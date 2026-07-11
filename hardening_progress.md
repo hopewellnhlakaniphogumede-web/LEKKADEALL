@@ -778,6 +778,46 @@ Verification found and patched three gaps before closeout:
 
 The CI workflow already includes `marketplace_state_machine.test.sql`, but the updated 58-assertion database test still needs to pass locally or in GitHub Actions before Ticket 6 is closed.
 
+### GitHub Actions marketplace state-machine test failure — 2026-07-11
+
+#### Failure summary
+
+GitHub Actions progressed through the earlier database tests and failed at `Run marketplace state machine pgTAP tests` with:
+
+```text
+ERROR: permission denied for table ticket6_ids
+Planned 58 tests but ran 0.
+```
+
+#### Root cause
+
+`ticket6_ids` is a temporary pgTAP helper table created near the top of `marketplace_state_machine.test.sql`. The test then switches to `role authenticated` to simulate frontend callers. At the first Ticket 6 flow setup block, the active role is `authenticated` with Customer A's JWT subject, and that role tries to insert/select IDs through `ticket6_ids`.
+
+Because the temporary table was created by the test session owner before the role switch, `authenticated` did not have privileges on the helper table. The test crashed before any assertions ran. This was a test helper permission issue, not a production RLS issue.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql`
+- `hardening_progress.md`
+
+#### Fix applied
+
+- Added `grant select, insert, update, delete on table ticket6_ids to anon, authenticated;` immediately after the temporary helper table is created.
+- Did not change production migrations.
+- Did not grant any production access to `service_requests`, `bids`, `bookings`, `payments`, `profiles`, `provider_profiles`, or private address tables.
+- Confirmed `ticket6_ids` is the only temporary/helper table in `marketplace_state_machine.test.sql` / `rls_test_seed.inc`.
+- Confirmed `marketplace_state_machine.test.sql` still has `plan(58)` and 58 assertion calls.
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+```
+
+If that passes, rerun the full GitHub Actions database workflow to confirm all four pgTAP files pass together.
+
 ### Remaining risks
 
 - The static prototype is not yet wired to these database functions.

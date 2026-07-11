@@ -12,6 +12,8 @@ create temporary table ticket6_ids (
   id uuid
 ) on commit drop;
 
+grant select, insert, update, delete on table ticket6_ids to anon, authenticated;
+
 insert into public.service_categories (id, slug, name, active) values
   ('00000000-0000-0000-0000-000000000103', 'test-mobile-grooming', 'Test Mobile Grooming', true);
 
