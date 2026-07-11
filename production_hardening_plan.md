@@ -28,8 +28,8 @@ The highest priority is to harden the database, RLS model, server-side state tra
 5. **Marketplace state transitions are partially server-controlled after Ticket 6.**  
    `006_marketplace_state_machine.sql` adds transactional database functions for draft creation, publication, cancellation, provider bid submission/withdrawal, bid acceptance, booking creation, in-progress marking, and two-party completion confirmation after `in_progress`. Remaining launch work: run pgTAP locally/CI, wire the production app to these functions, and complete payment confirmation, cancellation after booking, payout, refund, dispute, expiry-job, and webhook transitions.
 
-6. **Payment, refund, and webhook handling are missing.**  
-   Card/bank credentials are not stored in the schema, which is good, but there is no hosted-checkout adapter, signed webhook route, idempotency processing, refund ledger, reconciliation, or cash policy.
+6. **Payment, refund, and webhook handling are still not production-complete.**  
+   Ticket 7A constrains payment status values, separates `release_status`, adds an append-only `payment_events` ledger, and adds an audited internal/admin payment-event function. Card/bank credentials are still not stored in the schema, which is good. Remaining production blockers: hosted-checkout adapter, signed webhook route, real provider idempotency/reconciliation, refund workflow/ledger, cash policy, payout release/freeze workflow, and dispute-aware release blocking.
 
 7. **Disputes and evidence are not safely private or atomic.**  
    Opening a dispute does not pause release atomically. Evidence insertion only checks `uploaded_by`, not whether the uploader is a booking party.
@@ -46,7 +46,7 @@ The highest priority is to harden the database, RLS model, server-side state tra
 ## High-risk blockers
 
 - Ticket 6 removes broad direct `service_requests` and `bids` workflow mutation for the core request/bid/booking path, but the production app still needs to call the new trusted functions instead of the static prototype/localStorage flow.
-- `payments.status` is unrestricted `text`, not aligned to the `PaymentStatus` contract.
+- Ticket 7A constrains `payments.status` to safe MVP payment-status values and updates the TypeScript `PaymentStatus` contract; live provider confirmation, refunds, cash handling, payout release, and webhooks are still not implemented.
 - There is no dedicated `refunds` / `refund_events` table.
 - Ticket 5 adds a dedicated private address table, audited reveal/admin access path, and conservative free-text address detection; encryption/decryption key management, retention rules, controlled location lists, and application integration still need production design.
 - Reviews can target an unrelated `subject_id` as long as the reviewer participated in a completed booking.
@@ -199,6 +199,8 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 
 **Goal:** Keep payment credentials out of the database while tracking safe payment/refund state.
 
+**Status update — 11 July 2026:** Ticket 7A implemented the payment foundation only. `007_payment_status_and_ledger.sql` constrains payment status values, adds separate `release_status`, creates the append-only `payment_events` ledger, records an initial `intent_prepared` event for trusted pending payment creation, adds idempotency uniqueness, and adds `admin_record_payment_event(...)` for audited internal/admin payment state changes. It deliberately does not implement live payment-provider integration, refunds, cash workflow, payout release, or real webhook handlers.
+
 **Files likely affected:**
 - Supabase migrations
 - `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
@@ -210,10 +212,31 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 - Payment records are visible only to booking parties and authorised staff.
 - Unrelated users cannot view payment records.
 - Normal users cannot mutate payment status, release state, or refund totals.
+- Invalid payment status values are rejected by constraints.
+- Trusted internal/admin payment events are append-only and idempotent.
 - Refunds require trusted server/admin action and idempotency key.
 - Cash/off-platform bookings are clearly marked as unprotected or blocked, depending on launch policy.
 - Payout release cannot occur while a dispute is open or release is paused.
 - Card/bank credential fields do not exist in public tables.
+
+**Implemented in Ticket 7A:**
+- constrained MVP payment-status values on `payments.status`
+- separate `payments.release_status`
+- `payments.paid_at`
+- append-only `payment_events`
+- automatic initial `intent_prepared` ledger event on trusted payment creation
+- idempotency indexes for provider event ID and idempotency key
+- audited `admin_record_payment_event(...)`
+- `payments_ledger.test.sql`
+
+**Remaining follow-up tasks:**
+- Integrate a hosted payment provider through the vendor-neutral contract.
+- Add sandbox/mock checkout adapter behaviour.
+- Add signed/idempotent webhook routes.
+- Add reconciliation from provider lookup.
+- Add cash payment policy/workflow.
+- Add refund request/refund event workflow.
+- Add payout release/freeze rules and dispute-aware release blocking.
 
 ### Ticket 8 — Implement signed, idempotent vendor webhook handling
 

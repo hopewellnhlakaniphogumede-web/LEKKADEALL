@@ -842,14 +842,14 @@ If that passes, rerun the full GitHub Actions database workflow to confirm all f
 
 - The static prototype is not yet wired to these database functions.
 - Real payment provider funding, cash policy, refunds, payout release, booking cancellation after confirmation, disputes, expiry jobs, and webhooks remain future tickets.
-- `payments.status` is still text until the payment/refund ticket introduces a stricter payment state model.
+- Ticket 7A constrains `payments.status` to safe MVP payment-status values and adds an append-only payment event ledger. Real hosted checkout, cash handling, refunds, payout release, and vendor webhooks remain future tickets.
 - `consents` and `data_subject_requests` still need separate compliance workflow hardening.
 
 ## Ticket 7 — Payments, cash handling, refunds, and payout release
 
 ### Planning status
 
-Prepared only; not implemented.
+The full Ticket 7 roadmap is prepared. Ticket 7A payment status constraints and payment event ledger foundation is implemented below; live provider integration, cash handling, refunds, payout release, and real webhooks remain unimplemented.
 
 ### Plan file
 
@@ -871,4 +871,121 @@ Prepared only; not implemented.
 
 ### Next step
 
-Wait for explicit Ticket 7 implementation instruction before creating migrations, functions, adapters, or tests.
+Continue with the next explicitly scoped payment ticket, likely hosted checkout/mock adapter, cash handling, refunds, payout release, or signed webhooks.
+
+## Ticket 7A — Payment status constraints and payment event ledger
+
+### Issue fixed
+
+Payment status is no longer unconstrained free text, and trusted payment state changes now have an append-only ledger foundation.
+
+This ticket deliberately does **not** implement live payment-provider integration, refunds, cash workflow, payout release, or real webhook handlers.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/006_marketplace_state_machine.sql`
+- `outputs/marketplace-production-foundation/supabase/migrations/007_payment_status_and_ledger.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payments_ledger.test.sql`
+- `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Database changes
+
+- Normalised legacy payment status values into the Ticket 7A MVP vocabulary.
+- Added constrained payment status values on `payments.status`:
+  - `pending`
+  - `checkout_created`
+  - `paid`
+  - `failed`
+  - `expired`
+  - `cancelled`
+  - `partially_refunded`
+  - `refunded`
+- Added separate `payments.release_status` with constrained values:
+  - `not_applicable`
+  - `pending`
+  - `paused`
+  - `eligible`
+  - `released`
+  - `cancelled`
+- Added `payments.paid_at`.
+- Kept Ticket 6 payment creation compatible by changing the internal accepted-booking payment row to `status = 'pending'`.
+- Added `public.payment_events` as an append-only payment event ledger.
+- Added uniqueness/idempotency indexes for `(provider_name, provider_event_id)` and `(provider_name, idempotency_key)` when those values are present.
+- Revoked direct frontend access to `payment_events`; direct service-role table access is also revoked so server workflows use audited functions.
+- Added append-only trigger protection blocking `UPDATE` and `DELETE` on `payment_events`.
+- Added an automatic initial `intent_prepared` payment event when a trusted payment row is created.
+- Replaced the payment state protection trigger so payment/release/refund/provider fields remain trusted-function controlled.
+- Added `public.admin_record_payment_event(...)` as the current admin/server-controlled internal payment transition helper.
+- Every successful trusted payment event writes both:
+  - one `payment_events` ledger row
+  - one `audit_events` row
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/payments_ledger.test.sql` has 19 pgTAP assertions covering:
+
+- Invalid payment status is rejected.
+- Trusted pending payment creation writes an initial immutable payment event.
+- Customer cannot mark a payment as paid.
+- Provider cannot mark a payment as paid.
+- Customer cannot mark a payment as refunded.
+- Provider cannot mark a payment as released.
+- Unrelated users cannot read payment records.
+- Booking customer can read a safe payment summary.
+- Booking provider can read a safe payment summary.
+- Trusted admin function can write a payment event.
+- Trusted admin function can update constrained payment status.
+- Duplicate idempotency key does not create duplicate events.
+- `payment_events` cannot be updated.
+- `payment_events` cannot be deleted.
+- Ticket 1 role protections remain intact.
+- Ticket 2 baseline RLS protections remain intact.
+- Ticket 5 private address protections remain intact.
+- Ticket 6 direct booking mutation protections remain intact.
+
+### CI update
+
+The `Supabase database tests` workflow now runs:
+
+```bash
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+```
+
+### Tests to run
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the required database tooling available.
+
+From `outputs/marketplace-production-foundation`, rerun:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+```
+
+Then confirm GitHub Actions is green again.
+
+### Remaining risks
+
+- No live payment vendor is integrated yet.
+- No real hosted checkout/session creation exists yet.
+- No refund workflow or refund ledger exists yet.
+- No cash-payment policy/workflow exists yet.
+- No payout release/freeze execution exists yet.
+- No real signed webhook handler exists yet.
+- No provider reconciliation job exists yet.
+- `payments.status` is still the physical column name for compatibility, although it is now constrained and documented as the payment-status field.

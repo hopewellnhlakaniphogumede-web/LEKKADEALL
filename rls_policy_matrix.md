@@ -1,11 +1,11 @@
 # LEKKADEALL RLS Policy Matrix
 
 **Date:** 11 July 2026  
-**Ticket:** Ticket 2 baseline RLS + Ticket 5 exact-address privacy + Ticket 6 marketplace state-machine update
+**Ticket:** Ticket 2 baseline RLS + Ticket 5 exact-address privacy + Ticket 6 marketplace state-machine update + Ticket 7A payment ledger foundation
 
 ## Public schema table inventory
 
-The public schema currently contains 16 application tables:
+The public schema currently contains 17 application tables:
 
 1. `profiles`
 2. `provider_profiles`
@@ -15,14 +15,15 @@ The public schema currently contains 16 application tables:
 6. `bids`
 7. `bookings`
 8. `payments`
-9. `vendor_events`
-10. `identity_verifications`
-11. `disputes`
-12. `dispute_evidence`
-13. `reviews`
-14. `consents`
-15. `data_subject_requests`
-16. `audit_events`
+9. `payment_events`
+10. `vendor_events`
+11. `identity_verifications`
+12. `disputes`
+13. `dispute_evidence`
+14. `reviews`
+15. `consents`
+16. `data_subject_requests`
+17. `audit_events`
 
 ## RLS status
 
@@ -32,7 +33,7 @@ Before Ticket 2, these public tables did **not** have RLS enabled in `001_initia
 - `provider_services`
 - `vendor_events`
 
-After `003_repair_baseline_rls.sql`, every public table above has RLS enabled.
+After `003_repair_baseline_rls.sql`, the original public tables had RLS enabled. `007_payment_status_and_ledger.sql` adds `payment_events` with RLS enabled, so every current public application table above has RLS enabled.
 
 ## Access matrix
 
@@ -57,7 +58,8 @@ Legend:
 | `service_requests` | High - customer request details and address material | S own safe request columns; I/U/D none directly; create/publish/cancel through `customer_create_draft_request(...)`, `customer_publish_request(...)`, `customer_cancel_request(...)`; exact address via controlled address functions | S eligible open safe columns/summaries; I/U/D none directly | Direct frontend access none | Trusted state-machine and admin/server functions only | Ticket 6 removed the broad owner `FOR ALL` mutation policy. `status`, `closes_at`, and workflow timestamps are trigger-protected and changed only through marketplace functions. |
 | `bids` | High - commercial offers and bid state | S bids on own requests; I/U/D none | S own bids; I/U/D none directly; submit/withdraw through `provider_submit_bid(...)` and `provider_withdraw_bid(...)` | Direct frontend access none | Trusted state-machine functions only | Ticket 6 removed broad provider bid mutation. One accepted bid per request is enforced by partial unique index; acceptance/decline happens inside `customer_accept_bid(...)`. |
 | `bookings` | High - booking parties, schedule, commercial amounts | S party only; I/U/D none; completion confirmation through `customer_confirm_completion(...)` after `in_progress` | S party only; I/U/D none; progress/completion through `booking_mark_in_progress(...)` and `provider_confirm_completion(...)` after `in_progress` | Direct frontend access none | Trusted state-machine functions only | Ticket 6 creates bookings only from accepted bids and validates request/bid/customer/provider/amount/schedule consistency by trigger. |
-| `payments` | Critical - payment references/status, no card data | S party only; I/U/D none | S party only; I/U/D none | Direct frontend access none | Payment webhooks/server actions only | Ticket 6 prepares only an internal pending payment row during bid acceptance. Real payment/refund/vendor transitions remain future tickets and direct payment/release mutation is trigger-protected. |
+| `payments` | Critical - payment references/status, no card data | S party only; I/U/D none | S party only; I/U/D none | Direct frontend access none | Ticket 6 marketplace functions may prepare pending rows; Ticket 7A trusted admin/server function may update payment status/release status and append ledger events | Ticket 7A constrains `status` to safe MVP payment-status values and adds separate `release_status`. Frontend users cannot directly mutate payment/release/refund/provider fields. Real hosted checkout, refunds, cash policy, payout release, and webhooks remain future tickets. |
+| `payment_events` | Critical - append-only payment status ledger | none | none | Direct frontend access none | Append through trusted `admin_record_payment_event(...)` / future signed webhook functions only | RLS enabled; frontend and direct service-role table privileges revoked; UPDATE/DELETE blocked by append-only trigger; idempotency protected by unique indexes on provider event ID and idempotency key. |
 | `vendor_events` | Critical - webhook idempotency and raw-event metadata | none | none | Direct frontend access none | Server/webhook handlers only via `private.record_vendor_event(...)` or service role | RLS enabled; all frontend table privileges revoked; no frontend policies. |
 | `identity_verifications` | Critical - identity verification result metadata | S own status only; I/U/D none | S own status only; I/U/D none | Direct frontend access none | Identity webhook/admin server actions only | Frontend insert/update/delete revoked. Raw identity evidence should remain outside app DB. |
 | `disputes` | High - private case details | S party only; I own party dispute via existing policy; U/D none | S party only; I own party dispute via existing policy; U/D none | Direct frontend access none | Server/admin resolves and audits | Opening disputes still needs atomic payout-pause server action in a later ticket. |
@@ -75,6 +77,7 @@ Legend:
 - `provider_services`: authenticated read of active approved-provider services; owner mutation only for approved providers.
 - `audit_events`: no frontend access; append-only through trusted function.
 - `identity_verifications`: owner read only; no frontend insert/update/delete.
+- `payment_events`: no frontend direct read/write access; append-only through trusted payment/admin/webhook functions.
 
 ## Private exact-address model after Ticket 5
 
@@ -106,11 +109,21 @@ Legend:
 - Direct frontend mutation of `service_requests`, `bids`, `bookings`, and payment/release workflow state is denied through revoked DML privileges plus trigger guards.
 - Booking integrity is enforced by trigger: booking bid must belong to the booking request, booking customer must match the request customer, booking provider must match the bid provider, currency/schedule must match the bid, and service amount must match the accepted bid amount.
 
+## Payment status and ledger model after Ticket 7A
+
+- `payments.status` remains the physical column name for compatibility, but is now constrained as the payment status with allowed values: `pending`, `checkout_created`, `paid`, `failed`, `expired`, `cancelled`, `partially_refunded`, and `refunded`.
+- `payments.release_status` is separate from payment status with allowed values: `not_applicable`, `pending`, `paused`, `eligible`, `released`, and `cancelled`. Ticket 7A does not implement real payout release.
+- `payment_events` records trusted payment state events with payment/booking references, safe amount/currency metadata, provider event/idempotency references, actor/source, metadata, and `occurred_at`.
+- `payment_events` is append-only: no frontend SELECT/INSERT/UPDATE/DELETE, no direct service-role table access, and a trigger rejects UPDATE/DELETE.
+- Trusted pending payment row creation writes an initial `intent_prepared` event with a deterministic idempotency key.
+- `admin_record_payment_event(...)` is the current trusted internal/admin path for recording MVP payment events. It verifies platform-admin/server authority, updates constrained payment/release status where allowed, writes one ledger event, and writes an audit event.
+- Duplicate provider event IDs or idempotency keys return the existing ledger event instead of creating duplicates.
+
 ## Remaining RLS risks after Tickets 2-6
 
 - Public-description detection is conservative but not perfect. It blocks common street-number, unit/room, GPS, phone, and house/stand/erf patterns, but application UX and moderation should still warn users not to place exact addresses in public text.
 - Booking status semantics are now aligned for the core marketplace flow (`scheduled`, `in_progress`, `completed` remain revealable), but future payment/refund/dispute tickets must confirm the final revealable status list.
 - `consents` and `data_subject_requests` still have broad owner `FOR ALL` style policies from the initial schema. They require separate compliance/workflow tickets.
 - Ticket 6 hardens the database state machine, but the production application still needs to be wired to these functions; until then the static prototype remains a demo.
-- Real payment funding, refund, payout, dispute, expiry-job, and webhook state transitions remain future tickets.
+- Ticket 7A hardens payment status constraints and the payment event ledger. Real hosted checkout funding, cash handling, refunds, payout release, dispute-aware release blocking, reconciliation, and signed vendor webhook transitions remain future tickets.
 - Admin access is still intentionally server-mediated rather than broad direct admin RLS. A later staff/MFA ticket should formalise admin roles outside normal user-editable profile data.

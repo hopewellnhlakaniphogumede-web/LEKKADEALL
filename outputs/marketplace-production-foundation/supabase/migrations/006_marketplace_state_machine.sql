@@ -977,7 +977,7 @@ begin
       v_booking_id,
       'internal_pending',
       null,
-      'payment_pending',
+      'pending',
       v_bid.amount_minor + v_platform_fee_minor,
       v_bid.currency,
       true,

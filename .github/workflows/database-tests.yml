@@ -53,6 +53,9 @@ jobs:
       - name: Run marketplace state machine pgTAP tests
         run: supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 
+      - name: Run payment ledger pgTAP tests
+        run: supabase test db supabase/tests/database/payments_ledger.test.sql
+
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true

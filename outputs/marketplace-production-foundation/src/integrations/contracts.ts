@@ -2,9 +2,22 @@ export type Money = { amountMinor: number; currency: 'ZAR' };
 export type ProviderName = 'mock' | 'tradesafe' | 'netcash' | 'verifynow' | 'iidentifii' | 'clickatell';
 
 export type PaymentStatus =
-  | 'created' | 'pending' | 'funded' | 'failed' | 'cancelled'
-  | 'release_pending' | 'released' | 'refund_pending' | 'refunded'
-  | 'partially_refunded' | 'disputed';
+  | 'pending'
+  | 'checkout_created'
+  | 'paid'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
+  | 'partially_refunded'
+  | 'refunded';
+
+export type ReleaseStatus =
+  | 'not_applicable'
+  | 'pending'
+  | 'paused'
+  | 'eligible'
+  | 'released'
+  | 'cancelled';
 
 export interface CreateProtectedPaymentInput {
   idempotencyKey: string;
@@ -23,6 +36,7 @@ export interface ProtectedPayment {
   providerReference: string;
   checkoutUrl: string;
   status: PaymentStatus;
+  releaseStatus?: ReleaseStatus;
   expiresAt?: string;
 }
 

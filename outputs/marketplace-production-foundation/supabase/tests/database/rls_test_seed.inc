@@ -106,10 +106,10 @@ insert into public.bookings (
 
 insert into public.payments (
   id, booking_id, provider_name, provider_reference, status,
-  amount_minor, release_paused, funded_at, refunded_minor
+  amount_minor, release_paused, funded_at, paid_at, refunded_minor
 ) values (
   '00000000-0000-0000-0000-000000000501', '00000000-0000-0000-0000-000000000401',
-  'mock', 'test-payment-confirmed-booking', 'funded', 57750, true, now(), 0
+  'mock', 'test-payment-confirmed-booking', 'paid', 57750, true, now(), now(), 0
 );
 
 set local lekkadeall.allow_marketplace_state_transition = 'off';

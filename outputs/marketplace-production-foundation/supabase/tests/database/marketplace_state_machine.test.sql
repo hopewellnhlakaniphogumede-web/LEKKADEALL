@@ -1208,7 +1208,7 @@ select is(
     from public.payments p
     join ticket6_ids booking_id on booking_id.id = p.booking_id and booking_id.name = 'booking'
     where p.provider_name = 'internal_pending'
-      and p.status = 'payment_pending'
+      and p.status = 'pending'
       and p.amount_minor = 52500
       and p.currency = 'ZAR'
       and p.release_paused = true
