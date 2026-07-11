@@ -3,7 +3,7 @@
 ## Ticket 1 — Fix role escalation
 
 **Date:** 9 July 2026  
-**Status:** Implemented and verification pass completed in code; local pgTAP execution not run in this workspace because Supabase CLI/Docker are not available on PATH.
+**Status:** CI-verified. `role_escalation.test.sql` passed in the **Supabase database tests** GitHub Actions workflow with run status **Success**.
 
 ### Issue fixed
 
@@ -148,8 +148,8 @@ The current schema has no `admin` boolean, `provider_status`, `approved_by`, `ap
 ### Verification status
 
 - Static code review completed.
-- The test suite was expanded from 16 to 33 pgTAP assertions.
-- Local execution still not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+- The test suite was expanded from 16 to 37 pgTAP assertions.
+- CI execution passed in the **Supabase database tests** GitHub Actions workflow with run status **Success**.
 
 ### Ticket 1 closeout checklist
 
@@ -161,15 +161,15 @@ The current schema has no `admin` boolean, `provider_status`, `approved_by`, `ap
 - [x] `SECURITY DEFINER` functions reviewed.
 - [x] Audit events append-only.
 - [x] `identity_verifications` protected.
-- [x] 33 pgTAP assertions added.
-- [ ] Tests still need to be run locally or in CI.
+- [x] 37 pgTAP assertions added.
+- [x] `role_escalation.test.sql` passed in CI.
 
-**Closeout gate:** Ticket 1 may only be marked **CLOSED** after the pgTAP test command passes locally or in CI.
+**Closeout gate:** Satisfied by **Supabase database tests** GitHub Actions workflow run status **Success**.
 
 ## Ticket 2 — Repair baseline RLS on every public table
 
 **Date:** 10 July 2026  
-**Status:** Implemented in code; local pgTAP execution not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+**Status:** CI-verified. `baseline_rls.test.sql` passed in the **Supabase database tests** GitHub Actions workflow with run status **Success**.
 
 ### Files changed
 
@@ -285,10 +285,11 @@ npx supabase db reset
 npx supabase test db supabase/tests/database/baseline_rls.test.sql
 ```
 
-### Tests not run / run result
+### CI run result
 
-- Not run in this workspace. Required local tooling is not available on PATH.
-- Ticket 2 may only be marked **CLOSED** after `baseline_rls.test.sql` passes locally or in CI.
+- **Workflow:** Supabase database tests
+- **Run status:** Success
+- **Passed test file:** `baseline_rls.test.sql`
 
 ### Remaining risks
 
@@ -326,8 +327,8 @@ Verification found and fixed these gaps in the first Ticket 2 implementation:
 ### Verification status
 
 - Static code review completed.
-- Local pgTAP execution still not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
-- Ticket 2 may only be marked **CLOSED** after `baseline_rls.test.sql` passes locally or in CI.
+- CI execution passed in the **Supabase database tests** GitHub Actions workflow with run status **Success**.
+- `baseline_rls.test.sql` is CI-verified.
 
 ## Ticket 3 — Exact address privacy and confirmed-booking reveal
 
@@ -399,10 +400,12 @@ supabase test db supabase/tests/database/baseline_rls.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 ```
 
-### Tests not run / run result
+### CI run result
 
-- Not run in this workspace. Required local tooling is not available on PATH.
-- Ticket 3/Ticket 5 address privacy may only be marked **CLOSED** after `exact_address_privacy.test.sql` passes locally or in CI.
+- **Workflow:** Supabase database tests
+- **Run status:** Success
+- **Passed test file:** `exact_address_privacy.test.sql`
+- Ticket 5 supersedes this earlier Ticket 3 address section as the canonical exact-address privacy closeout.
 
 ### Remaining risks
 
@@ -497,18 +500,19 @@ supabase test db supabase/tests/database/baseline_rls.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 ```
 
-### Tests not run / run result
+### CI run result
 
-- Not run in this workspace. Required local tooling is not available on PATH.
+- **Workflow:** Supabase database tests
+- **Run status:** Success
+- **Passed test file:** `exact_address_privacy.test.sql`
 - Static check confirms `exact_address_privacy.test.sql` has `plan(49)` and 49 assertion calls.
-- Ticket 5 may only be marked **CLOSED** after `exact_address_privacy.test.sql` passes locally or in CI.
 
 ### Ticket 5 verification pass — 11 July 2026
 
 - Static review found missing negative tests for direct private address INSERT/UPDATE/DELETE, cross-customer safe-function reads, owner updates after provider selection/confirmed booking, blank admin/support access reasons, and house/stand/erf-number description detection.
 - Updated `outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql` from 41 to 49 assertions to cover those gaps.
 - No migration change was required for this verification pass; the existing migration already revokes direct frontend/private-table access, routes customer writes through safe functions, and audits reveal/admin access.
-- Tests still need to be run locally or in CI before Ticket 5 is marked **CLOSED**.
+- `exact_address_privacy.test.sql` is CI-verified by the **Supabase database tests** workflow with run status **Success**.
 
 ### Remaining risks
 
@@ -522,7 +526,22 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 
 ### Status
 
-Implemented in code; not yet proven by a live GitHub Actions run from this workspace.
+CI-verified by a live GitHub Actions run.
+
+### CI verification result — 2026-07-11
+
+- **Workflow name:** Supabase database tests
+- **Run status:** Success
+- **Tickets marked CI-verified:**
+  - Ticket 1: Role escalation protection
+  - Ticket 2: Baseline RLS protection
+  - Ticket 5: Exact address privacy protection
+  - Ticket 6: Marketplace state machine
+- **Test files passed:**
+  - `role_escalation.test.sql`
+  - `baseline_rls.test.sql`
+  - `exact_address_privacy.test.sql`
+  - `marketplace_state_machine.test.sql`
 
 ### CI setup verification — 11 July 2026
 
@@ -762,11 +781,12 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 ```
 
-### Tests not run / run result
+### CI run result
 
-- Not run in this workspace. Required local tooling is not available on PATH.
+- **Workflow:** Supabase database tests
+- **Run status:** Success
+- **Passed test file:** `marketplace_state_machine.test.sql`
 - Static check confirms `marketplace_state_machine.test.sql` has `plan(58)` and 58 assertion calls.
-- Ticket 6 may only be marked **CLOSED** after `marketplace_state_machine.test.sql` passes locally or in CI.
 
 ### Ticket 6 verification pass — 2026-07-11
 
@@ -776,7 +796,7 @@ Verification found and patched three gaps before closeout:
 - Booking integrity tests now separately cover mismatched request/bid, wrong customer, wrong provider, wrong amount, duplicate booking, and duplicate accepted bid cases.
 - Payment/release direct mutation tests now cover both customer and provider callers.
 
-The CI workflow already includes `marketplace_state_machine.test.sql`, but the updated 58-assertion database test still needs to pass locally or in GitHub Actions before Ticket 6 is closed.
+The CI workflow includes `marketplace_state_machine.test.sql`, and the updated 58-assertion database test is now CI-verified with run status **Success**.
 
 ### GitHub Actions marketplace state-machine test failure — 2026-07-11
 
@@ -824,3 +844,31 @@ If that passes, rerun the full GitHub Actions database workflow to confirm all f
 - Real payment provider funding, cash policy, refunds, payout release, booking cancellation after confirmation, disputes, expiry jobs, and webhooks remain future tickets.
 - `payments.status` is still text until the payment/refund ticket introduces a stricter payment state model.
 - `consents` and `data_subject_requests` still need separate compliance workflow hardening.
+
+## Ticket 7 — Payments, cash handling, refunds, and payout release
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_7_payments_plan.md`
+
+### Scope covered by the plan
+
+- Payment status constraints.
+- Payment events/ledger.
+- Hosted payment provider abstraction.
+- Mock payment adapter.
+- Cash payment policy.
+- Refund request and refund event workflow.
+- Payout release/freeze rules.
+- Dispute-aware release blocking.
+- Signed and idempotent webhook requirements.
+- Required pgTAP/database tests.
+- Items that must remain mock/sandbox until vendor credentials are available.
+
+### Next step
+
+Wait for explicit Ticket 7 implementation instruction before creating migrations, functions, adapters, or tests.
