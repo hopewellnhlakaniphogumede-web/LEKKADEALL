@@ -1,0 +1,728 @@
+# LEKKADEALL Hardening Progress
+
+## Ticket 1 — Fix role escalation
+
+**Date:** 9 July 2026  
+**Status:** Implemented and verification pass completed in code; local pgTAP execution not run in this workspace because Supabase CLI/Docker are not available on PATH.
+
+### Issue fixed
+
+Normal frontend-authenticated users can no longer directly update privileged role or provider-status fields.
+
+The affected privileged fields are:
+
+- `profiles.role`
+- `profiles.account_status`
+- `provider_profiles.verification_status`
+- `provider_profiles.verification_reference`
+- `provider_profiles.bank_name_match`
+- `provider_profiles.review_status`
+- `provider_profiles.reviewed_by`
+- `provider_profiles.reviewed_at`
+- `identity_verifications.status`
+
+The existing schema does not have a separate `provider_status` column. `provider_profiles.review_status` is currently the provider activation/review status field.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/002_fix_role_escalation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/role_escalation.test.sql`
+- `hardening_progress.md`
+
+### What changed
+
+- Removed broad direct client update policies:
+  - `profile owner updates self`
+  - `provider owns provider profile`
+- Added `public.is_platform_admin()` to identify active admins or service-role server context.
+- Added audited admin/server functions:
+  - `public.admin_set_user_role(...)`
+  - `public.admin_set_account_status(...)`
+  - `public.admin_set_provider_review_status(...)`
+  - `public.admin_set_provider_verification_status(...)`
+- Added private audit writer:
+  - `private.append_audit_event(...)`
+- Added append-only audit protection:
+  - `audit_events_append_only` trigger blocks update/delete of audit rows.
+- Added safe owner-edit paths:
+  - `profile owner updates safe profile fields`
+  - `provider updates safe provider profile fields`
+- Added column allow-list grants:
+  - customers/users may update only `profiles.display_name`, `profiles.phone_e164`, `profiles.suburb`, `profiles.city`, and `profiles.avatar_path`
+  - providers may update only `provider_profiles.business_name`, `provider_profiles.bio`, and `provider_profiles.service_radius_km`
+- Added privileged-field guard triggers:
+  - `protect_profile_privileged_fields`
+  - `protect_provider_profile_privileged_fields`
+- Confirmed the static prototype does not directly write privileged database fields. It still contains demo-only role/admin/verification screens, but there is no Supabase/database update code in the prototype.
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/role_escalation.test.sql` proves:
+
+- Customer cannot make themselves provider.
+- Provider cannot make themselves admin.
+- Customer can still update safe profile fields.
+- Provider can still update safe provider profile fields.
+- Normal user cannot directly change `account_status`.
+- Normal user cannot directly change `provider_profiles.verification_status`.
+- Normal user cannot directly change `identity_verifications.status`.
+- Normal user cannot directly change provider status / `review_status`.
+- Normal user cannot call the admin role-change function.
+- Normal provider cannot call the admin provider-status function.
+- Authorised admin function can make a customer provider.
+- Authorised admin function can change account status.
+- Authorised admin function can change provider verification/review status.
+- Privileged role/status changes write audit events.
+
+These tests should fail against `001_initial_schema.sql` alone because broad owner update policies allow self-escalation, and should pass after applying `002_fix_role_escalation.sql`.
+
+### How to run tests
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+npx supabase start
+npx supabase db reset
+npx supabase test db supabase/tests/database/role_escalation.test.sql
+```
+
+If Supabase CLI is installed globally, use:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+```
+
+### Remaining risks
+
+- The wider `rls_policies.test.sql` file still includes tests for other unresolved tickets, including address reveal rules. It should not be treated as green until those tickets are repaired.
+- Safe direct profile/provider-profile editing is allowed only for explicitly allow-listed fields. Future tickets may still replace these direct updates with application server actions for better validation/rate limiting.
+- Admin authority is still derived from `profiles.role = 'admin'`. This is acceptable after this fix because normal users can no longer update their own role, but a later ticket should move staff/admin authority to a dedicated staff-membership/permission model with MFA checks.
+- Provider verification is still duplicated between `provider_profiles.verification_status` and `identity_verifications.status`. A later identity-verification ticket should define the source of truth and reconciliation rules.
+- There is still no production application backend, CI pipeline, webhook handler, or vendor adapter.
+
+## Ticket 1 verification pass — 10 July 2026
+
+### Result
+
+Verification found and fixed two gaps in the first Ticket 1 implementation:
+
+1. Safe customer/provider profile edits were fully locked down instead of being allowed through a safe path.
+2. Privileged-column protection needed a durable trigger guard so a future broad owner update policy could not accidentally re-open role/status escalation.
+
+### Additional files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/002_fix_role_escalation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/role_escalation.test.sql`
+- `hardening_progress.md`
+
+### Protected privileged fields verified
+
+- `profiles.role`
+- `profiles.account_status`
+- `provider_profiles.verification_status`
+- `provider_profiles.verification_reference`
+- `provider_profiles.bank_name_match`
+- `provider_profiles.review_status`
+- `provider_profiles.reviewed_by`
+- `provider_profiles.reviewed_at`
+- `identity_verifications.status`
+
+The current schema has no `admin` boolean, `provider_status`, `approved_by`, `approved_at`, `suspended_by`, or `suspended_at` columns. The current equivalents are:
+
+- admin status: `profiles.role = 'admin'`
+- provider status: `provider_profiles.review_status`
+- approval/review actor: `provider_profiles.reviewed_by`
+- approval/review timestamp: `provider_profiles.reviewed_at`
+
+### Protection mechanisms verified
+
+- **RLS policies:** owner updates are allowed only on own `profiles` / `provider_profiles` rows.
+- **Column-level privileges:** `authenticated` users receive update grants only for safe profile/provider-profile columns.
+- **Triggers:** direct changes to privileged columns are rejected unless an authorised admin/server function sets a transaction-local privileged-update guard.
+- **Server-side functions:** admin-only `SECURITY DEFINER` functions perform legitimate privileged changes.
+- **Audit logging:** every authorised privileged change writes to `audit_events`.
+- **Append-only audit trigger:** `audit_events_append_only` rejects update/delete attempts on audit rows.
+
+### Verification status
+
+- Static code review completed.
+- The test suite was expanded from 16 to 33 pgTAP assertions.
+- Local execution still not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+
+### Ticket 1 closeout checklist
+
+- [x] All privileged fields protected.
+- [x] Safe profile fields still editable.
+- [x] RLS policies updated.
+- [x] Column-level update grants added.
+- [x] Privileged-field protection triggers added.
+- [x] `SECURITY DEFINER` functions reviewed.
+- [x] Audit events append-only.
+- [x] `identity_verifications` protected.
+- [x] 33 pgTAP assertions added.
+- [ ] Tests still need to be run locally or in CI.
+
+**Closeout gate:** Ticket 1 may only be marked **CLOSED** after the pgTAP test command passes locally or in CI.
+
+## Ticket 2 — Repair baseline RLS on every public table
+
+**Date:** 10 July 2026  
+**Status:** Implemented in code; local pgTAP execution not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/003_repair_baseline_rls.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/baseline_rls.test.sql`
+- `rls_policy_matrix.md`
+- `hardening_progress.md`
+
+### Public tables reviewed
+
+All 16 public application tables were listed in `rls_policy_matrix.md`:
+
+- `profiles`
+- `provider_profiles`
+- `service_categories`
+- `provider_services`
+- `service_requests`
+- `bids`
+- `bookings`
+- `payments`
+- `vendor_events`
+- `identity_verifications`
+- `disputes`
+- `dispute_evidence`
+- `reviews`
+- `consents`
+- `data_subject_requests`
+- `audit_events`
+
+### RLS disabled before Ticket 2
+
+These tables had no RLS in `001_initial_schema.sql`:
+
+- `service_categories`
+- `provider_services`
+- `vendor_events`
+
+### Policies and grants added/removed
+
+- Enabled RLS on every public application table.
+- Added `public.is_approved_provider(...)` helper for active, verified, approved providers.
+- Locked down `vendor_events`:
+  - all frontend privileges revoked from `anon` and `authenticated`
+  - no frontend RLS policies added
+  - added service-role-only `private.record_vendor_event(...)` for idempotent server-side writes
+- Locked down `service_categories`:
+  - frontend users may `SELECT` active categories only
+  - no frontend insert/update/delete
+- Locked down `provider_services`:
+  - anonymous access denied
+  - authenticated users may read active services for approved providers
+  - approved providers may insert/update/delete only their own provider services
+  - unapproved/suspended providers cannot create active services
+- Tightened `provider_profiles` discovery:
+  - anonymous direct select revoked
+  - authenticated users can discover only active, verified, approved provider profiles or their own provider profile
+- Replaced the old open-request provider policy:
+  - removed `providers see open requests`
+  - added `approved providers see open requests`
+  - revoked frontend direct SELECT on `service_requests.precise_address_ciphertext`
+  - revoked frontend direct SELECT on `service_requests.customer_id`
+  - granted frontend SELECT only on safe service-request columns
+- Preserved hard locks:
+  - `audit_events` frontend privileges revoked; append-only trigger remains
+  - `identity_verifications` frontend insert/update/delete revoked
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/baseline_rls.test.sql` adds 47 pgTAP assertions proving:
+
+- RLS is enabled on every public table.
+- Anonymous users cannot access protected payment/vendor/provider-service tables.
+- Frontend users cannot read, insert, update, or delete `vendor_events`.
+- Providers cannot read, insert, update, or delete `vendor_events`.
+- Service role can record `vendor_events` through the private server function.
+- Customers cannot insert/update/delete `service_categories`.
+- Providers cannot insert/update/delete `service_categories`.
+- Active service categories are readable.
+- Inactive service categories are hidden.
+- Authenticated users cannot access unrelated private booking/payment/identity rows.
+- Customers can view their own service requests.
+- Customers cannot view another customer's request rows.
+- Approved providers can view eligible open requests.
+- Approved providers can read safe open-request fields before booking confirmation.
+- Unapproved/suspended providers cannot view open requests.
+- Approved providers cannot select precise address fields before confirmed booking.
+- The `authenticated` frontend role has no SELECT privilege on `service_requests.precise_address_ciphertext`.
+- Frontend roles cannot select exact-address-like columns from `service_requests`.
+- Approved providers can create/update only their own `provider_services`.
+- Customers cannot create/update/delete `provider_services`.
+- Approved providers cannot manage another provider's `provider_services`.
+- Unapproved providers cannot create active `provider_services`.
+- Suspended providers cannot create active `provider_services`.
+- Authenticated users can read active services for approved providers.
+- Frontend users cannot edit `audit_events`.
+- Frontend users cannot insert/update `identity_verifications`.
+
+### How to run tests
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/baseline_rls.test.sql
+```
+
+If using `npx`:
+
+```powershell
+npx supabase start
+npx supabase db reset
+npx supabase test db supabase/tests/database/baseline_rls.test.sql
+```
+
+### Tests not run / run result
+
+- Not run in this workspace. Required local tooling is not available on PATH.
+- Ticket 2 may only be marked **CLOSED** after `baseline_rls.test.sql` passes locally or in CI.
+
+### Remaining risks
+
+- Historical Ticket 2 address risk, superseded by Ticket 3: at this point `service_requests` still contained precise address material on the same table. Ticket 3 moves exact address ciphertext into `private.service_request_addresses` and adds audited reveal/upsert functions. Open-request `description` still needs validation/redaction so customers cannot accidentally place exact addresses in free text.
+- `bids`, `service_requests`, `consents`, and `data_subject_requests` still have broad initial owner policies that should be replaced by workflow/state-machine server actions in later tickets.
+- `dispute_evidence` still allows insert based on `uploaded_by` only; it must be restricted to booking parties in the dispute ticket.
+- Admin access is still intentionally server-mediated, not broad direct admin RLS. A later ticket should add a dedicated staff/MFA model.
+
+## Ticket 2 verification pass — 10 July 2026
+
+### Result
+
+Verification found and fixed these gaps in the first Ticket 2 implementation:
+
+1. Approved providers could still directly select `service_requests.precise_address_ciphertext`.
+2. Provider-specific `vendor_events` negative tests were not explicit.
+3. Customer `provider_services` insert/update/delete negative tests were not explicit.
+4. Service-request visibility tests for own customer, unrelated customer, approved provider, unapproved provider, and suspended provider were missing.
+5. A safe server-only vendor-event writer was not documented or implemented.
+
+### Additional changes made during verification
+
+- Added column-level safe SELECT grants for `service_requests`, excluding `precise_address_ciphertext` and `customer_id`.
+- Added service-role-only `private.record_vendor_event(...)` with idempotency on `(provider_name, provider_event_id)`.
+- Expanded `baseline_rls.test.sql` from 26 to 47 pgTAP assertions.
+- Updated `rls_policy_matrix.md` to reflect precise-address SELECT denial and the private vendor-event writer.
+
+### Address privacy test addendum — 11 July 2026
+
+- Added explicit regression coverage proving an approved provider can read safe fields on an open service request before booking confirmation.
+- Added explicit regression coverage proving the `authenticated` frontend role cannot select `service_requests.precise_address_ciphertext`.
+- Added explicit regression coverage proving frontend roles cannot select any exact-address-like columns currently present on `service_requests`.
+- Marked the remaining address model as a critical design risk until exact address material could be moved to a separate private table or exposed only through a safe request view and confirmed-booking reveal path. This is addressed by Ticket 3, with free-text redaction and state-machine alignment still remaining.
+
+### Verification status
+
+- Static code review completed.
+- Local pgTAP execution still not run in this workspace because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+- Ticket 2 may only be marked **CLOSED** after `baseline_rls.test.sql` passes locally or in CI.
+
+## Ticket 3 — Exact address privacy and confirmed-booking reveal
+
+### Issue fixed
+
+Precise customer address ciphertext no longer lives on the frontend-facing request row as active data. It is isolated in a private table and can only be revealed through an audited server-side function after the booking is confirmed/revealable and only to the selected approved provider.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/004_exact_address_privacy.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Policies and functions added
+
+- Added `private.service_request_addresses` for exact address ciphertext.
+- Enabled RLS on `private.service_request_addresses` and revoked all frontend privileges.
+- Deprecated `public.service_requests.precise_address_ciphertext`; migrated existing values into the private table and nulled the public column.
+- Added `private.prevent_service_request_precise_address_write` trigger so direct writes to the deprecated public address column fail.
+- Replaced broad direct `service_requests` insert/update grants with column-level grants that exclude exact address material.
+- Added `public.list_provider_open_request_summaries(...)` for approved-provider discovery of open requests without customer IDs or exact address fields.
+- Added `public.customer_upsert_service_request_address(...)` so a customer can update their own draft/open request address through controlled server-side logic.
+- Added `public.reveal_confirmed_booking_address(...)` so only the selected approved provider can reveal the exact address after a revealable booking status.
+- Added `public.is_address_revealable_booking_status(...)` to centralise the temporary revealable-status list.
+- Every successful address reveal writes `booking.address_revealed` to append-only `audit_events`.
+- Every controlled customer address upsert writes `customer.request_address_upserted` to append-only `audit_events`.
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql` originally added 26 pgTAP assertions here and is expanded to 49 assertions in Ticket 5. The address-privacy coverage proves:
+
+- Exact addresses live in `private.service_request_addresses`.
+- Public `service_requests` rows do not store active exact address ciphertext.
+- Approved providers can view safe open request summaries.
+- Approved providers cannot directly select `public.service_requests.precise_address_ciphertext`.
+- Approved providers cannot directly select from `private.service_request_addresses`.
+- The `authenticated` role has no SELECT privilege on the deprecated public precise-address column.
+- Unapproved providers cannot view open request summaries.
+- Suspended providers cannot view open request summaries.
+- Approved but unselected providers cannot reveal confirmed booking addresses.
+- Selected providers cannot reveal addresses while a booking is still `payment_pending`.
+- Unrelated customers cannot reveal booking addresses.
+- The selected approved provider can reveal the address for a scheduled confirmed booking.
+- Every successful address reveal writes a separate audit event.
+- Customers can upsert their own open request address through controlled logic.
+- Customers cannot upsert another customer request address.
+- Customers cannot directly write the deprecated public precise-address column.
+- Controlled customer address upserts write audit events.
+- Ticket 1/2 smoke protections remain intact: provider self-verification is blocked, audit events cannot be edited by frontend users, vendor events cannot be inserted by frontend users, service categories cannot be mutated by customers, and `service_requests` RLS remains enabled.
+
+### How to run tests
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+```
+
+Recommended full database hardening set:
+
+```powershell
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+```
+
+### Tests not run / run result
+
+- Not run in this workspace. Required local tooling is not available on PATH.
+- Ticket 3/Ticket 5 address privacy may only be marked **CLOSED** after `exact_address_privacy.test.sql` passes locally or in CI.
+
+### Remaining risks
+
+- Open-request `description` remains readable to approved providers. The request-creation ticket must add validation/redaction to stop users from putting exact addresses into free text.
+- The booking state machine is still incomplete outside the core Ticket 6 flow. Ticket 6 aligns `scheduled`, `in_progress`, and `completed`; future payment/refund/dispute tickets must confirm or adjust the remaining revealable statuses.
+- The private address field stores ciphertext but the production encryption/decryption key-management design still needs to be finalised outside the database schema.
+- Existing `service_requests` owner policies still allow broad non-address request mutation and must be replaced by workflow/state-machine server actions in a later ticket.
+
+## Ticket 5 — Exact address privacy and confirmed-booking reveal
+
+### Issue fixed
+
+Ticket 5 supersedes the earlier Ticket 3 address work as the canonical exact-address privacy ticket. It tightens the model so precise customer address data does not live on public service request rows, private address records are tied to the owning customer, providers cannot directly read address storage, and selected providers can reveal only the minimum exact-address ciphertext through an audited confirmed-booking function.
+
+### Address-material fields reviewed
+
+- `public.service_requests.precise_address_ciphertext`: exact-address ciphertext risk. Deprecated, nulled, blocked by trigger, and not granted to frontend roles.
+- `private.service_request_addresses.precise_address_ciphertext`: canonical exact-address ciphertext. Private table; no direct frontend or service-role table access.
+- `private.service_request_addresses.customer_id`: added in Ticket 5 to bind each private address record to the customer who owns the request.
+- `public.service_requests.customer_id`: private customer identifier. Excluded from provider open-request summaries and direct frontend safe SELECT grants.
+- `public.service_requests.description`: provider-visible free text. Now conservatively checked before publication/open status for likely street addresses, unit/room references, GPS coordinates, phone numbers, and house/stand/erf numbers.
+- `public.service_requests.suburb` and `public.service_requests.city`: retained as approximate location fields. They are visible to approved providers and should contain general area only.
+- Other free-text fields (`bids.message`, `provider_services.description`, `disputes.description`, `reviews.body`) can technically contain sensitive text, but they are not part of the provider-facing open-request summary. Later workflow tickets should add context-specific validation where needed.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/005_ticket_5_address_privacy_hardening.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Policies, triggers, and functions added or tightened
+
+- Added `private.service_request_addresses.customer_id`.
+- Added `private.enforce_service_request_address_owner` trigger to keep private address `customer_id` aligned with `service_requests.customer_id`.
+- Revoked direct `service_role` table access to `private.service_request_addresses`; server/admin access must use audited functions. This narrows direct PostgREST/table-query access, but it does not make the service-role key safe for frontend use and does not restrict database owners/superusers or intentionally granted `SECURITY DEFINER` functions.
+- Added `public.service_request_description_has_exact_address_risk(...)`.
+- Added `private.prevent_public_request_description_exact_address_material` trigger to reject risky public descriptions when a request is opened/published.
+- Added `public.customer_get_service_request_address(...)` for controlled customer reads of their own address.
+- Tightened `public.customer_upsert_service_request_address(...)` to draft requests only, before provider selection/publication.
+- Replaced `public.reveal_confirmed_booking_address(...)` so it returns only `precise_address_ciphertext`, validates selected approved provider plus revealable booking status, and checks the private address `customer_id`.
+- Added `public.admin_get_service_request_address(...)` with required reason and audit event.
+
+### Tests added/expanded
+
+`outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql` now has 49 pgTAP assertions proving:
+
+- Exact addresses live in the private address table.
+- Public `service_requests` rows do not store active exact-address ciphertext.
+- Private address rows copy the owning `customer_id`.
+- Approved providers can view safe open request summaries.
+- Approved providers cannot access exact address before confirmed booking.
+- Providers cannot directly select/insert/update/delete `private.service_request_addresses`.
+- `service_role` cannot directly select private request addresses and must use audited functions.
+- Unapproved providers cannot view summaries or reveal addresses.
+- Suspended providers cannot view summaries or reveal addresses.
+- Unselected providers cannot reveal confirmed booking addresses.
+- Selected providers cannot reveal while booking is still `payment_pending`.
+- Unrelated customers cannot reveal booking addresses.
+- Selected approved providers can reveal after confirmed/revealable booking status.
+- Every reveal writes a separate audit event.
+- Customers can create/update exact address data only for their own draft request through controlled functions.
+- Customers cannot directly insert unsafe private address rows.
+- Customers cannot read another customer's exact address through the controlled customer function.
+- Customers cannot update exact address after request publication.
+- Customers cannot update exact address after provider selection or a confirmed/revealable booking exists.
+- Customers cannot directly write the deprecated public exact-address column.
+- Public descriptions with likely street address, unit/room, GPS, phone, or house/stand/erf material are flagged, including an explicit house-number assertion.
+- Publishing/opening a request with likely exact-address material is rejected.
+- Admin/support address access works only through audited function with a required reason.
+- Admin/support address access with a blank reason is rejected.
+- Ordinary customers cannot use the admin address access function.
+- Ticket 1 role protections and Ticket 2 baseline RLS protections remain intact.
+
+### How to run tests
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+```
+
+Recommended full security set:
+
+```powershell
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+```
+
+### Tests not run / run result
+
+- Not run in this workspace. Required local tooling is not available on PATH.
+- Static check confirms `exact_address_privacy.test.sql` has `plan(49)` and 49 assertion calls.
+- Ticket 5 may only be marked **CLOSED** after `exact_address_privacy.test.sql` passes locally or in CI.
+
+### Ticket 5 verification pass — 11 July 2026
+
+- Static review found missing negative tests for direct private address INSERT/UPDATE/DELETE, cross-customer safe-function reads, owner updates after provider selection/confirmed booking, blank admin/support access reasons, and house/stand/erf-number description detection.
+- Updated `outputs/marketplace-production-foundation/supabase/tests/database/exact_address_privacy.test.sql` from 41 to 49 assertions to cover those gaps.
+- No migration change was required for this verification pass; the existing migration already revokes direct frontend/private-table access, routes customer writes through safe functions, and audits reveal/admin access.
+- Tests still need to be run locally or in CI before Ticket 5 is marked **CLOSED**.
+
+### Remaining risks
+
+- Public-description detection is conservative and cannot perfectly detect every exact-address phrasing. The production UI should still warn customers not to type exact addresses into public request descriptions.
+- `suburb` and `city` remain general-location fields and are not fully normalised to a controlled list yet.
+- Booking revealable statuses are still provisional until the booking state-machine ticket finalises the lifecycle.
+- The exact address value is treated as ciphertext, but production encryption/decryption and key-management still need to be implemented in the server layer.
+- Ticket 6 now replaces broad direct `service_requests` workflow mutation with trusted draft/publish/cancel state-machine functions. The production application still needs to be wired to those functions.
+
+## CI — Supabase database tests
+
+### Status
+
+Implemented in code; not yet proven by a live GitHub Actions run from this workspace.
+
+### CI setup verification — 11 July 2026
+
+- Confirmed `.github/workflows/database-tests.yml` exists and is configured to run on every `push` and `pull_request`.
+- Confirmed the workflow uses the `ubuntu-latest` runner, verifies Docker availability, installs the Supabase CLI, starts the local Supabase stack, runs `supabase db reset`, and executes the required pgTAP test files.
+- Confirmed the workflow runs from `outputs/marketplace-production-foundation`, where the local Supabase migrations and tests live.
+- Confirmed no production secrets are added to the workflow.
+- Confirmed the local Supabase project now commits a deterministic, non-secret `supabase/config.toml`; CI no longer runs `supabase init`.
+- Confirmed `TESTING.md` documents how to read GitHub Actions results and how to reproduce the database tests locally.
+- Static verification only: this workspace still cannot execute the workflow locally because Supabase CLI, Docker, `npx`, `psql`, and `git` are not available on PATH.
+
+### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/marketplace-production-foundation/supabase/config.toml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+### What the workflow does
+
+The GitHub Actions workflow runs on every push and pull request. It:
+
+- checks out the repository
+- verifies Docker is available on the `ubuntu-latest` runner
+- installs the Supabase CLI using `supabase/setup-cli@v1`
+- verifies the committed local `supabase/config.toml` exists and does not contain obvious secret/key markers or production Supabase project references
+- starts the local Supabase stack
+- runs `supabase db reset`
+- runs:
+  - `supabase test db supabase/tests/database/role_escalation.test.sql`
+  - `supabase test db supabase/tests/database/baseline_rls.test.sql`
+  - `supabase test db supabase/tests/database/exact_address_privacy.test.sql`
+  - `supabase test db supabase/tests/database/marketplace_state_machine.test.sql`
+- stops the local Supabase stack with `supabase stop --no-backup`
+
+### Security posture
+
+- No production secrets are added to the workflow.
+- The committed `outputs/marketplace-production-foundation/supabase/config.toml` is local-only and contains no database password, service-role key, JWT secret, payment key, identity key, production Supabase project ref/URL, or production project secret.
+- The workflow uses only local config, local migrations, and deterministic pgTAP seed data.
+- The workflow should fail if any migration or pgTAP assertion fails.
+
+### How to read results
+
+See `TESTING.md` for where to find GitHub Actions results, which steps map to which hardening areas, and how to reproduce the same commands locally.
+
+### Remaining risks
+
+- The workflow still needs to be run in GitHub Actions to confirm the Supabase CLI setup, Docker startup, committed local config, migrations, and pgTAP commands succeed on `ubuntu-latest`.
+- This workspace still cannot run the workflow locally because Supabase CLI/Docker/`npx`/`psql` are not available on PATH.
+
+## Pre-CI safety check — 2026-07-11
+
+### Result
+
+Static pre-push safety check completed and patched the missing repository ignore rules.
+
+### Files changed
+
+- `.gitignore`
+- `hardening_progress.md`
+
+### Checks confirmed
+
+- No non-example `.env` files were found in the workspace.
+- `outputs/marketplace-production-foundation/.env.example` contains placeholder/empty/mock values only.
+- `outputs/marketplace-production-foundation/supabase/config.toml` contains no database password, service-role key, JWT secret, payment key, identity key, API key, access token, or production Supabase project reference.
+- `.github/workflows/database-tests.yml` contains no production secrets and no `supabase init` fallback.
+- No suspicious committed secret assignments were found for service-role keys, JWT secrets, payment keys, identity keys, API keys, access tokens, database URLs, or database passwords.
+- `.gitignore` now blocks `.env`, `.env.*` including `.env.local` and `.env.production`, `node_modules`, build outputs, and Supabase local temp/cache/runtime folders while allowing `.env.example`.
+- GitHub Actions database tests still run from `outputs/marketplace-production-foundation`.
+- CI still includes all four pgTAP files:
+  - `supabase/tests/database/role_escalation.test.sql`
+  - `supabase/tests/database/baseline_rls.test.sql`
+  - `supabase/tests/database/exact_address_privacy.test.sql`
+  - `supabase/tests/database/marketplace_state_machine.test.sql`
+
+### Remaining note
+
+This is a static workspace scan because Git is not available on PATH here, so I could not ask Git directly which files are staged/tracked. The new `.gitignore` should be in place before pushing.
+
+## Ticket 6 — Request, bid, acceptance, and booking state machine
+
+### Issue fixed
+
+Core request, bid, acceptance, booking creation, and completion state changes are now routed through trusted transactional database functions instead of broad direct frontend table writes.
+
+### Authoritative state machine
+
+- `service_requests`: `draft -> open -> awarded|cancelled|expired`
+- `bids`: `submitted -> accepted|declined|withdrawn|expired`
+- `bookings`: `scheduled -> in_progress -> completed` for the current database MVP flow
+
+Later tickets still own payment funding, refunds, payout release, booking cancellation after confirmation, disputes, expiry jobs, and vendor webhook transitions.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/006_marketplace_state_machine.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Policies, triggers, constraints, and functions added or tightened
+
+- Added workflow timestamps to `service_requests`, `bids`, and `bookings`.
+- Added `bids_one_accepted_per_request_idx` partial unique index.
+- Added trigger guards preventing direct frontend insert/update/delete on `service_requests`, `bids`, `bookings`, and `payments` workflow state.
+- Added booking integrity trigger requiring booking request, bid, customer, provider, amount, currency, and scheduled time to match.
+- Removed broad `service_requests` owner `FOR ALL` mutation policy and replaced it with customer read-only ownership.
+- Removed broad provider `bids` `FOR ALL` mutation policy and replaced it with provider read-only ownership.
+- Revoked direct frontend `INSERT/UPDATE/DELETE` on `service_requests`, `bids`, `bookings`, and `payments`.
+- Added transactional public functions:
+  - `customer_create_draft_request(...)`
+  - `customer_publish_request(...)`
+  - `customer_cancel_request(...)`
+  - `provider_submit_bid(...)`
+  - `provider_withdraw_bid(...)`
+  - `customer_accept_bid(...)`
+  - `booking_mark_in_progress(...)`
+  - `customer_confirm_completion(...)`
+  - `provider_confirm_completion(...)`
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql` has 58 pgTAP assertions proving:
+
+- Customer can create a draft request.
+- Customer can publish own draft request.
+- Customer cannot publish another customer's request.
+- Customer can cancel own draft/open request through controlled function.
+- Approved eligible provider can submit a bid.
+- Unapproved provider cannot bid.
+- Suspended provider cannot bid.
+- Approved provider cannot bid without active service for the request category.
+- Provider can withdraw own submitted bid.
+- Provider cannot bid after request close time.
+- Customer can accept valid bid on own request.
+- Customer cannot accept another customer's bid/request.
+- Accepting one bid awards the request, accepts the winning bid, and declines competing bids.
+- Duplicate accept calls are safely rejected.
+- Booking is created with correct customer, provider, request, bid, amount, fee, currency, and status.
+- Pending internal payment record is created without vendor credentials.
+- Direct frontend updates to request, bid, booking, and payment/release status fields are blocked for customers and providers.
+- Booking with a bid from a different request is rejected.
+- Booking with the wrong customer is rejected.
+- Booking with the wrong provider is rejected.
+- Booking with the wrong service amount is rejected.
+- A second booking for the same request is rejected.
+- More than one accepted bid per request is rejected.
+- Selected provider can reveal exact address after scheduled confirmed booking.
+- Unselected provider cannot reveal confirmed booking address.
+- Selected provider can mark booking in progress.
+- Customer and provider completion confirmations are blocked before `in_progress`.
+- Customer and provider completion confirmations complete the booking only after the booking is `in_progress` and both parties confirm.
+- Ticket 1 role protections remain intact.
+- Ticket 2 baseline RLS protections remain intact.
+- Ticket 5 address privacy protections remain intact.
+
+### How to run tests
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+```
+
+Recommended full security set:
+
+```powershell
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+```
+
+### Tests not run / run result
+
+- Not run in this workspace. Required local tooling is not available on PATH.
+- Static check confirms `marketplace_state_machine.test.sql` has `plan(58)` and 58 assertion calls.
+- Ticket 6 may only be marked **CLOSED** after `marketplace_state_machine.test.sql` passes locally or in CI.
+
+### Ticket 6 verification pass — 2026-07-11
+
+Verification found and patched three gaps before closeout:
+
+- Completion is now only confirmable after `bookings.status = 'in_progress'`; it is no longer accepted directly from `scheduled`.
+- Booking integrity tests now separately cover mismatched request/bid, wrong customer, wrong provider, wrong amount, duplicate booking, and duplicate accepted bid cases.
+- Payment/release direct mutation tests now cover both customer and provider callers.
+
+The CI workflow already includes `marketplace_state_machine.test.sql`, but the updated 58-assertion database test still needs to pass locally or in GitHub Actions before Ticket 6 is closed.
+
+### Remaining risks
+
+- The static prototype is not yet wired to these database functions.
+- Real payment provider funding, cash policy, refunds, payout release, booking cancellation after confirmation, disputes, expiry jobs, and webhooks remain future tickets.
+- `payments.status` is still text until the payment/refund ticket introduces a stricter payment state model.
+- `consents` and `data_subject_requests` still need separate compliance workflow hardening.
