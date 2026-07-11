@@ -841,15 +841,15 @@ If that passes, rerun the full GitHub Actions database workflow to confirm all f
 ### Remaining risks
 
 - The static prototype is not yet wired to these database functions.
-- Real payment provider funding, cash policy, refunds, payout release, booking cancellation after confirmation, disputes, expiry jobs, and webhooks remain future tickets.
-- Ticket 7A constrains `payments.status` to safe MVP payment-status values and adds an append-only payment event ledger. Real hosted checkout, cash handling, refunds, payout release, and vendor webhooks remain future tickets.
+- Real payment provider funding, real refund execution, payout release, booking cancellation after confirmation, disputes, expiry jobs, and webhooks remain future tickets.
+- Ticket 7A constrains `payments.status` to safe MVP payment-status values and adds an append-only payment event ledger. Ticket 7B adds refund request/ledger foundations. Ticket 7C disables cash/off-platform cash for MVP. Real hosted checkout, real refund execution, payout release, and vendor webhooks remain future tickets.
 - `consents` and `data_subject_requests` still need separate compliance workflow hardening.
 
 ## Ticket 7 — Payments, cash handling, refunds, and payout release
 
 ### Planning status
 
-The full Ticket 7 roadmap is prepared. Ticket 7A payment status constraints and payment event ledger foundation is implemented below; live provider integration, cash handling, refunds, payout release, and real webhooks remain unimplemented.
+The full Ticket 7 roadmap is prepared. Ticket 7A payment status constraints and payment event ledger foundation, Ticket 7B refund request/ledger foundation, and Ticket 7C cash-disabled MVP policy are implemented below. Live provider integration, real refund execution, payout release, and real webhooks remain unimplemented.
 
 ### Plan file
 
@@ -871,7 +871,7 @@ The full Ticket 7 roadmap is prepared. Ticket 7A payment status constraints and 
 
 ### Next step
 
-Continue with the next explicitly scoped payment ticket, likely hosted checkout/mock adapter, cash handling, refunds, payout release, or signed webhooks.
+Continue with the next explicitly scoped payment ticket, likely hosted checkout/mock adapter, payout release/freeze, dispute-aware release blocking, or signed webhooks.
 
 ## Ticket 7A — Payment status constraints and payment event ledger
 
@@ -1215,31 +1215,105 @@ Manual/sandbox refund outcomes are internal state records only and must not be r
 
 Ticket 7B still does **not** implement live refund execution, cash workflow, payout release/freeze, real webhooks, or UI.
 
-## Ticket 7C — Cash payment policy and confirmation flow
+## Ticket 7C — Cash payment policy enforcement: cash disabled for MVP
 
-### Planning status
+### Issue fixed
 
-Prepared only; not implemented.
+Cash/off-platform payments are now explicitly disabled for MVP at the database layer so LEKKADEALL does not misrepresent off-platform cash as protected platform payment.
 
-### Plan file
+### Policy decision
 
-- `ticket_7c_cash_payment_plan.md`
+Cash payments are disabled for MVP.
 
-### Scope
+Allowed MVP payment method markers are limited to:
 
-Ticket 7C planning covers:
+- `platform_online_pending`
+- `platform_online`
+- `sandbox_online`
+- `manual_sandbox_online`
 
-- whether cash is allowed in MVP or disabled
-- off-platform / not-payment-protected labelling
-- cash-specific statuses
-- customer/provider confirmation requirements
-- admin override rules
-- cash dispute handling
-- why cash must not trigger payout release
-- RLS and privilege model
-- required pgTAP tests
-- definition of done
+Cash/off-platform markers such as `cash`, `off_platform_cash`, `cash_selected`, `customer_cash_confirmed`, `provider_cash_confirmed`, `cash_confirmed`, `cash_disputed`, `cash_cancelled`, and `cash_unverified` are rejected.
 
-### Next step
+### Files changed
 
-Choose the MVP cash policy before implementation. Recommendation in the plan: disable cash for launch unless there is a strong adoption/operations reason to allow it.
+- `outputs/marketplace-production-foundation/supabase/migrations/009_cash_payment_policy.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/cash_payment_policy.test.sql`
+- `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Database changes
+
+- Added `payments.payment_method`.
+- Backfilled/defaulted `payment_method` to `platform_online_pending`.
+- Added `payments_payment_method_check` to allow only MVP online/sandbox method markers.
+- Added a trigger that rejects disabled cash/off-platform payment method values with: `Cash payments are disabled for MVP.`
+- Added `customer_select_cash_payment(...)` and `provider_select_cash_payment(...)` as explicit policy marker functions that always reject for MVP.
+- Added payment-event protection against cash/off-platform metadata and payout-release-like events.
+- Kept customer/provider direct payment mutations blocked by existing Ticket 6/7A payment protections.
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/cash_payment_policy.test.sql` has 22 pgTAP assertions covering:
+
+- cash payment method is rejected
+- off-platform cash payment method is rejected
+- customer cannot create cash payment directly
+- provider cannot create cash payment directly
+- online/sandbox payment marker remains compatible
+- customer cannot switch an online payment to cash
+- provider cannot switch an online payment to cash
+- customer/provider cash-selection functions reject
+- no booking/payment can become cash-confirmed
+- cash cannot set payment status to paid
+- cash cannot set payment status to refunded
+- cash cannot set release status to released
+- cash cannot create payout-release-like payment events
+- no payment row has a cash/off-platform method
+- Ticket 1 role protections remain intact
+- Ticket 2 RLS protections remain intact
+- Ticket 5 address protections remain intact
+- Ticket 6 marketplace state-machine protections remain intact
+- Ticket 7A payment ledger protections remain intact
+- Ticket 7B refund ledger protections remain intact
+
+### CI update
+
+The `Supabase database tests` workflow now runs `cash_payment_policy.test.sql` after `refunds_ledger.test.sql`.
+
+### Tests to run
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the required database tooling available.
+
+From `outputs/marketplace-production-foundation`, rerun:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
+```
+
+Then confirm GitHub Actions is green.
+
+### Remaining non-goals / risks
+
+Ticket 7C deliberately does not implement:
+
+- customer cash confirmation
+- provider cash confirmation
+- admin cash override
+- cash dispute workflow
+- payout release
+- live payment provider integration
+- real webhook handlers
+- UI
+
+If the business later chooses to allow cash, it must be implemented as an explicitly off-platform, not-payment-protected workflow with separate cash statuses, append-only cash events, clear customer/provider acknowledgements, dispute wording, and tests proving it cannot trigger payout release.

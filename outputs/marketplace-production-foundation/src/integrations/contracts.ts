@@ -19,6 +19,12 @@ export type ReleaseStatus =
   | 'released'
   | 'cancelled';
 
+export type PaymentMethod =
+  | 'platform_online_pending'
+  | 'platform_online'
+  | 'sandbox_online'
+  | 'manual_sandbox_online';
+
 export interface CreateProtectedPaymentInput {
   idempotencyKey: string;
   bookingId: string;
@@ -36,6 +42,7 @@ export interface ProtectedPayment {
   providerReference: string;
   checkoutUrl: string;
   status: PaymentStatus;
+  paymentMethod?: PaymentMethod;
   releaseStatus?: ReleaseStatus;
   expiresAt?: string;
 }

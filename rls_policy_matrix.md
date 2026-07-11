@@ -1,7 +1,7 @@
 # LEKKADEALL RLS Policy Matrix
 
 **Date:** 12 July 2026  
-**Ticket:** Ticket 2 baseline RLS + Ticket 5 exact-address privacy + Ticket 6 marketplace state-machine update + Ticket 7A payment ledger foundation + Ticket 7B refund ledger foundation
+**Ticket:** Ticket 2 baseline RLS + Ticket 5 exact-address privacy + Ticket 6 marketplace state-machine update + Ticket 7A payment ledger foundation + Ticket 7B refund ledger foundation + Ticket 7C cash-disabled MVP policy
 
 ## Public schema table inventory
 
@@ -60,7 +60,7 @@ Legend:
 | `service_requests` | High - customer request details and address material | S own safe request columns; I/U/D none directly; create/publish/cancel through `customer_create_draft_request(...)`, `customer_publish_request(...)`, `customer_cancel_request(...)`; exact address via controlled address functions | S eligible open safe columns/summaries; I/U/D none directly | Direct frontend access none | Trusted state-machine and admin/server functions only | Ticket 6 removed the broad owner `FOR ALL` mutation policy. `status`, `closes_at`, and workflow timestamps are trigger-protected and changed only through marketplace functions. |
 | `bids` | High - commercial offers and bid state | S bids on own requests; I/U/D none | S own bids; I/U/D none directly; submit/withdraw through `provider_submit_bid(...)` and `provider_withdraw_bid(...)` | Direct frontend access none | Trusted state-machine functions only | Ticket 6 removed broad provider bid mutation. One accepted bid per request is enforced by partial unique index; acceptance/decline happens inside `customer_accept_bid(...)`. |
 | `bookings` | High - booking parties, schedule, commercial amounts | S party only; I/U/D none; completion confirmation through `customer_confirm_completion(...)` after `in_progress` | S party only; I/U/D none; progress/completion through `booking_mark_in_progress(...)` and `provider_confirm_completion(...)` after `in_progress` | Direct frontend access none | Trusted state-machine functions only | Ticket 6 creates bookings only from accepted bids and validates request/bid/customer/provider/amount/schedule consistency by trigger. |
-| `payments` | Critical - payment references/status, no card data | S party only; I/U/D none | S party only; I/U/D none | Direct frontend access none | Ticket 6 marketplace functions may prepare pending rows; Ticket 7A trusted admin/server function may update payment status/release status and append ledger events | Ticket 7A constrains `status` to safe MVP payment-status values and adds separate `release_status`. Frontend users cannot directly mutate payment/release/refund/provider fields. Real hosted checkout, refunds, cash policy, payout release, and webhooks remain future tickets. |
+| `payments` | Critical - payment references/status, no card data | S party only; I/U/D none | S party only; I/U/D none | Direct frontend access none | Ticket 6 marketplace functions may prepare pending rows; Ticket 7A trusted admin/server function may update payment status/release status and append ledger events | Ticket 7A constrains `status` to safe MVP payment-status values and adds separate `release_status`. Ticket 7C adds `payment_method` and permits only protected online/sandbox method markers for MVP; `cash`, `off_platform_cash`, and cash-confirmation markers are rejected. Frontend users cannot directly mutate payment/release/refund/provider fields. Real hosted checkout, payout release, and webhooks remain future tickets. |
 | `payment_events` | Critical - append-only payment status ledger | none | none | Direct frontend access none | Append through trusted `admin_record_payment_event(...)` / future signed webhook functions only | RLS enabled; frontend and direct service-role table privileges revoked; UPDATE/DELETE blocked by append-only trigger; idempotency protected by unique indexes on provider event ID and idempotency key. |
 | `refund_requests` | Critical - refund workflow/commercial amounts | S party only; I/U/D none directly; request through `customer_request_refund(...)` | S party only; I/U/D none directly; request through `provider_request_refund(...)` | Direct frontend access none | Trusted refund functions only | Ticket 7B constrains refund statuses, requires booking-party ownership for request functions, and makes admin decisions server/admin-function controlled with required reasons. No live refund provider execution. |
 | `refund_events` | Critical - append-only refund ledger | none | none | Direct frontend access none | Append through trusted refund functions only | RLS enabled; frontend and direct service-role table privileges revoked; UPDATE/DELETE blocked by append-only trigger; idempotency protected by unique indexes on provider event ID and idempotency key. |
@@ -84,6 +84,7 @@ Legend:
 - `payment_events`: no frontend direct read/write access; append-only through trusted payment/admin/webhook functions.
 - `refund_requests`: booking-party read only; all creation/decision/outcome changes through trusted functions.
 - `refund_events`: no frontend direct read/write access; append-only through trusted refund functions.
+- `payments.payment_method`: cash/off-platform cash is disabled for MVP; allowed values are online/sandbox markers only.
 
 ## Private exact-address model after Ticket 5
 
@@ -140,11 +141,25 @@ Legend:
 - Successful refund outcomes that affect payment state also write a `payment_events` row.
 - `refund_events` is append-only and not frontend-readable or frontend-writable.
 
+## Cash payment policy after Ticket 7C
+
+- MVP policy decision: cash payments are explicitly disabled.
+- `payments.payment_method` is required and defaults to `platform_online_pending`.
+- Allowed MVP `payment_method` values are:
+  - `platform_online_pending`
+  - `platform_online`
+  - `sandbox_online`
+  - `manual_sandbox_online`
+- Rejected cash/off-platform markers include `cash`, `off_platform_cash`, `cash_selected`, `customer_cash_confirmed`, `provider_cash_confirmed`, `cash_confirmed`, `cash_disputed`, `cash_cancelled`, and `cash_unverified`.
+- `customer_select_cash_payment(...)` and `provider_select_cash_payment(...)` exist only as explicit policy markers and always raise: `Cash payments are disabled for MVP.`
+- Cash cannot be used to mark payments as paid/refunded/released, create payout-release-like payment events, or bypass the Ticket 7A/7B payment and refund ledgers.
+- Ticket 7C deliberately does not implement customer cash confirmation, provider cash confirmation, admin cash override, cash dispute workflow, payout release, live payment provider integration, real webhooks, or UI.
+
 ## Remaining RLS risks after Tickets 2-6
 
 - Public-description detection is conservative but not perfect. It blocks common street-number, unit/room, GPS, phone, and house/stand/erf patterns, but application UX and moderation should still warn users not to place exact addresses in public text.
 - Booking status semantics are now aligned for the core marketplace flow (`scheduled`, `in_progress`, `completed` remain revealable), but future payment/refund/dispute tickets must confirm the final revealable status list.
 - `consents` and `data_subject_requests` still have broad owner `FOR ALL` style policies from the initial schema. They require separate compliance/workflow tickets.
 - Ticket 6 hardens the database state machine, but the production application still needs to be wired to these functions; until then the static prototype remains a demo.
-- Ticket 7A hardens payment status constraints and the payment event ledger. Ticket 7B adds refund request and refund event ledger foundations. Real hosted checkout funding, real provider refund execution, cash handling, payout release, dispute-aware release blocking, reconciliation, and signed vendor webhook transitions remain future tickets.
+- Ticket 7A hardens payment status constraints and the payment event ledger. Ticket 7B adds refund request and refund event ledger foundations. Ticket 7C disables cash for MVP. Real hosted checkout funding, real provider refund execution, payout release, dispute-aware release blocking, reconciliation, and signed vendor webhook transitions remain future tickets.
 - Admin access is still intentionally server-mediated rather than broad direct admin RLS. A later staff/MFA ticket should formalise admin roles outside normal user-editable profile data.

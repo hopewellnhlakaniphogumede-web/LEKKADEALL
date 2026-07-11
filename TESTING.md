@@ -31,6 +31,7 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
 ```
 
 The workflow fails if any migration or pgTAP test fails.
@@ -54,6 +55,7 @@ Common useful steps:
 - **Run marketplace state machine pgTAP tests**: request draft/publish/cancel, provider bid submission/withdrawal, bid acceptance, booking creation, direct workflow mutation denial, booking integrity constraints, completion confirmation after `in_progress`, and Ticket 1/2/5 smoke protections.
 - **Run payment ledger pgTAP tests**: constrained payment status values, payment/release direct mutation denial, booking-party payment visibility, append-only payment events, idempotent trusted payment event recording, and Ticket 1/2/5/6 smoke protections.
 - **Run refund ledger pgTAP tests**: booking-party refund requests, refund amount constraints, admin-only refund decisions, manual/sandbox refund outcomes, payment refunded totals/status transitions, append-only refund events, idempotency, and Ticket 1/2/5/6/7A smoke protections.
+- **Run cash payment policy pgTAP tests**: MVP cash-disabled enforcement, cash/off-platform payment method rejection, customer/provider cash mutation denial, payout-release-like cash event blocking, and Ticket 1/2/5/6/7A/7B smoke protections.
 
 pgTAP failures usually show which assertion failed and the assertion message. Use that message to find the relevant block in the `.test.sql` file.
 
@@ -76,6 +78,7 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
 supabase stop --no-backup
 ```
 

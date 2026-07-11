@@ -59,6 +59,9 @@ jobs:
       - name: Run refund ledger pgTAP tests
         run: supabase test db supabase/tests/database/refunds_ledger.test.sql
 
+      - name: Run cash payment policy pgTAP tests
+        run: supabase test db supabase/tests/database/cash_payment_policy.test.sql
+
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true

@@ -12,14 +12,15 @@ Status note as of 12 July 2026:
 
 - Ticket 7A now constrains payment status and adds `payment_events`.
 - Ticket 7B now adds `refund_requests` and append-only `refund_events`.
-- Real hosted checkout, real provider refund execution, cash workflow, payout release, signed webhooks, and reconciliation are still not implemented.
+- Ticket 7C now disables cash/off-platform cash for MVP at the database layer.
+- Real hosted checkout, real provider refund execution, payout release, signed webhooks, and reconciliation are still not implemented.
 
 Original starting point before Ticket 7A/7B:
 
 - Ticket 6 creates an internal pending payment row when a customer accepts a bid.
 - Direct frontend mutation of payment/release fields is blocked.
 - `payments.status` is still text and needs stricter constraints.
-- There is no refund ledger, payout ledger, hosted-checkout abstraction, real webhook reconciliation, or cash policy enforcement yet.
+- There was no refund ledger, payout ledger, hosted-checkout abstraction, real webhook reconciliation, or cash policy enforcement yet.
 
 ## 1. Payment status constraints
 
@@ -111,10 +112,13 @@ Mock mode must be explicitly marked non-production.
 
 ## 5. Cash payment policy
 
-Define the product policy before implementation. Recommended MVP approach:
+Implementation status as of 12 July 2026: Ticket 7C chose the MVP policy and disables cash/off-platform cash at the database layer. The notes below are retained for future product discussion only if the business later chooses to allow an explicitly off-platform, not-payment-protected cash workflow.
+
+Recommended future approach if cash is ever reconsidered:
 
 - Online payment is the protected default.
-- Cash jobs may be allowed only if clearly labelled as “cash/off-platform, not payment-protected”.
+- Cash jobs are disabled for MVP.
+- If cash is ever allowed later, it may be allowed only if clearly labelled as “cash/off-platform, not payment-protected”.
 - Cash status should be tracked separately from online payment status.
 - Cash confirmation should require both customer and provider confirmation or admin override.
 - Cash bookings should not trigger payout release logic because the platform did not hold funds.

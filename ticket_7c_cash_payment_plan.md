@@ -4,11 +4,13 @@
 
 Define whether LEKKADEALL will allow cash payments in the MVP, and if allowed, how cash jobs are clearly separated from protected online payments.
 
-Ticket 7C is planning-only at this stage. Do not create migrations, functions, UI, or tests until the implementation ticket is explicitly requested.
+Implementation status as of 12 July 2026: the MVP policy has been chosen and implemented as **cash disabled for MVP** in `009_cash_payment_policy.sql`, with pgTAP coverage in `cash_payment_policy.test.sql`.
+
+The future-cash sections below are retained only for later product discussion if the business chooses to allow explicitly off-platform, not-payment-protected cash jobs after MVP.
 
 ## 1. MVP policy recommendation
 
-Recommended MVP position: **disable cash payments for launch** unless there is a strong operational reason to allow them.
+Chosen MVP position: **disable cash payments for launch**.
 
 Reasoning:
 
