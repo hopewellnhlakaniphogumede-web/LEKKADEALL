@@ -1317,3 +1317,43 @@ Ticket 7C deliberately does not implement:
 - UI
 
 If the business later chooses to allow cash, it must be implemented as an explicitly off-platform, not-payment-protected workflow with separate cash statuses, append-only cash events, clear customer/provider acknowledgements, dispute wording, and tests proving it cannot trigger payout release.
+
+### Ticket 7C CI verification — 2026-07-12
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Implement Ticket 7C cash disabled for MVP
+- **Run status:** Success
+- **Passed test file:** `cash_payment_policy.test.sql`
+- **Status:** Ticket 7C is CI-verified.
+
+Ticket 7C disables cash for MVP and does **not** implement cash confirmation, cash disputes, payout release, real payment provider integration, real webhooks, or UI.
+
+## Ticket 7D — Payout release, payout freeze, and dispute-aware release blocking
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_7d_payout_release_plan.md`
+
+### Scope
+
+Ticket 7D planning covers:
+
+- payout release eligibility rules
+- payout freeze/pause rules
+- dispute-aware release blocking
+- refund-aware release blocking
+- provider eligibility checks before release
+- trusted server/admin release functions
+- append-only payment ledger and audit requirements
+- idempotency and future provider-payout abstraction
+- RLS and privilege model
+- required pgTAP tests
+- definition of done
+
+### Next step
+
+Review and approve the Ticket 7D plan before any migration, function, test, webhook, provider-payout, or UI work is implemented.
