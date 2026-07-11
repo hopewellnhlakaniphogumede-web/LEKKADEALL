@@ -1043,3 +1043,39 @@ supabase test db supabase/tests/database/payments_ledger.test.sql
 ```
 
 Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
+### Ticket 7A CI verification — 2026-07-11
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Fix Ticket 7A payment ledger test assertions
+- **Run status:** Success
+- **Passed test file:** `payments_ledger.test.sql`
+- **Status:** Ticket 7A is CI-verified.
+
+Ticket 7A still does **not** implement live payment integration, refunds, cash workflow, payout release, or real webhooks.
+
+## Ticket 7B — Refund requests and refund event ledger
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_7b_refunds_plan.md`
+
+### Scope
+
+Ticket 7B is limited to refund requests and an append-only refund event ledger.
+
+It should not implement:
+
+- live payment provider integration
+- real refund execution
+- cash workflow
+- payout release
+- real webhook handlers
+
+### Next step
+
+Wait for explicit Ticket 7B implementation instruction before creating refund migrations, functions, RLS policies, tests, or CI changes.
