@@ -604,6 +604,64 @@ Static pre-push safety check completed and patched the missing repository ignore
 
 This is a static workspace scan because Git is not available on PATH here, so I could not ask Git directly which files are staged/tracked. The new `.gitignore` should be in place before pushing.
 
+## GitHub Actions role-escalation test failure — 2026-07-11
+
+### Failure summary
+
+GitHub Actions reached the database test workflow but failed at `Run role escalation pgTAP tests`. The visible failure was:
+
+- `have: Customer A`
+- `want: Customer A Updated`
+
+That means the safe profile update assertion returned without a durable row change.
+
+### Root cause
+
+The hardening migration had removed broad profile updates and correctly granted column-level updates for safe profile fields, but it did not make profile `SELECT` privileges explicit for authenticated users. Owner reads were protected by RLS, yet the safe update path depends on the caller being able to resolve their own row under RLS. The pgTAP helper also returned `true` without checking `ROW_COUNT`, so a zero-row safe update could look successful until the following persistence assertion failed.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/002_fix_role_escalation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/role_escalation.test.sql`
+- `hardening_progress.md`
+
+### Fix applied
+
+- Added explicit authenticated `SELECT` grants on `public.profiles` and `public.provider_profiles`; RLS still limits profile reads to permitted rows.
+- Kept update privileges column-allowlisted only:
+  - `profiles.display_name`
+  - `profiles.phone_e164`
+  - `profiles.suburb`
+  - `profiles.city`
+  - `profiles.avatar_path`
+  - safe provider profile columns only
+- Did not grant broad profile row updates.
+- Left `role`, `account_status`, provider verification, provider review/approval, and identity verification protections intact.
+- Updated the safe-update pgTAP helpers to require exactly one updated row.
+- Expanded `role_escalation.test.sql` from 33 to 37 assertions, adding coverage that:
+  - safe `display_name` update succeeds
+  - safe phone/suburb/city/avatar updates persist
+  - safe profile update plus role escalation is rejected
+  - role remains unchanged after the failed mixed safe/privileged update
+  - safe display name remains unchanged after the failed mixed safe/privileged update
+
+### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+```
+
+Then rerun the full CI database workflow:
+
+```powershell
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+```
+
 ## Ticket 6 — Request, bid, acceptance, and booking state machine
 
 ### Issue fixed

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(33);
+select plan(37);
 
 \ir rls_test_seed.inc
 
@@ -11,6 +11,8 @@ create function pg_temp.try_customer_safe_profile_update()
 returns boolean
 language plpgsql
 as $$
+declare
+  v_rows integer;
 begin
   update public.profiles
   set display_name = 'Customer A Updated',
@@ -19,7 +21,9 @@ begin
       city = 'Potchefstroom',
       avatar_path = 'avatars/customer-a.png'
   where id = '00000000-0000-0000-0000-000000000001';
-  return true;
+
+  get diagnostics v_rows = row_count;
+  return v_rows = 1;
 exception
   when others then return false;
 end;
@@ -29,13 +33,36 @@ create function pg_temp.try_provider_safe_profile_update()
 returns boolean
 language plpgsql
 as $$
+declare
+  v_rows integer;
 begin
   update public.provider_profiles
   set business_name = 'Provider A Updated Services',
       bio = 'Updated safe provider biography.',
       service_radius_km = 15
   where user_id = '00000000-0000-0000-0000-000000000011';
-  return true;
+
+  get diagnostics v_rows = row_count;
+  return v_rows = 1;
+exception
+  when others then return false;
+end;
+$$;
+
+create function pg_temp.try_customer_safe_update_plus_role_escalation()
+returns boolean
+language plpgsql
+as $$
+declare
+  v_rows integer;
+begin
+  update public.profiles
+  set display_name = 'Customer A Escalated',
+      role = 'provider'
+  where id = '00000000-0000-0000-0000-000000000001';
+
+  get diagnostics v_rows = row_count;
+  return v_rows = 1;
 exception
   when others then return false;
 end;
@@ -176,6 +203,40 @@ select is(
    where id = '00000000-0000-0000-0000-000000000001'),
   'Customer A Updated',
   'safe customer profile update persists'
+);
+
+select is(
+  (select concat_ws('|', phone_e164, suburb, city, avatar_path)
+   from public.profiles
+   where id = '00000000-0000-0000-0000-000000000001'),
+  '+27820000001|Die Bult|Potchefstroom|avatars/customer-a.png',
+  'safe customer phone/suburb/city/avatar update persists'
+);
+
+-- Safe-field edits cannot be combined with privileged role escalation.
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
+
+select is(
+  pg_temp.try_customer_safe_update_plus_role_escalation(),
+  false,
+  'safe profile update plus role escalation attempt is rejected'
+);
+
+reset role;
+
+select is(
+  (select role::text from public.profiles
+   where id = '00000000-0000-0000-0000-000000000001'),
+  'customer',
+  'role remains unchanged after failed mixed safe/privileged update'
+);
+
+select is(
+  (select display_name from public.profiles
+   where id = '00000000-0000-0000-0000-000000000001'),
+  'Customer A Updated',
+  'safe display_name remains unchanged after failed mixed safe/privileged update'
 );
 
 -- Safe provider profile edits are still allowed, but verification/review fields are not exposed.

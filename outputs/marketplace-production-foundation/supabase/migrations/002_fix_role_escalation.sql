@@ -19,9 +19,11 @@ comment on column public.provider_profiles.review_status is
   'Provider review/approval status. Never client-editable; set only through audited admin functions.';
 
 revoke update on public.profiles from anon, authenticated;
+grant select on public.profiles to authenticated;
 grant update (display_name, phone_e164, suburb, city, avatar_path) on public.profiles to authenticated;
 
 revoke update on public.provider_profiles from anon, authenticated;
+grant select on public.provider_profiles to authenticated;
 grant update (business_name, bio, service_radius_km) on public.provider_profiles to authenticated;
 
 revoke insert, update, delete on public.identity_verifications from anon, authenticated;
