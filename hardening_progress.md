@@ -1204,3 +1204,42 @@ It does not implement:
 - UI
 
 Manual/sandbox refund outcomes are internal state records only and must not be represented as proof that a real provider moved money.
+
+### Ticket 7B CI verification — 2026-07-12
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Implement Ticket 7B refund requests and ledger
+- **Run status:** Success
+- **Passed test file:** `refunds_ledger.test.sql`
+- **Status:** Ticket 7B is CI-verified.
+
+Ticket 7B still does **not** implement live refund execution, cash workflow, payout release/freeze, real webhooks, or UI.
+
+## Ticket 7C — Cash payment policy and confirmation flow
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_7c_cash_payment_plan.md`
+
+### Scope
+
+Ticket 7C planning covers:
+
+- whether cash is allowed in MVP or disabled
+- off-platform / not-payment-protected labelling
+- cash-specific statuses
+- customer/provider confirmation requirements
+- admin override rules
+- cash dispute handling
+- why cash must not trigger payout release
+- RLS and privilege model
+- required pgTAP tests
+- definition of done
+
+### Next step
+
+Choose the MVP cash policy before implementation. Recommendation in the plan: disable cash for launch unless there is a strong adoption/operations reason to allow it.
