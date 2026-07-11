@@ -8,6 +8,14 @@ Ticket 7 should make payment state trustworthy, auditable, vendor-neutral, and d
 
 ## Current starting point
 
+Status note as of 12 July 2026:
+
+- Ticket 7A now constrains payment status and adds `payment_events`.
+- Ticket 7B now adds `refund_requests` and append-only `refund_events`.
+- Real hosted checkout, real provider refund execution, cash workflow, payout release, signed webhooks, and reconciliation are still not implemented.
+
+Original starting point before Ticket 7A/7B:
+
 - Ticket 6 creates an internal pending payment row when a customer accepts a bid.
 - Direct frontend mutation of payment/release fields is blocked.
 - `payments.status` is still text and needs stricter constraints.

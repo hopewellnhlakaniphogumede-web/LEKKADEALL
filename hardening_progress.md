@@ -988,7 +988,7 @@ Then confirm GitHub Actions is green again.
 
 - No live payment vendor is integrated yet.
 - No real hosted checkout/session creation exists yet.
-- No refund workflow or refund ledger exists yet.
+- Ticket 7B adds refund request and refund event ledger foundations; real provider refund execution is still not implemented.
 - No cash-payment policy/workflow exists yet.
 - No payout release/freeze execution exists yet.
 - No real signed webhook handler exists yet.
@@ -1056,26 +1056,151 @@ Ticket 7A still does **not** implement live payment integration, refunds, cash w
 
 ## Ticket 7B — Refund requests and refund event ledger
 
-### Planning status
+### Issue fixed
 
-Prepared only; not implemented.
+Refund requests and refund state changes now have a secure database foundation:
+
+- booking parties request refunds only through safe functions
+- frontend users cannot directly mutate refund workflow rows
+- admin/server refund decisions require authorised context and non-empty reasons
+- refund state changes write append-only refund ledger rows and audit rows
+- manual/sandbox refund-success outcomes update payment refund totals/status through trusted logic only
 
 ### Plan file
 
 - `ticket_7b_refunds_plan.md`
 
-### Scope
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/008_refund_requests_and_ledger.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/refunds_ledger.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `hardening_progress.md`
+
+### Database changes
+
+- Added `public.refund_requests` with constrained statuses:
+  - `requested`
+  - `under_review`
+  - `approved`
+  - `rejected`
+  - `cancelled`
+  - `processing`
+  - `succeeded`
+  - `failed`
+- Added `public.refund_events` with constrained event types:
+  - `refund_requested`
+  - `refund_under_review`
+  - `refund_approved`
+  - `refund_rejected`
+  - `refund_cancelled`
+  - `refund_processing_recorded`
+  - `refund_succeeded_recorded`
+  - `refund_failed_recorded`
+  - `admin_note`
+- Enabled RLS on both refund tables.
+- Revoked direct frontend and direct service-role table access for refund workflow writes.
+- Added booking-party read policy for `refund_requests`.
+- Kept `refund_events` non-frontend-readable and append-only.
+- Added idempotency indexes for refund requests and refund events.
+- Added integrity triggers for:
+  - refund amount greater than zero
+  - refund currency matching payment currency
+  - refund booking matching payment booking
+  - refund amount not exceeding payment amount
+  - refund amount not exceeding remaining refundable amount
+  - only `paid` / `partially_refunded` payments receiving new refund requests
+  - refund event references matching the refund request
+- Added conservative refund metadata validation to reject obvious raw payment/identity credential material.
+
+### Trusted functions added
+
+- `customer_request_refund(...)`
+- `provider_request_refund(...)`
+- `admin_mark_refund_under_review(...)`
+- `admin_approve_refund(...)`
+- `admin_reject_refund(...)`
+- `admin_record_refund_outcome(...)`
+
+`admin_record_refund_outcome(...)` is manual/sandbox outcome recording only. It does not call a live vendor and writes metadata indicating that real money did not move.
+
+### Payment interaction
+
+- Refund approval/rejection alone does not mutate payment refund totals.
+- A trusted manual/sandbox `succeeded` refund outcome increments `payments.refunded_minor`.
+- Partial refund outcomes move `payments.status` to `partially_refunded`.
+- Full refund outcomes move `payments.status` to `refunded`.
+- Rejected refunds do not increase `payments.refunded_minor`.
+- Successful refund outcomes also write a `payment_events` row.
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/refunds_ledger.test.sql` has 48 pgTAP assertions covering:
+
+- Customer can request refund for own booking payment.
+- Provider can request refund for own booking payment.
+- Customer cannot request refund for unrelated payment.
+- Provider cannot request refund for unrelated payment.
+- Anonymous users cannot access refund requests/events.
+- Unrelated authenticated users cannot read refund requests.
+- Booking parties can read safe refund request summaries.
+- Frontend users cannot directly insert/update/delete `refund_requests`.
+- Frontend users cannot directly insert/update/delete `refund_events`.
+- Refund amount must be greater than zero.
+- Refund amount cannot exceed payment amount.
+- Refund amount cannot exceed remaining refundable amount.
+- Invalid refund status is rejected.
+- Invalid refund event type is rejected.
+- Customer/provider cannot approve, reject, or mark refund outcomes.
+- Admin/server can approve refund with audit and refund event.
+- Admin/server can reject refund with audit and refund event.
+- Rejected refund does not increase `payments.refunded_minor`.
+- Trusted manual/sandbox success updates `payments.refunded_minor`.
+- Partial refund moves payment to `partially_refunded`.
+- Full refund moves payment to `refunded`.
+- Duplicate idempotency key does not duplicate refund event.
+- `refund_events` cannot be updated.
+- `refund_events` cannot be deleted.
+- Customer/provider direct payment refund mutation remains blocked.
+- Ticket 1, 2, 5, 6, and 7A smoke protections remain intact.
+
+### CI update
+
+The `Supabase database tests` workflow now runs `refunds_ledger.test.sql` after `payments_ledger.test.sql`.
+
+### Tests to run
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the required database tooling available.
+
+From `outputs/marketplace-production-foundation`, rerun:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+supabase test db supabase/tests/database/refunds_ledger.test.sql
+```
+
+Then confirm GitHub Actions is green.
+
+### Remaining non-goals / risks
 
 Ticket 7B is limited to refund requests and an append-only refund event ledger.
 
-It should not implement:
+It does not implement:
 
 - live payment provider integration
 - real refund execution
 - cash workflow
 - payout release
+- payout freeze/unfreeze
 - real webhook handlers
+- UI
 
-### Next step
-
-Wait for explicit Ticket 7B implementation instruction before creating refund migrations, functions, RLS policies, tests, or CI changes.
+Manual/sandbox refund outcomes are internal state records only and must not be represented as proof that a real provider moved money.
