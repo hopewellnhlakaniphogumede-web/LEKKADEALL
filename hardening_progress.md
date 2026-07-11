@@ -929,7 +929,7 @@ This ticket deliberately does **not** implement live payment-provider integratio
 
 ### Tests added
 
-`outputs/marketplace-production-foundation/supabase/tests/database/payments_ledger.test.sql` has 19 pgTAP assertions covering:
+`outputs/marketplace-production-foundation/supabase/tests/database/payments_ledger.test.sql` has 24 pgTAP assertions covering:
 
 - Invalid payment status is rejected.
 - Trusted pending payment creation writes an initial immutable payment event.
@@ -940,8 +940,13 @@ This ticket deliberately does **not** implement live payment-provider integratio
 - Unrelated users cannot read payment records.
 - Booking customer can read a safe payment summary.
 - Booking provider can read a safe payment summary.
+- Customer cannot call or abuse the trusted payment event function.
+- Provider cannot call or abuse the trusted payment event function.
+- Failed normal-user trusted-function attempts create no payment events.
+- Trusted payment event function rejects invalid payment status.
 - Trusted admin function can write a payment event.
 - Trusted admin function can update constrained payment status.
+- Trusted admin function writes exactly one payment event for a new idempotency key.
 - Duplicate idempotency key does not create duplicate events.
 - `payment_events` cannot be updated.
 - `payment_events` cannot be deleted.
@@ -989,3 +994,52 @@ Then confirm GitHub Actions is green again.
 - No real signed webhook handler exists yet.
 - No provider reconciliation job exists yet.
 - `payments.status` is still the physical column name for compatibility, although it is now constrained and documented as the payment-status field.
+
+### GitHub Actions payment ledger test failure — 2026-07-11
+
+#### Failure summary
+
+GitHub Actions reached `Run payment ledger pgTAP tests` and failed `payments_ledger.test.sql` 1/19 subtests.
+
+The visible failed assertion was:
+
+```text
+trusted admin function can update constrained payment status
+have: NULL
+want: checkout_created
+```
+
+#### Root cause
+
+The database function was already designed to update `payments.status` and write a `payment_events` row atomically. The failing assertion queried `public.payments` while the test was still impersonating the authenticated admin profile.
+
+That admin profile is not a party to the test booking, and the existing payment RLS policy only exposes payment rows to the booking customer/provider. The query therefore saw no row and returned `NULL`. This was a pgTAP test read-context issue, not a need to weaken payment RLS.
+
+#### Fix applied
+
+- Reset the test session out of the simulated authenticated admin role before directly asserting the raw `payments.status` value.
+- Kept payment RLS unchanged.
+- Kept `admin_record_payment_event(...)` as the trusted admin/server path for Ticket 7A payment status changes.
+- Expanded `payments_ledger.test.sql` from 19 to 24 assertions.
+- Added explicit tests proving:
+  - customers cannot call or abuse `admin_record_payment_event(...)`
+  - providers cannot call or abuse `admin_record_payment_event(...)`
+  - failed normal-user calls do not create `payment_events`
+  - trusted function rejects invalid payment status
+  - trusted admin function writes exactly one event for a new idempotency key
+  - duplicate idempotency key still does not duplicate the event
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/payments_ledger.test.sql`
+- `hardening_progress.md`
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/payments_ledger.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.

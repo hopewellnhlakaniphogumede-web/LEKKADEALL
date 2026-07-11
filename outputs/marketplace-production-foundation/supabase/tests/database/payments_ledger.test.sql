@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(19);
+select plan(24);
 
 \ir rls_test_seed.inc
 
@@ -139,6 +139,33 @@ begin
 
   get diagnostics v_rows = row_count;
   return v_rows > 0;
+exception
+  when others then return false;
+end;
+$$;
+
+create function pg_temp.try_call_admin_record_payment_event(
+  p_idempotency_key text,
+  p_payment_status text default 'checkout_created'
+)
+returns boolean
+language plpgsql
+as $$
+begin
+  perform public.admin_record_payment_event(
+    '00000000-0000-0000-0000-000000000902',
+    'payment_status_changed',
+    p_payment_status,
+    null,
+    null,
+    'mock',
+    null,
+    p_idempotency_key,
+    'admin',
+    jsonb_build_object('test', 'ticket-7a-abuse-check')
+  );
+
+  return true;
 exception
   when others then return false;
 end;
@@ -324,7 +351,45 @@ select is(
 reset role;
 
 set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
+
+select is(
+  pg_temp.try_call_admin_record_payment_event('ticket-7-customer-abuse'),
+  false,
+  'customer cannot call or abuse trusted payment event function'
+);
+
+reset role;
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000012';
+
+select is(
+  pg_temp.try_call_admin_record_payment_event('ticket-7-provider-abuse'),
+  false,
+  'provider cannot call or abuse trusted payment event function'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.payment_events
+    where idempotency_key in ('ticket-7-customer-abuse', 'ticket-7-provider-abuse')
+  ),
+  0::bigint,
+  'failed normal-user trusted function calls create no payment events'
+);
+
+set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
+
+select is(
+  pg_temp.try_call_admin_record_payment_event('ticket-7-invalid-status-function', 'not_a_payment_status'),
+  false,
+  'trusted payment event function rejects invalid payment status'
+);
 
 select ok(
   public.admin_record_payment_event(
@@ -342,6 +407,8 @@ select ok(
   'trusted admin function can write a payment event'
 );
 
+reset role;
+
 select is(
   (
     select status
@@ -351,6 +418,19 @@ select is(
   'checkout_created',
   'trusted admin function can update constrained payment status'
 );
+
+select is(
+  (
+    select count(*)
+    from public.payment_events
+    where idempotency_key = 'ticket-7-checkout-created'
+  ),
+  1::bigint,
+  'trusted admin function writes exactly one payment event for a new idempotency key'
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
 
 select ok(
   public.admin_record_payment_event(
