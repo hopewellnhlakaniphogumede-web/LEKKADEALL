@@ -530,7 +530,6 @@ CI-verified by a live GitHub Actions run.
 
 ### CI verification result — 2026-07-11
 
-- **Workflow name:** Supabase database tests
 - **Run status:** Success
 - **Tickets marked CI-verified:**
   - Ticket 1: Role escalation protection
@@ -1537,7 +1536,7 @@ Opening a dispute still needs the later Ticket 10 dispute workflow to atomically
 
 ### Implementation status
 
-Implemented locally; awaiting GitHub Actions/local pgTAP verification.
+CI-verified.
 
 ### Files changed
 
@@ -1591,7 +1590,7 @@ supabase test db supabase/tests/database/payout_release_controls.test.sql
 supabase test db supabase/tests/database/mock_payment_checkout.test.sql
 ```
 
-Then confirm GitHub Actions is green before marking Ticket 7E CI-verified.
+Ticket 7E is now CI-verified; the commands above remain the local rerun path if the test needs to be rechecked during future changes.
 
 ### GitHub Actions mock payment checkout test failure â€” 2026-07-12
 
@@ -1649,3 +1648,44 @@ supabase test db supabase/tests/database/mock_payment_checkout.test.sql
 ```
 
 Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
+### Ticket 7E CI verification â€” 2026-07-12
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Fix Ticket 7E mock checkout event tests
+- **Run status:** Success
+- **Passed test file:** `mock_payment_checkout.test.sql`
+- **Status:** Ticket 7E is CI-verified.
+
+Ticket 7E implements mock/sandbox checkout only. It does **not** implement live payment provider integration, real payment webhooks, real card/EFT processing, real payout execution, or UI.
+
+## Ticket 8 â€” Signed and idempotent payment webhook handling
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_8_payment_webhooks_plan.md`
+
+### Scope
+
+Ticket 8 planning covers:
+
+- signed webhook verification
+- raw body verification requirements
+- `vendor_events` idempotency
+- duplicate webhook handling
+- out-of-order event handling
+- `payment_events` and `audit_events` writing
+- failed signature handling
+- no committed webhook secrets
+- mock/sandbox webhook tests
+- future live provider integration requirements
+- required pgTAP/database tests
+- definition of done
+
+### Next step
+
+Review and approve the Ticket 8 plan before any webhook route, migration, handler, adapter, provider secret, or UI work is implemented.
