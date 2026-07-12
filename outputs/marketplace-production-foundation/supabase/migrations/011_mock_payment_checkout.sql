@@ -205,11 +205,11 @@ begin
 
   select id
     into v_event_id
-  from public.payment_events
-  where provider_name = 'mock'
-    and idempotency_key = v_idempotency_key
-    and payment_id = p_payment_id
-    and event_type = 'checkout_created';
+  from public.payment_events pe
+  where pe.provider_name = 'mock'
+    and pe.idempotency_key = v_idempotency_key
+    and pe.payment_id = p_payment_id
+    and pe.event_type = 'checkout_created';
 
   if found then
     if v_payment.status = 'checkout_created'
@@ -366,7 +366,7 @@ create or replace function public.admin_record_mock_payment_outcome(
 returns uuid
 language plpgsql
 security definer
-set search_path = public, private, auth
+set search_path = public, private, auth, extensions
 as $$
 declare
   v_actor_id uuid := auth.uid();
@@ -458,13 +458,29 @@ begin
       'real_money_moved', false
     )::text, 'sha256'), 'hex');
 
-    v_vendor_event_id := private.record_vendor_event(
+    insert into public.vendor_events (
+      provider_name,
+      provider_event_id,
+      event_type,
+      related_reference,
+      payload_hash
+    ) values (
       'mock',
       v_provider_event_id,
       v_event_type,
       coalesce(v_payment.provider_reference, p_payment_id::text),
       v_payload_hash
-    );
+    )
+    on conflict (provider_name, provider_event_id) do nothing
+    returning id into v_vendor_event_id;
+
+    if v_vendor_event_id is null then
+      select id
+        into v_vendor_event_id
+      from public.vendor_events
+      where provider_name = 'mock'
+        and provider_event_id = v_provider_event_id;
+    end if;
 
     insert into public.payment_events (
       payment_id,
@@ -558,13 +574,29 @@ begin
     'real_money_moved', false
   )::text, 'sha256'), 'hex');
 
-  v_vendor_event_id := private.record_vendor_event(
+  insert into public.vendor_events (
+    provider_name,
+    provider_event_id,
+    event_type,
+    related_reference,
+    payload_hash
+  ) values (
     'mock',
     v_provider_event_id,
     v_event_type,
     coalesce(v_payment.provider_reference, p_payment_id::text),
     v_payload_hash
-  );
+  )
+  on conflict (provider_name, provider_event_id) do nothing
+  returning id into v_vendor_event_id;
+
+  if v_vendor_event_id is null then
+    select id
+      into v_vendor_event_id
+    from public.vendor_events
+    where provider_name = 'mock'
+      and provider_event_id = v_provider_event_id;
+  end if;
 
   perform set_config('lekkadeall.allow_trusted_payment_update', 'on', true);
 

@@ -1592,3 +1592,60 @@ supabase test db supabase/tests/database/mock_payment_checkout.test.sql
 ```
 
 Then confirm GitHub Actions is green before marking Ticket 7E CI-verified.
+
+### GitHub Actions mock payment checkout test failure â€” 2026-07-12
+
+#### Failure summary
+
+GitHub Actions reached `Run mock payment checkout pgTAP tests` and `mock_payment_checkout.test.sql` failed 21/50 assertions.
+
+Failed assertion ranges reported:
+
+- tests 1-6: checkout creation/idempotency/event assertions
+- tests 18-32: mock paid/failed outcome/event assertions
+
+Visible failures included missing mock failed `vendor_events` and `audit_events` rows:
+
+```text
+mock failed outcome writes vendor event
+have: 0
+want: 1
+
+mock failed outcome writes audit event
+have: 0
+want: 1
+```
+
+#### Root cause
+
+This was a real Ticket 7E function issue, not a reason to weaken production RLS:
+
+- `customer_create_mock_checkout_session(...)` is a `RETURNS TABLE` function with an output column named `provider_name`. One internal `payment_events` lookup referenced `provider_name` without a table alias, which can be ambiguous in PL/pgSQL and throw before the checkout update and event inserts.
+- `admin_record_mock_payment_outcome(...)` used `digest(...)` for mock payload hashes while its explicit `SECURITY DEFINER` search path did not include the Supabase `extensions` schema. In CI this can prevent `pgcrypto.digest` from resolving before `vendor_events`, `payment_events`, and `audit_events` are written.
+- The mock outcome function also depended on the separate private vendor-event helper. The implementation now writes the idempotent `vendor_events` row directly inside the same trusted admin/server function to avoid nested helper EXECUTE-permission edge cases.
+
+The test-only ledger count helpers were already `SECURITY DEFINER`, so this was not treated as a frontend role-read issue.
+
+#### Fix applied
+
+- Qualified the checkout idempotency lookup with a `payment_events` table alias.
+- Added `extensions` to the explicit safe `search_path` for `admin_record_mock_payment_outcome(...)`.
+- Changed `admin_record_mock_payment_outcome(...)` to insert/select the mock `vendor_events` row idempotently inside the trusted function.
+- Kept frontend access to `payment_events`, `vendor_events`, and `audit_events` locked down.
+- Kept append-only protections unchanged.
+- Kept Ticket 1/2/5/6/7A/7B/7C/7D protections unchanged.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/011_mock_payment_checkout.sql`
+- `hardening_progress.md`
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.
