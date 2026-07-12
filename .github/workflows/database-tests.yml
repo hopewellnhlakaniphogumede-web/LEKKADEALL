@@ -62,6 +62,9 @@ jobs:
       - name: Run cash payment policy pgTAP tests
         run: supabase test db supabase/tests/database/cash_payment_policy.test.sql
 
+      - name: Run payout release controls pgTAP tests
+        run: supabase test db supabase/tests/database/payout_release_controls.test.sql
+
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true

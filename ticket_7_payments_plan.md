@@ -13,7 +13,8 @@ Status note as of 12 July 2026:
 - Ticket 7A now constrains payment status and adds `payment_events`.
 - Ticket 7B now adds `refund_requests` and append-only `refund_events`.
 - Ticket 7C now disables cash/off-platform cash for MVP at the database layer.
-- Real hosted checkout, real provider refund execution, payout release, signed webhooks, and reconciliation are still not implemented.
+- Ticket 7D now adds internal/manual-sandbox payout release controls and blocker checks.
+- Real hosted checkout, real provider refund execution, real provider payout execution/reconciliation, signed webhooks, and reconciliation are still not implemented.
 
 Original starting point before Ticket 7A/7B:
 
@@ -171,6 +172,8 @@ Rules:
 
 ## 7. Payout release / freeze rules
 
+Implementation status as of 12 July 2026: Ticket 7D adds internal/manual-sandbox release eligibility, pause/resume, blocker checks, audit/payment ledger events, and manual/sandbox payout-release recording. It does not execute real provider payouts.
+
 Payout release must be server/admin controlled and dispute-aware.
 
 Recommended MVP release rules:
@@ -191,6 +194,13 @@ Every release/freeze/unfreeze action must write:
 
 - `payment_events`
 - `audit_events`
+
+Remaining future work:
+
+- integrate real provider payout execution only after credentials are available
+- verify signed payout webhooks
+- reconcile against provider payout status
+- connect the full dispute-opening workflow so dispute creation and release pause are atomic
 
 ## 8. Dispute-aware release blocking
 
@@ -247,7 +257,7 @@ Add pgTAP tests covering:
 - Payout release is blocked before booking completion.
 - Payout release is blocked while release is paused or dispute is open.
 - Payout release is blocked if provider is suspended/unapproved.
-- Payout release writes payment ledger and audit event.
+- Manual/sandbox payout release recording writes payment ledger and audit event.
 - Cash bookings do not pretend to be platform-protected online payments.
 - Ticket 1, 2, 5, and 6 smoke protections remain intact.
 

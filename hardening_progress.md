@@ -1330,30 +1330,151 @@ Ticket 7C disables cash for MVP and does **not** implement cash confirmation, ca
 
 ## Ticket 7D — Payout release, payout freeze, and dispute-aware release blocking
 
-### Planning status
+### Issue fixed
 
-Prepared only; not implemented.
+Internal/manual-sandbox payout release control now has a trusted database foundation.
+
+Customers and providers cannot mark funds eligible, paused, resumed, or released. Release state changes are trusted admin/server controlled, ledgered in `payment_events`, audited in `audit_events`, and blocked when payment, booking, refund, dispute, provider, or cash-policy conditions are unsafe.
 
 ### Plan file
 
 - `ticket_7d_payout_release_plan.md`
 
-### Scope
+### Files changed
 
-Ticket 7D planning covers:
+- `outputs/marketplace-production-foundation/supabase/migrations/010_payout_release_controls.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `ticket_7_payments_plan.md`
+- `hardening_progress.md`
 
-- payout release eligibility rules
-- payout freeze/pause rules
-- dispute-aware release blocking
-- refund-aware release blocking
-- provider eligibility checks before release
-- trusted server/admin release functions
-- append-only payment ledger and audit requirements
-- idempotency and future provider-payout abstraction
-- RLS and privilege model
-- required pgTAP tests
-- definition of done
+### Database changes
 
-### Next step
+- Added release-control fields to `payments`:
+  - `release_paused_at`
+  - `release_paused_by`
+  - `release_pause_reason`
+  - `release_hold_until`
+  - `release_eligible_at`
+  - `release_provider_reference`
+  - `release_idempotency_key`
+- Extended `payment_events.event_type` to include:
+  - `release_paused`
+  - `release_resumed`
+  - `release_eligible`
+  - `release_cancelled`
+  - `payout_release_recorded`
+  - `payout_release_failed`
+  - `payout_reconciliation_checked`
+- Added release blocker logic for:
+  - unpaid payments
+  - incomplete bookings
+  - fully refunded payments
+  - active refund requests
+  - active disputes
+  - paused releases
+  - suspended/inactive providers
+  - unapproved providers
+  - unverified providers
+  - cash/off-platform payment methods
+  - zero or negative releasable amounts
 
-Review and approve the Ticket 7D plan before any migration, function, test, webhook, provider-payout, or UI work is implemented.
+### Trusted functions added
+
+- `admin_pause_payment_release(payment_id, reason, idempotency_key)`
+- `admin_resume_payment_release(payment_id, reason, idempotency_key)`
+- `admin_mark_release_eligible(payment_id, reason, idempotency_key)`
+- `admin_record_payout_release(payment_id, provider_reference, amount_minor, reason, idempotency_key)`
+
+Each function:
+
+- is `SECURITY DEFINER`
+- sets an explicit `search_path`
+- verifies platform-admin/trusted-server authority
+- requires a non-empty reason
+- requires an idempotency key
+- locks the payment row
+- checks release blockers where applicable
+- writes `payment_events`
+- writes `audit_events`
+- remains idempotency-safe
+
+`admin_record_payout_release(...)` is manual/sandbox internal state recording only. It does **not** call a live payout provider and records metadata that real money did not move.
+
+### Tests added
+
+`outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql` has 37 pgTAP assertions covering:
+
+- customer cannot mark release as eligible
+- provider cannot mark release as eligible
+- customer cannot mark payment released
+- provider cannot mark payment released
+- admin/server cannot release unpaid payment
+- admin/server cannot release incomplete booking
+- admin/server cannot release fully refunded payment
+- admin/server cannot release while refund is requested
+- admin/server cannot release while refund is under review
+- admin/server cannot release while refund is approved
+- admin/server cannot release while refund is processing
+- admin/server cannot release while dispute is open
+- admin/server cannot release when provider is suspended
+- admin/server cannot release when provider approval is revoked
+- admin/server can pause release with a non-empty reason
+- blank pause, resume, and release reasons are rejected
+- admin/server can resume release only after blockers are cleared
+- release pause writes `payment_events`
+- release pause writes `audit_events`
+- release eligibility writes `payment_events`
+- payout release recording writes `payment_events`
+- payout release recording writes `audit_events`
+- duplicate idempotency key does not duplicate events
+- `payment_events` remain append-only
+- `audit_events` remain append-only
+- cash/off-platform payment cannot be released
+- Ticket 1 role protections remain intact
+- Ticket 2 baseline RLS protections remain intact
+- Ticket 5 address privacy remains intact
+- Ticket 6 marketplace state machine remains intact
+- Ticket 7A payment ledger protections remain intact
+- Ticket 7B refund protections remain intact
+- Ticket 7C cash-disabled protections remain intact
+
+### CI update
+
+The `Supabase database tests` workflow now runs `payout_release_controls.test.sql` after `cash_payment_policy.test.sql`.
+
+### Tests to run
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the required database tooling available.
+
+From `outputs/marketplace-production-foundation`, rerun:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
+supabase test db supabase/tests/database/payout_release_controls.test.sql
+```
+
+Then confirm GitHub Actions is green.
+
+### Remaining non-goals / risks
+
+Ticket 7D deliberately does not implement:
+
+- real provider bank payouts
+- live payment-provider payout calls
+- payout webhooks
+- payout reconciliation with a real vendor
+- cash payout release
+- UI
+
+Opening a dispute still needs the later Ticket 10 dispute workflow to atomically create the dispute and pause release in one user-facing operation. Ticket 7D blocks release when an active dispute already exists and provides trusted pause/resume/release controls.

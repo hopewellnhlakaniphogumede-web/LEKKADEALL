@@ -6,11 +6,23 @@ Plan the secure payout-release layer for LEKKADEALL without implementing it yet.
 
 Ticket 7D must make provider payout release server/admin controlled, dispute-aware, refund-aware, auditable, and idempotent. It must not allow customers, providers, or frontend clients to mark funds released.
 
-## Planning-only status
+## Implementation status
 
-This document is planning-only.
+Implementation requested and started on 12 July 2026.
 
-Do not create migrations, database functions, tests, webhook handlers, provider-payout adapters, or UI for Ticket 7D until the implementation ticket is explicitly requested.
+Implemented artifacts:
+
+- `outputs/marketplace-production-foundation/supabase/migrations/010_payout_release_controls.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql`
+
+Still not implemented:
+
+- real provider bank payouts
+- live payment-provider calls
+- payout webhooks
+- real vendor payout reconciliation
+- cash payout release
+- UI
 
 ## Current starting point
 
@@ -23,16 +35,22 @@ Already implemented before Ticket 7D:
 - Ticket 7C disabled cash/off-platform cash for MVP.
 - `payments.release_paused` and `payments.released_at` already exist from the initial schema.
 
-Still missing:
+Implemented in the Ticket 7D foundation:
 
 - release eligibility calculation
-- payout freeze/unfreeze rules
-- dispute-aware release blocking
-- refund-aware release blocking
-- trusted release/freeze functions
+- payout pause/resume rules
+- dispute-aware release blocking when an active dispute exists
+- refund-aware release blocking when an active refund exists
+- trusted release/pause/resume functions
+- payment event and audit event recording
+- idempotency-safe manual/sandbox payout-release recording
+
+Still missing for production money movement:
+
 - real provider payout execution
 - payout reconciliation
 - payout webhook handling
+- atomic user-facing dispute creation plus release pause integration
 
 ## 1. MVP payout-release policy
 
@@ -283,7 +301,7 @@ Ticket 7D implementation tests should prove:
 
 ## 13. Definition of done
 
-Ticket 7D may be considered implementation-ready when:
+Ticket 7D implementation may be considered ready for closeout when:
 
 - release eligibility rules are approved
 - dispute statuses that block release are confirmed
@@ -293,7 +311,7 @@ Ticket 7D may be considered implementation-ready when:
 - idempotency strategy is defined
 - audit and payment-ledger events are defined
 - real-provider payout execution is explicitly separated from manual/sandbox state recording
-- pgTAP tests are written before or alongside migration implementation
+- pgTAP tests are written and wired into CI
 - all prior security tests remain green
 
 Ticket 7D may be marked complete only after implementation tests pass locally or in CI.
