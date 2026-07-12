@@ -6,11 +6,16 @@ Plan the hosted checkout contract and mock payment adapter for LEKKADEALL withou
 
 Ticket 7E should create a safe path from booking payment intent to hosted checkout state and deterministic sandbox outcomes while preserving the existing payment ledger, refund ledger, cash-disabled policy, and payout-release controls.
 
-## Planning-only status
+## Implementation status
 
-This document is planning-only.
+Implemented locally on 12 July 2026; awaiting local/CI pgTAP verification.
 
-Do not create migrations, database functions, app routes, adapters, webhook handlers, tests, provider credentials, or UI for Ticket 7E until the implementation ticket is explicitly requested.
+Implementation files:
+
+- `outputs/marketplace-production-foundation/supabase/migrations/011_mock_payment_checkout.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/mock_payment_checkout.test.sql`
+
+Ticket 7E now creates the database-side mock/sandbox checkout contract and deterministic mock paid/failed outcome recorder. It still does not create app routes, live payment adapters, real signed webhook handlers, provider credentials, or UI.
 
 ## Current starting point
 
@@ -25,10 +30,6 @@ Already implemented:
 
 Still missing:
 
-- hosted checkout session creation
-- mock checkout URL/reference generation
-- sandbox paid/failed outcome simulation
-- payment-provider configuration validation
 - signed/idempotent webhook processing
 - real provider reconciliation
 - UI that opens hosted checkout

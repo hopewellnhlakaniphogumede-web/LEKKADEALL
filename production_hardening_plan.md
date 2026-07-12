@@ -29,7 +29,7 @@ The highest priority is to harden the database, RLS model, server-side state tra
    `006_marketplace_state_machine.sql` adds transactional database functions for draft creation, publication, cancellation, provider bid submission/withdrawal, bid acceptance, booking creation, in-progress marking, and two-party completion confirmation after `in_progress`. Remaining launch work: run pgTAP locally/CI, wire the production app to these functions, and complete payment confirmation, cancellation after booking, payout, refund, dispute, expiry-job, and webhook transitions.
 
 6. **Payment, refund, cash, and webhook handling are still not production-complete.**  
-   Ticket 7A constrains payment status values, separates `release_status`, adds an append-only `payment_events` ledger, and adds an audited internal/admin payment-event function. Ticket 7B adds refund requests, append-only `refund_events`, and trusted admin/manual-sandbox refund outcome recording. Ticket 7C explicitly disables cash/off-platform cash for MVP so the app does not misrepresent cash as payment-protected. Ticket 7D adds internal/manual-sandbox payout release controls, release pause/resume, blocker checks, and audit/payment-ledger events. Card/bank credentials are still not stored in the schema, which is good. Remaining production blockers: hosted-checkout adapter, signed webhook route, real provider idempotency/reconciliation, real refund execution, real provider payout execution/reconciliation, and the full dispute workflow.
+   Ticket 7A constrains payment status values, separates `release_status`, adds an append-only `payment_events` ledger, and adds an audited internal/admin payment-event function. Ticket 7B adds refund requests, append-only `refund_events`, and trusted admin/manual-sandbox refund outcome recording. Ticket 7C explicitly disables cash/off-platform cash for MVP so the app does not misrepresent cash as payment-protected. Ticket 7D adds internal/manual-sandbox payout release controls, release pause/resume, blocker checks, and audit/payment-ledger events. Ticket 7E adds a mock/sandbox hosted-checkout contract and mock paid/failed outcome recorder with production fail-closed validation for mock mode. Card/bank credentials are still not stored in the schema, which is good. Remaining production blockers: real hosted-checkout provider integration, signed webhook route, real provider idempotency/reconciliation, real refund execution, real provider payout execution/reconciliation, and the full dispute workflow.
 
 7. **Disputes and evidence are not safely private or atomic.**  
    Opening a dispute does not pause release atomically. Evidence insertion only checks `uploaded_by`, not whether the uploader is a booking party.
@@ -46,7 +46,7 @@ The highest priority is to harden the database, RLS model, server-side state tra
 ## High-risk blockers
 
 - Ticket 6 removes broad direct `service_requests` and `bids` workflow mutation for the core request/bid/booking path, but the production app still needs to call the new trusted functions instead of the static prototype/localStorage flow.
-- Ticket 7A constrains `payments.status` to safe MVP payment-status values and updates the TypeScript `PaymentStatus` contract. Ticket 7B adds refund request and refund event ledger foundations. Ticket 7C disables cash/off-platform cash for MVP. Ticket 7D adds internal/manual-sandbox payout release controls. Live provider confirmation, real refund execution, real provider payout execution/reconciliation, and webhooks are still not implemented.
+- Ticket 7A constrains `payments.status` to safe MVP payment-status values and updates the TypeScript `PaymentStatus` contract. Ticket 7B adds refund request and refund event ledger foundations. Ticket 7C disables cash/off-platform cash for MVP. Ticket 7D adds internal/manual-sandbox payout release controls. Ticket 7E adds mock/sandbox checkout and mock outcome recording only. Live provider confirmation, real refund execution, real provider payout execution/reconciliation, and webhooks are still not implemented.
 - Refund execution is manual/sandbox state recording only; it must not be represented as proof that a real payment provider moved money.
 - Ticket 5 adds a dedicated private address table, audited reveal/admin access path, and conservative free-text address detection; encryption/decryption key management, retention rules, controlled location lists, and application integration still need production design.
 - Reviews can target an unrelated `subject_id` as long as the reviewer participated in a completed booking.
@@ -207,6 +207,8 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 
 **Status update — 12 July 2026:** Ticket 7D implemented the internal/manual-sandbox payout release controls foundation. `010_payout_release_controls.sql` adds release-control fields, extends payment event types, adds blocker logic for unpaid payments, incomplete bookings, full refunds, active refunds, active disputes, paused releases, unsafe providers, and cash/off-platform methods, and adds trusted admin/server functions for pause, resume, eligibility, and manual/sandbox payout-release recording. `payout_release_controls.test.sql` covers 37 assertions. It deliberately does not execute real provider bank payouts, call a live payment provider, implement payout webhooks, implement real payout reconciliation, implement cash payout release, or build UI.
 
+**Status update — 12 July 2026:** Ticket 7E implemented the mock/sandbox hosted-checkout contract. `011_mock_payment_checkout.sql` adds safe checkout reference fields, production fail-closed provider-mode validation, `customer_create_mock_checkout_session(...)`, and `admin_record_mock_payment_outcome(...)`. `mock_payment_checkout.test.sql` covers 50 assertions for checkout authorization, idempotency, mock paid/failed outcomes, no credential storage, append-only payment/vendor/audit ledgers, and Ticket 1/2/5/6/7A/7B/7C/7D smoke protections. It deliberately does not integrate a live provider, process real cards/EFTs/bank credentials, implement real signed webhooks, implement UI, or permit mock provider mode in production.
+
 **Files likely affected:**
 - Supabase migrations
 - `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
@@ -227,6 +229,9 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 - Cash/off-platform bookings are blocked for MVP and cannot be marked as payment-protected.
 - Payout release cannot occur while a dispute is open or release is paused.
 - Card/bank credential fields do not exist in public tables.
+- Mock checkout can be created only by the booking customer for their own pending payment.
+- Mock paid/failed outcome recording is admin/server-only, idempotent, audited, and marks `real_money_moved = false`.
+- Production + mock payment provider mode fails closed.
 
 **Implemented in Ticket 7A:**
 - constrained MVP payment-status values on `payments.status`
@@ -265,9 +270,18 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 - idempotency protection for trusted release actions
 - `payout_release_controls.test.sql`
 
+**Implemented in Ticket 7E:**
+- mock/sandbox checkout reference fields on `payments`
+- `validate_payment_provider_mode(...)` fail-closed guard for production + mock
+- `customer_create_mock_checkout_session(...)`
+- `admin_record_mock_payment_outcome(...)`
+- mock paid/failed/out-of-order payment event types
+- `vendor_events`, `payment_events`, and `audit_events` recording for mock outcomes
+- no card/CVV/bank credential storage
+- `mock_payment_checkout.test.sql`
+
 **Remaining follow-up tasks:**
-- Integrate a hosted payment provider through the vendor-neutral contract.
-- Add sandbox/mock checkout adapter behaviour.
+- Integrate a real hosted payment provider through the vendor-neutral contract.
 - Add signed/idempotent webhook routes.
 - Add reconciliation from provider lookup.
 - Revisit cash only if the business later chooses to allow explicitly off-platform, not-payment-protected cash jobs.

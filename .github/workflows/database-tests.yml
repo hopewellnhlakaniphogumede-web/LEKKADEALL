@@ -65,6 +65,9 @@ jobs:
       - name: Run payout release controls pgTAP tests
         run: supabase test db supabase/tests/database/payout_release_controls.test.sql
 
+      - name: Run mock payment checkout pgTAP tests
+        run: supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true

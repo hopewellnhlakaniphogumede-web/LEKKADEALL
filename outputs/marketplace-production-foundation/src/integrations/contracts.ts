@@ -1,5 +1,7 @@
 export type Money = { amountMinor: number; currency: 'ZAR' };
 export type ProviderName = 'mock' | 'tradesafe' | 'netcash' | 'verifynow' | 'iidentifii' | 'clickatell';
+export type PaymentProviderMode = 'mock' | 'sandbox' | 'live';
+export type MockPaymentOutcomeStatus = 'paid' | 'failed';
 
 export type PaymentStatus =
   | 'pending'
@@ -35,6 +37,32 @@ export interface CreateProtectedPaymentInput {
   returnUrl: string;
   cancelUrl: string;
   description: string;
+}
+
+export interface HostedCheckoutSessionInput {
+  paymentId: string;
+  idempotencyKey: string;
+  returnUrl: string;
+  cancelUrl: string;
+}
+
+export interface HostedCheckoutSession {
+  paymentId: string;
+  provider: Extract<ProviderName, 'mock'>;
+  providerReference: string;
+  checkoutUrl: string;
+  status: Extract<PaymentStatus, 'checkout_created'>;
+  expiresAt: string;
+  realMoneyMoved: false;
+}
+
+export interface MockPaymentOutcomeInput {
+  paymentId: string;
+  outcomeStatus: MockPaymentOutcomeStatus;
+  providerEventId: string;
+  idempotencyKey: string;
+  reason: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ProtectedPayment {

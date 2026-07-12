@@ -85,6 +85,8 @@ Legend:
 - `refund_requests`: booking-party read only; all creation/decision/outcome changes through trusted functions.
 - `refund_events`: no frontend direct read/write access; append-only through trusted refund functions.
 - `payments.payment_method`: cash/off-platform cash is disabled for MVP; allowed values are online/sandbox markers only.
+- `payments.checkout_url`, `payments.checkout_expires_at`, and `payments.checkout_idempotency_key`: safe mock/sandbox hosted-checkout references only; frontend users cannot mutate them directly.
+- Mock checkout/outcome state changes: only through `customer_create_mock_checkout_session(...)` for the booking customer or `admin_record_mock_payment_outcome(...)` for platform-admin/trusted-server contexts.
 
 ## Private exact-address model after Ticket 5
 
@@ -177,11 +179,25 @@ Legend:
 - Every trusted release action writes `payment_events` and `audit_events`.
 - `admin_record_payout_release(...)` records manual/sandbox internal release state only and includes metadata that no live provider payout was executed.
 
+## Mock hosted checkout after Ticket 7E
+
+- Ticket 7E implements a mock/sandbox hosted-checkout contract only. It does not process real cards, EFTs, instant EFTs, bank logins, wallet payments, signed webhooks, or live provider calls.
+- `payments.checkout_url`, `payments.checkout_expires_at`, and `payments.checkout_idempotency_key` are server-controlled safe checkout reference fields.
+- `customer_create_mock_checkout_session(...)` can be executed only by the booking customer for their own pending payment.
+- Providers, unrelated users, and normal users cannot create checkout sessions for customer payments.
+- Checkout creation rejects paid, refunded, failed, cancelled, expired, cash, or off-platform payments.
+- Checkout creation sets `payments.status = checkout_created`, assigns deterministic `mock_checkout_...` references, writes `payment_events`, and writes `audit_events`.
+- `admin_record_mock_payment_outcome(...)` is admin/trusted-server only and records mock `paid` or `failed` outcomes with `real_money_moved = false`.
+- Mock paid/failed outcomes write `vendor_events`, `payment_events`, and `audit_events`, and are idempotent by provider event ID or idempotency key.
+- Failed-after-paid is safely rejected/ignored without regressing payment status; paid-after-refunded is rejected.
+- `validate_payment_provider_mode(...)` fails closed for production + `mock`.
+- Mock mode remains local/CI/sandbox only until a real hosted-checkout provider and signed webhook handler are implemented.
+
 ## Remaining RLS risks after Tickets 2-6
 
 - Public-description detection is conservative but not perfect. It blocks common street-number, unit/room, GPS, phone, and house/stand/erf patterns, but application UX and moderation should still warn users not to place exact addresses in public text.
 - Booking status semantics are now aligned for the core marketplace flow (`scheduled`, `in_progress`, `completed` remain revealable), but future payment/refund/dispute tickets must confirm the final revealable status list.
 - `consents` and `data_subject_requests` still have broad owner `FOR ALL` style policies from the initial schema. They require separate compliance/workflow tickets.
 - Ticket 6 hardens the database state machine, but the production application still needs to be wired to these functions; until then the static prototype remains a demo.
-- Ticket 7A hardens payment status constraints and the payment event ledger. Ticket 7B adds refund request and refund event ledger foundations. Ticket 7C disables cash for MVP. Ticket 7D adds internal/manual-sandbox payout release controls and blocker checks. Real hosted checkout funding, real provider refund execution, real provider payout execution, reconciliation, signed vendor webhook transitions, and the full dispute workflow remain future tickets.
+- Ticket 7A hardens payment status constraints and the payment event ledger. Ticket 7B adds refund request and refund event ledger foundations. Ticket 7C disables cash for MVP. Ticket 7D adds internal/manual-sandbox payout release controls and blocker checks. Ticket 7E adds mock/sandbox hosted checkout and mock payment outcome recording only. Real hosted checkout funding, real provider refund execution, real provider payout execution, reconciliation, signed vendor webhook transitions, and the full dispute workflow remain future tickets.
 - Admin access is still intentionally server-mediated rather than broad direct admin RLS. A later staff/MFA ticket should formalise admin roles outside normal user-editable profile data.

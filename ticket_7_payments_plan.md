@@ -14,7 +14,8 @@ Status note as of 12 July 2026:
 - Ticket 7B now adds `refund_requests` and append-only `refund_events`.
 - Ticket 7C now disables cash/off-platform cash for MVP at the database layer.
 - Ticket 7D now adds internal/manual-sandbox payout release controls and blocker checks.
-- Real hosted checkout, real provider refund execution, real provider payout execution/reconciliation, signed webhooks, and reconciliation are still not implemented.
+- Ticket 7E now adds the mock/sandbox hosted-checkout contract and deterministic mock paid/failed outcome recording.
+- Real hosted checkout provider integration, real provider refund execution, real provider payout execution/reconciliation, signed webhooks, and reconciliation are still not implemented.
 
 Original starting point before Ticket 7A/7B:
 
@@ -77,6 +78,8 @@ Rules:
 
 ## 3. Hosted payment provider abstraction
 
+Implementation status as of 12 July 2026: Ticket 7E adds the database-side hosted-checkout contract for mock/sandbox only through `customer_create_mock_checkout_session(...)`. This creates a safe mock checkout URL/reference, sets `payments.status = checkout_created`, writes `payment_events`, and writes `audit_events`. It does not call a live hosted payment provider.
+
 Create a vendor-neutral server-side payment contract before integrating any real provider.
 
 Core operations:
@@ -95,7 +98,19 @@ Important:
 
 ## 4. Mock payment adapter
 
-Add a mock/sandbox adapter for CI and local development.
+Implementation status as of 12 July 2026: Ticket 7E adds deterministic database-level mock checkout and mock outcome functions for CI/local/sandbox:
+
+- `validate_payment_provider_mode(...)`
+- `customer_create_mock_checkout_session(...)`
+- `admin_record_mock_payment_outcome(...)`
+
+The mock adapter records safe payment references only, writes `vendor_events`, `payment_events`, and `audit_events`, records `real_money_moved = false`, rejects paid-after-refunded, and does not regress paid payments if a later failed event arrives.
+
+Mock mode must be explicitly marked non-production. Production + `mock` fails closed through the provider-mode validation path.
+
+Future server adapter work should call these database functions in local/CI/sandbox, then swap to a real hosted-checkout provider only after credentials, webhook secrets, and reconciliation are available.
+
+The mock/sandbox adapter supports deterministic test scenarios:
 
 It should support deterministic test scenarios:
 
@@ -108,8 +123,6 @@ It should support deterministic test scenarios:
 - full refund
 - release paused by dispute
 - release approved after completion/dispute resolution
-
-Mock mode must be explicitly marked non-production.
 
 ## 5. Cash payment policy
 

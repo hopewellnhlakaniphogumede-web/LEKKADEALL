@@ -1535,30 +1535,60 @@ Opening a dispute still needs the later Ticket 10 dispute workflow to atomically
 
 ## Ticket 7E — Mock payment adapter and hosted checkout contract
 
-### Planning status
+### Implementation status
 
-Prepared only; not implemented.
+Implemented locally; awaiting GitHub Actions/local pgTAP verification.
 
-### Plan file
+### Files changed
 
 - `ticket_7e_mock_payment_adapter_plan.md`
+- `outputs/marketplace-production-foundation/supabase/migrations/011_mock_payment_checkout.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/mock_payment_checkout.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `ticket_7_payments_plan.md`
+- `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
 
-### Scope
+### What was implemented
 
-Ticket 7E planning covers:
+- Added safe mock/sandbox hosted checkout fields on `payments`: `checkout_url`, `checkout_expires_at`, and `checkout_idempotency_key`.
+- Added `validate_payment_provider_mode(app_env, provider_mode, webhook_secret_present)` so production + `mock` fails closed.
+- Added `customer_create_mock_checkout_session(...)`, limited to the booking customer for their own pending payment. It rejects providers, unrelated users, terminal payment states, and cash/off-platform methods; sets `payments.status = checkout_created`; writes `payment_events` and `audit_events`; and is idempotent by checkout idempotency key.
+- Added `admin_record_mock_payment_outcome(...)`, limited to platform-admin/trusted-server authority with a non-empty reason. It records mock `paid`/`failed` outcomes, writes `vendor_events`, `payment_events`, and `audit_events`, records `real_money_moved = false`, rejects paid-after-refunded, and safely ignores/rejects failed-after-paid without regressing payment state.
+- Extended allowed `payment_events.event_type` values for mock outcomes: `mock_payment_paid`, `mock_payment_failed`, `mock_payment_duplicate_ignored`, and `mock_payment_out_of_order_rejected`.
+- Kept card numbers, CVV, bank-login credentials, raw payment credentials, and raw sensitive provider payloads out of the database.
 
-- hosted checkout abstraction
-- mock payment adapter
-- sandbox-only behaviour
-- production fail-closed rule when provider mode is `mock`
-- no card/bank credential storage
-- `checkout_created` transition into `payments.status`
-- mock paid/failed outcome recording
-- `payment_events`, `vendor_events`, and `audit_events` requirements
-- idempotency requirements
-- required pgTAP tests
-- definition of done
+### Tests added
 
-### Next step
+`outputs/marketplace-production-foundation/supabase/tests/database/mock_payment_checkout.test.sql` has 50 pgTAP assertions covering checkout authorization, idempotency, terminal-state rejection, cash/off-platform rejection, mock paid/failed outcomes, failed-after-paid safety, production mock-mode fail-closed validation, no credential storage, append-only ledgers, frontend-inaccessible vendor events, and Ticket 1/2/5/6/7A/7B/7C/7D smoke protections.
 
-Review and approve the Ticket 7E plan before any hosted-checkout contract, adapter, migration, test, webhook, or UI work is implemented.
+### CI update
+
+The `Supabase database tests` workflow now runs `mock_payment_checkout.test.sql` after `payout_release_controls.test.sql`.
+
+### Non-goals still not implemented
+
+Ticket 7E deliberately does not implement live payment provider integration, real cards/EFTs/instant EFTs/bank logins/wallet payments, real signed webhooks, real refund execution, real bank payouts, live provider payout API calls, UI, or production use of the mock adapter.
+
+### Tests to run
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the required database tooling available.
+
+From `outputs/marketplace-production-foundation`, rerun:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
+supabase test db supabase/tests/database/payout_release_controls.test.sql
+supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+```
+
+Then confirm GitHub Actions is green before marking Ticket 7E CI-verified.
