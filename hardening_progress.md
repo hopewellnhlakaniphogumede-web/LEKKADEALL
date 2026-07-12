@@ -1466,6 +1466,50 @@ supabase test db supabase/tests/database/payout_release_controls.test.sql
 
 Then confirm GitHub Actions is green.
 
+### GitHub Actions payout release controls test failure — 2026-07-12
+
+#### Failure summary
+
+GitHub Actions reached `Run payout release controls pgTAP tests` and crashed in `payout_release_controls.test.sql` before completing all assertions.
+
+Visible failure:
+
+```text
+ERROR: permission denied for table payment_events
+CONTEXT: SQL function "payment_event_count" statement 1
+```
+
+The planned count remained 37 assertions, but the test run stopped after 20 assertions.
+
+#### Root cause
+
+`payment_event_count(...)` was a temporary pgTAP helper function defined as a default invoker-rights SQL function. The test was still impersonating the authenticated admin profile when the helper tried to read `public.payment_events`.
+
+That authenticated role correctly has no direct `SELECT` privilege on `payment_events`, because Ticket 7A keeps the payment ledger inaccessible to frontend users. This was a test-helper execution-context issue, not a reason to weaken production RLS or grants.
+
+#### Fix applied
+
+- Kept production `payment_events` permissions unchanged.
+- Kept `payment_events` append-only protection unchanged.
+- Updated only `payout_release_controls.test.sql`.
+- Changed the raw ledger-count helpers `payment_event_count(...)` and `audit_count(...)` to test-only `SECURITY DEFINER` helpers with explicit `search_path = public, pg_temp`.
+- This lets internal pgTAP ledger assertions run under the test owner while customer/provider/admin impersonation remains intact for permission checks.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql`
+- `hardening_progress.md`
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/payout_release_controls.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
 ### Remaining non-goals / risks
 
 Ticket 7D deliberately does not implement:

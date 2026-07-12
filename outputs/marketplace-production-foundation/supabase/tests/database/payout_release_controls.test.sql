@@ -299,6 +299,8 @@ $$;
 create function pg_temp.payment_event_count(p_provider_name text, p_idempotency_key text)
 returns bigint
 language sql
+security definer
+set search_path = public, pg_temp
 as $$
   select count(*)
   from public.payment_events
@@ -309,6 +311,8 @@ $$;
 create function pg_temp.audit_count(p_action text, p_object_id text)
 returns bigint
 language sql
+security definer
+set search_path = public, pg_temp
 as $$
   select count(*)
   from public.audit_events
