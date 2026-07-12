@@ -1510,6 +1510,16 @@ supabase test db supabase/tests/database/payout_release_controls.test.sql
 
 Then rerun the full `Supabase database tests` GitHub Actions workflow.
 
+### Ticket 7D CI verification — 2026-07-12
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Fix payout release payment event test helper permissions
+- **Run status:** Success
+- **Passed test file:** `payout_release_controls.test.sql`
+- **Status:** Ticket 7D is CI-verified.
+
+Ticket 7D implements internal/manual/sandbox payout release controls only. It does **not** implement real bank payouts, live provider payout API calls, payout webhooks, UI, or real payout reconciliation.
+
 ### Remaining non-goals / risks
 
 Ticket 7D deliberately does not implement:
@@ -1522,3 +1532,33 @@ Ticket 7D deliberately does not implement:
 - UI
 
 Opening a dispute still needs the later Ticket 10 dispute workflow to atomically create the dispute and pause release in one user-facing operation. Ticket 7D blocks release when an active dispute already exists and provides trusted pause/resume/release controls.
+
+## Ticket 7E — Mock payment adapter and hosted checkout contract
+
+### Planning status
+
+Prepared only; not implemented.
+
+### Plan file
+
+- `ticket_7e_mock_payment_adapter_plan.md`
+
+### Scope
+
+Ticket 7E planning covers:
+
+- hosted checkout abstraction
+- mock payment adapter
+- sandbox-only behaviour
+- production fail-closed rule when provider mode is `mock`
+- no card/bank credential storage
+- `checkout_created` transition into `payments.status`
+- mock paid/failed outcome recording
+- `payment_events`, `vendor_events`, and `audit_events` requirements
+- idempotency requirements
+- required pgTAP tests
+- definition of done
+
+### Next step
+
+Review and approve the Ticket 7E plan before any hosted-checkout contract, adapter, migration, test, webhook, or UI work is implemented.
