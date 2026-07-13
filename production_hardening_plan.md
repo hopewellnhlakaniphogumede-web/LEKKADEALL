@@ -211,6 +211,8 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 
 **Status update — 12 July 2026:** Ticket 8A implemented the mock/sandbox payment webhook database foundation. `012_mock_payment_webhook_processing.sql` adds `admin_process_verified_mock_payment_webhook(...)`, safe mock webhook event types, duplicate provider-event handling through `vendor_events`, out-of-order/manual-review payment ledger outcomes, and raw webhook metadata rejection. `payment_webhooks.test.sql` covers 48 assertions for mock paid/failed webhook processing, duplicate/different-hash handling, out-of-order status protection, paid-after-refunded manual review, append-only ledgers, frontend mutation denial, no raw webhook body storage, and Ticket 1/2/5/6/7A/7B/7C/7D/7E smoke protections. It deliberately does not implement live HTTP routes, Edge Functions, real webhook signature verification, real webhook secrets, live provider webhooks, real card/EFT processing, or UI.
 
+**Status update — 13 July 2026:** Ticket 8B implemented the mock/sandbox payment webhook Edge Function route with raw-body signature verification. `supabase/functions/payment-webhook/index.ts` reads the request body once as raw bytes, verifies a deterministic mock HMAC signature before JSON parsing, rejects stale timestamps, computes `payload_hash` from exact raw bytes, normalizes safe mock event fields, and calls `admin_process_verified_mock_payment_webhook(...)` only after verification succeeds. `index.test.ts` covers valid/invalid signatures, missing signatures, stale timestamps, raw-body verification, parsed/reserialized JSON rejection, exact payload hashing, safe metadata forwarding, runtime-only mock secret config, and production + mock fail-closed behavior. It deliberately does not implement live provider adapters, real webhook secrets, real card/EFT processing, real refund/payout webhooks, or UI.
+
 **Files likely affected:**
 - Supabase migrations
 - `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
@@ -293,9 +295,20 @@ Note: this plan was drafted before the current execution-ticket numbering. The c
 - `vendor_events`, `payment_events`, and `audit_events` recording for accepted mock webhook outcomes
 - `payment_webhooks.test.sql`
 
+**Implemented in Ticket 8B:**
+- `supabase/functions/payment-webhook/index.ts`
+- deterministic mock HMAC verification against exact raw request body bytes
+- `x-lekkadeall-mock-signature` and `x-lekkadeall-mock-timestamp` handling
+- configurable stale timestamp tolerance through `PAYMENT_WEBHOOK_TOLERANCE_SECONDS`
+- `sha256:<hex>` payload hash computed from exact raw bytes
+- safe mock webhook normalization before calling `admin_process_verified_mock_payment_webhook(...)`
+- no raw body, signature, secret, full provider payload, or payment credential forwarding
+- production + mock provider mode fail-closed route behavior
+- Deno application tests in `supabase/functions/payment-webhook/index.test.ts`
+
 **Remaining follow-up tasks:**
 - Integrate a real hosted payment provider through the vendor-neutral contract.
-- Add signed/idempotent HTTP webhook routes with raw-body signature verification.
+- Add live provider-specific signed/idempotent webhook adapters and routes with vendor-documented signature verification.
 - Add reconciliation from provider lookup.
 - Revisit cash only if the business later chooses to allow explicitly off-platform, not-payment-protected cash jobs.
 - Replace manual/sandbox refund outcome recording with real provider refund execution only after vendor credentials, signed webhooks, and reconciliation are ready.

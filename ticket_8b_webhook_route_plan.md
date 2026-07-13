@@ -1,19 +1,25 @@
-# Ticket 8B Planning Document — Application/Edge Function Webhook Route with Raw-Body Signature Verification
+# Ticket 8B Implementation Document — Mock/Sandbox Payment Webhook Route with Raw-Body Signature Verification
 
 ## Goal
 
-Plan the application/server route that receives payment-provider webhooks, verifies signatures against the exact raw HTTP body, normalizes safe mock/sandbox events, and only then calls the Ticket 8A trusted database function.
+Implement the application/server route that receives mock/sandbox payment-provider webhooks, verifies signatures against the exact raw HTTP body, normalizes safe mock events, and only then calls the Ticket 8A trusted database function.
 
 Ticket 8B must bridge the gap between:
 
 - Ticket 8A database-side mock/sandbox webhook processing, and
 - a future production payment provider webhook integration.
 
-## Planning-only status
+## Implementation status
 
-This document is planning-only.
+Implemented locally; awaiting GitHub Actions verification.
 
-Do not implement an Edge Function, server route, provider adapter, migration, production secret, UI, or live payment-provider integration in Ticket 8B until an explicit implementation ticket is requested.
+Ticket 8B now adds:
+
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.ts`
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.test.ts`
+- CI wiring for Deno route tests before the Supabase pgTAP suite
+
+This implementation remains mock/sandbox only. It does not add live provider adapters, production webhook secrets, real card/EFT processing, real refund/payout webhooks, or UI.
 
 ## Current starting point
 
@@ -276,11 +282,11 @@ Future production monitoring should alert on:
 - webhook processing latency or retries
 - reconciliation mismatches
 
-## Required tests
+## Implemented tests
 
-Ticket 8B should add application/server tests in addition to existing pgTAP tests.
+Ticket 8B adds Deno application/server tests in addition to the existing pgTAP tests.
 
-Required tests:
+Implemented tests:
 
 - valid mock webhook signature is accepted
 - invalid mock webhook signature is rejected
@@ -291,17 +297,17 @@ Required tests:
 - payload hash is computed from exact raw body bytes
 - valid paid webhook calls the database function exactly once
 - valid failed webhook calls the database function exactly once
-- duplicate provider event returns success without duplicate database mutation
 - invalid signature does not call `admin_process_verified_mock_payment_webhook(...)`
-- raw request body is not stored or logged
+- raw request body and signature/secret material are not forwarded to the database
 - webhook secret is read only from server runtime config
+- missing app environment fails closed
 - production + mock provider mode fails closed
-- frontend bundle does not include webhook secret names/values beyond harmless placeholders
-- existing pgTAP file `payment_webhooks.test.sql` remains green
+
+The existing pgTAP file `payment_webhooks.test.sql` remains the database-side idempotency, duplicate, out-of-order, and ledger protection test.
 
 ## Manual verification checklist
 
-Before Ticket 8B can be considered implemented:
+Before Ticket 8B can be considered CI-verified:
 
 - Confirm the route reads raw bytes before parsing JSON.
 - Confirm provider signature verification uses exact raw bytes.

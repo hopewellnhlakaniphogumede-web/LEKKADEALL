@@ -93,6 +93,31 @@ export interface PaymentWebhookEvent {
   rawPayloadHash: string;
 }
 
+export type MockPaymentWebhookEventType =
+  | 'mock.checkout.created'
+  | 'mock.payment.paid'
+  | 'mock.payment.failed'
+  | 'mock.payment.expired'
+  | 'mock.payment.cancelled';
+
+export interface VerifiedPaymentWebhookEnvelope {
+  provider: Extract<ProviderName, 'mock'>;
+  providerEventId: string;
+  providerReference: string;
+  eventType: MockPaymentWebhookEventType;
+  payloadHash: string;
+  idempotencyKey: string;
+  safeMetadata: Record<string, unknown>;
+}
+
+export interface PaymentWebhookRouteConfig {
+  appEnv: 'local' | 'development' | 'dev' | 'test' | 'ci' | 'sandbox' | 'production' | 'prod';
+  providerMode: PaymentProviderMode;
+  webhookToleranceSeconds: number;
+  // Secret values are server-runtime configuration only and must never be sent to clients.
+  webhookSecretPresent: boolean;
+}
+
 export interface PaymentGateway {
   createProtectedPayment(input: CreateProtectedPaymentInput): Promise<ProtectedPayment>;
   getPayment(providerReference: string): Promise<ProtectedPayment>;

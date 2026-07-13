@@ -2,19 +2,21 @@
 
 ## Goal
 
-Plan secure payment webhook handling for LEKKADEALL without implementing live webhook routes yet.
+Plan secure payment webhook handling for LEKKADEALL without implementing live provider routes yet.
 
 Ticket 8 should turn payment-provider callbacks into trusted, idempotent, auditable state transitions while preserving the protections from Tickets 1, 2, 5, 6, and 7A-7E.
 
 ## Current implementation status
 
-Ticket 8A has now implemented the database-side mock/sandbox webhook foundation only:
+Ticket 8A and Ticket 8B have now implemented the mock/sandbox webhook foundation:
 
 - `outputs/marketplace-production-foundation/supabase/migrations/012_mock_payment_webhook_processing.sql`
 - `admin_process_verified_mock_payment_webhook(...)`
 - `outputs/marketplace-production-foundation/supabase/tests/database/payment_webhooks.test.sql`
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.ts`
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.test.ts`
 
-This does not implement live webhook routes, Edge Functions, provider adapters, real signature verification, provider secrets, real card/EFT processing, or UI. Those remain future Ticket 8 work.
+This implements mock/sandbox raw-body signature verification and database-side mock processing only. It does not implement live provider adapters, real webhook secrets, real provider webhooks, real card/EFT processing, real refund/payout webhooks, reconciliation, or UI. Those remain future Ticket 8 work.
 
 ## Current starting point
 
@@ -28,18 +30,20 @@ Already implemented:
 - Mock/sandbox checkout and mock paid/failed outcome recording exist through trusted database functions.
 - Mock mode fails closed in production through `validate_payment_provider_mode(...)`.
 - Mock/sandbox database webhook processing exists for already signature-verified events through `admin_process_verified_mock_payment_webhook(...)`.
+- The mock/sandbox `payment-webhook` route verifies deterministic mock HMAC signatures against exact raw request body bytes before JSON parsing.
 - `payment_webhooks.test.sql` covers mock paid/failed processing, duplicate provider event IDs, different-payload-hash duplicates, out-of-order events, paid-after-refunded manual review, raw webhook metadata rejection, append-only ledgers, and Ticket 1/2/5/6/7A/7B/7C/7D/7E smoke protections.
+- `index.test.ts` covers mock route valid/invalid signatures, missing signatures, stale timestamps, raw-body mismatch, exact payload hashing, safe metadata forwarding, runtime-only mock secret config, and production + mock fail-closed behavior.
 
 Still missing:
 
-- real webhook HTTP endpoint
-- raw body signature verification
+- live provider webhook HTTP endpoints/adapters
+- live provider-specific raw body signature verification
 - provider-specific signature adapters
-- replay protection
+- live provider replay protection rules
 - live provider event parsing
 - webhook reconciliation against provider lookup APIs
 - safe production secret loading
-- application/server tests for raw-body signed webhook verification
+- application/server tests for live provider webhook adapters
 
 ## 1. Signed webhook verification
 

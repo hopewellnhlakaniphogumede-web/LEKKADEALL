@@ -1708,7 +1708,7 @@ CI-verified by the `Supabase database tests` GitHub Actions workflow after the T
 
 ### Issue addressed
 
-Ticket 8A adds trusted database-side processing for mock/sandbox payment webhook events after a future server route has already verified the webhook signature. It does not implement live webhook routes or real signature verification.
+Ticket 8A adds trusted database-side processing for mock/sandbox payment webhook events after a trusted server route has already verified the webhook signature. Ticket 8B now provides that mock/sandbox route. Ticket 8A itself does not implement live webhook routes or real provider signature verification.
 
 ### Files changed
 
@@ -1927,3 +1927,113 @@ supabase test db supabase/tests/database/payment_webhooks.test.sql
 ```
 
 Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
+## Ticket 8B — Mock/sandbox payment webhook route with raw-body signature verification
+
+### Implementation status
+
+Implemented locally; awaiting GitHub Actions verification.
+
+### Issue addressed
+
+Ticket 8B adds the application/Edge Function webhook route for mock/sandbox payment events. The route verifies a deterministic HMAC mock signature against the exact raw request body before JSON parsing and before calling the Ticket 8A database function.
+
+This keeps the system’s trust boundary clear:
+
+1. the HTTP route verifies raw-body signature and timestamp freshness;
+2. only verified mock events are normalized into safe internal fields;
+3. only safe metadata is sent to the database;
+4. `admin_process_verified_mock_payment_webhook(...)` remains responsible for transactional payment/vendor/payment-event/audit-event processing.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.ts`
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.test.ts`
+- `outputs/marketplace-production-foundation/src/integrations/contracts.ts`
+- `outputs/marketplace-production-foundation/.env.example`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `production_hardening_plan.md`
+- `ticket_8b_webhook_route_plan.md`
+- `hardening_progress.md`
+
+### Security behavior implemented
+
+- Reads the request body once as raw bytes.
+- Computes `payload_hash` from those exact raw bytes.
+- Verifies `x-lekkadeall-mock-signature` before parsing JSON.
+- Uses `x-lekkadeall-mock-timestamp` and `PAYMENT_WEBHOOK_TOLERANCE_SECONDS` for replay/staleness checks.
+- Rejects missing signatures, invalid signatures, stale timestamps, missing mock webhook secret config, unsupported methods, unsupported event types, and malformed verified payloads.
+- Parses JSON only after signature verification succeeds.
+- Normalizes only safe fields:
+  - `provider_event_id`
+  - `provider_reference`
+  - `event_type`
+  - `payload_hash`
+  - `idempotency_key`
+  - safe metadata
+- Calls `public.admin_process_verified_mock_payment_webhook(...)` through the server-side Supabase RPC path only after verification succeeds.
+- Does not forward raw body, webhook secret, signature header, full provider payload, card data, bank credential data, or payment credential data to the database.
+- Fails closed when `APP_ENV=production` and `PAYMENT_PROVIDER_MODE=mock`.
+
+### Tests added
+
+Added Deno application tests in:
+
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.test.ts`
+
+The tests cover:
+
+- valid mock signature is accepted
+- invalid mock signature is rejected
+- missing signature header is rejected
+- stale timestamp is rejected
+- exact raw body bytes are used for verification
+- parsed-then-reserialized JSON cannot bypass verification
+- `payload_hash` is computed from exact raw bytes
+- valid paid webhook calls the database function exactly once
+- valid failed webhook calls the database function exactly once
+- invalid signature does not call the database function
+- malformed JSON is not parsed before signature verification
+- raw body, payload-provided secrets, and signature material are not forwarded
+- webhook secret is read from server runtime config
+- missing runtime webhook secret fails closed
+- missing app environment fails closed
+- production + mock provider mode fails closed
+- unsupported HTTP method is rejected without a database call
+
+### CI wiring
+
+Updated `.github/workflows/database-tests.yml` to:
+
+- install Deno with `denoland/setup-deno@v2`
+- run `deno test supabase/functions/payment-webhook/index.test.ts`
+- then continue running the existing Supabase local stack and pgTAP database tests
+
+### How to run
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+deno test supabase/functions/payment-webhook/index.test.ts
+supabase db reset
+supabase test db supabase/tests/database/payment_webhooks.test.sql
+```
+
+For the full local security suite, run the commands listed in `TESTING.md`.
+
+### Tests not run locally
+
+I could not run the new Deno tests locally in this shell because Deno is not installed on PATH. The workflow installs Deno in GitHub Actions before running the route tests.
+
+I also did not rerun the Supabase pgTAP suite locally because the local shell does not have the Supabase CLI/database tooling available.
+
+### Remaining risks / non-goals
+
+- Ticket 8B implements mock/sandbox webhook route support only.
+- Ticket 8B does not implement live provider webhook adapters.
+- Ticket 8B does not add real webhook secrets.
+- Ticket 8B does not process real card/EFT/bank payments.
+- Ticket 8B does not implement real refund or payout webhooks.
+- Ticket 8B does not build UI.
+- Real provider integration still needs vendor-specific signature adapters, sandbox certification, reconciliation, monitoring, and production secret management.
