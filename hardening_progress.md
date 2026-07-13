@@ -1692,9 +1692,19 @@ Review and approve the Ticket 8 plan before any webhook route, migration, handle
 
 ## Ticket 8A — Mock/sandbox payment webhook database foundation
 
+### Ticket 8A CI verification — 2026-07-13
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Fix Ticket 8A mock webhook state transitions
+- **Run status:** Success
+- **Passed test file:** `payment_webhooks.test.sql`
+- **Status:** Ticket 8A is CI-verified.
+
+Ticket 8A implements mock/sandbox database-side webhook processing only. It does **not** implement live provider webhook routes, raw-body HTTP signature verification, real provider webhooks, real payment provider integration, UI, or production secrets.
+
 ### Implementation status
 
-Implemented locally; awaiting GitHub Actions verification.
+CI-verified by the `Supabase database tests` GitHub Actions workflow after the Ticket 8A mock webhook state-transition fix.
 
 ### Issue addressed
 
@@ -1754,7 +1764,7 @@ The test covers:
 
 Added `payment_webhooks.test.sql` to the `Supabase database tests` GitHub Actions workflow after `mock_payment_checkout.test.sql`.
 
-### Tests to rerun
+### Rerun command
 
 From `outputs/marketplace-production-foundation`:
 
@@ -1763,7 +1773,7 @@ supabase db reset
 supabase test db supabase/tests/database/payment_webhooks.test.sql
 ```
 
-Then rerun the full `Supabase database tests` GitHub Actions workflow.
+The full `Supabase database tests` GitHub Actions workflow is now green. Use the command above for a focused local rerun if needed.
 
 I could not run Supabase/pgTAP locally in this environment because the local shell does not have the Supabase CLI/database tooling available.
 
