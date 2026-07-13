@@ -1776,3 +1776,58 @@ I could not run Supabase/pgTAP locally in this environment because the local she
 - Ticket 8A does not implement live provider reconciliation.
 - Ticket 8A does not build UI.
 - Final production webhook work still needs a server route/Edge Function that verifies the exact raw body before calling the database function.
+
+### GitHub Actions payment webhook test failure — 2026-07-13
+
+#### Failure summary
+
+GitHub Actions reached `Run payment webhook pgTAP tests` and `payment_webhooks.test.sql` failed 26/48 assertions.
+
+Failed assertion ranges reported:
+
+- tests 2-6
+- tests 9-16
+- tests 18-20
+- tests 22-24
+- tests 26-32
+
+Visible failures included missing `vendor_events` and `audit_events` rows for valid mock webhook outcomes:
+
+```text
+failed webhook writes vendor event
+have: 0
+want: 1
+
+failed webhook writes audit event
+have: 0
+want: 1
+```
+
+#### Root cause
+
+This was a real Ticket 8A function bug, not a reason to weaken production RLS and not a protected-table test-helper issue.
+
+`admin_process_verified_mock_payment_webhook(...)` used unqualified column names inside PL/pgSQL queries, including `provider_reference`, `provider_event_id`, and `idempotency_key`. Those names collide with function parameters. In CI, the function raised before reaching the trusted `vendor_events`, `payment_events`, and `audit_events` inserts, so the test counters correctly saw zero rows.
+
+#### Fix applied
+
+- Qualified the affected `payments`, `vendor_events`, and `payment_events` queries with explicit table aliases.
+- Kept `vendor_events`, `payment_events`, and `audit_events` frontend-inaccessible.
+- Kept append-only protections unchanged.
+- Kept Ticket 1/2/5/6/7A/7B/7C/7D/7E protections unchanged.
+- Did not add any production grants to make tests pass.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/012_mock_payment_webhook_processing.sql`
+- `hardening_progress.md`
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/payment_webhooks.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.

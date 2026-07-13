@@ -148,9 +148,9 @@ begin
 
   select *
     into v_payment
-  from public.payments
-  where provider_name = v_provider_name
-    and provider_reference = v_provider_reference
+  from public.payments p
+  where p.provider_name = v_provider_name
+    and p.provider_reference = v_provider_reference
   for update;
 
   if not found then
@@ -165,18 +165,18 @@ begin
 
   select *
     into v_existing_vendor
-  from public.vendor_events
-  where provider_name = v_provider_name
-    and provider_event_id = v_provider_event_id;
+  from public.vendor_events ve
+  where ve.provider_name = v_provider_name
+    and ve.provider_event_id = v_provider_event_id;
 
   if found then
     if v_existing_vendor.payload_hash = v_payload_hash then
       select id
         into v_existing_payment_event_id
-      from public.payment_events
-      where provider_name = v_provider_name
-        and provider_event_id = v_provider_event_id
-      order by occurred_at
+      from public.payment_events pe
+      where pe.provider_name = v_provider_name
+        and pe.provider_event_id = v_provider_event_id
+      order by pe.occurred_at
       limit 1;
 
       return v_existing_payment_event_id;
@@ -205,9 +205,9 @@ begin
 
   select id
     into v_existing_payment_event_id
-  from public.payment_events
-  where provider_name = v_provider_name
-    and idempotency_key = v_idempotency_key;
+  from public.payment_events pe
+  where pe.provider_name = v_provider_name
+    and pe.idempotency_key = v_idempotency_key;
 
   if found then
     return v_existing_payment_event_id;
@@ -286,9 +286,9 @@ begin
   if v_vendor_event_id is null then
     select id
       into v_vendor_event_id
-    from public.vendor_events
-    where provider_name = v_provider_name
-      and provider_event_id = v_provider_event_id;
+    from public.vendor_events ve
+    where ve.provider_name = v_provider_name
+      and ve.provider_event_id = v_provider_event_id;
   end if;
 
   if v_should_update_payment then
