@@ -265,30 +265,75 @@ begin
     end if;
   end if;
 
-  insert into public.vendor_events (
-    provider_name,
-    provider_event_id,
-    event_type,
-    related_reference,
-    payload_hash,
-    processed_at
-  ) values (
-    v_provider_name,
-    v_provider_event_id,
-    v_processing_event_type,
-    v_provider_reference,
-    v_payload_hash,
-    now()
-  )
-  on conflict (provider_name, provider_event_id) do nothing
-  returning id into v_vendor_event_id;
+  begin
+    insert into public.vendor_events (
+      provider_name,
+      provider_event_id,
+      event_type,
+      related_reference,
+      payload_hash,
+      processed_at
+    ) values (
+      v_provider_name,
+      v_provider_event_id,
+      v_processing_event_type,
+      v_provider_reference,
+      v_payload_hash,
+      now()
+    )
+    returning id into v_vendor_event_id;
+  exception
+    when unique_violation then
+      v_vendor_event_id := null;
+  end;
 
   if v_vendor_event_id is null then
-    select id
-      into v_vendor_event_id
+    select *
+      into v_existing_vendor
     from public.vendor_events ve
     where ve.provider_name = v_provider_name
       and ve.provider_event_id = v_provider_event_id;
+
+    if not found then
+      raise exception 'Mock webhook vendor event could not be recorded or reused'
+        using errcode = '23514';
+    end if;
+
+    if v_existing_vendor.payload_hash <> v_payload_hash then
+      perform private.append_audit_event(
+        v_actor_id,
+        'admin.mock_webhook_payload_hash_mismatch',
+        'payment',
+        v_payment.id::text,
+        'Duplicate mock webhook provider_event_id arrived with a different payload_hash during idempotent insert; payment state was not mutated.',
+        jsonb_build_object(
+          'provider_event_id', v_provider_event_id,
+          'provider_reference', v_provider_reference,
+          'existing_payload_hash', v_existing_vendor.payload_hash,
+          'incoming_payload_hash', v_payload_hash,
+          'payment_status_after', v_payment.status,
+          'mock_adapter', true,
+          'sandbox_only', true,
+          'real_money_moved', false
+        )
+      );
+
+      return null;
+    end if;
+
+    select id
+      into v_existing_payment_event_id
+    from public.payment_events pe
+    where pe.provider_name = v_provider_name
+      and pe.provider_event_id = v_provider_event_id
+    order by pe.occurred_at
+    limit 1;
+
+    if found then
+      return v_existing_payment_event_id;
+    end if;
+
+    v_vendor_event_id := v_existing_vendor.id;
   end if;
 
   if v_should_update_payment then

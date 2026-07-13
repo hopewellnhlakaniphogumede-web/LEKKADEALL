@@ -1831,3 +1831,89 @@ supabase test db supabase/tests/database/payment_webhooks.test.sql
 ```
 
 Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
+### Second GitHub Actions payment webhook test failure — 2026-07-13
+
+#### Failure summary
+
+GitHub Actions still failed at `Run payment webhook pgTAP tests` after the first Ticket 8A fix.
+
+Failed file:
+
+- `supabase/tests/database/payment_webhooks.test.sql`
+
+Result:
+
+- Failed 26/48 assertions.
+- Failed ranges: tests 2-6, 9-16, 18-20, 22-24, and 26-32.
+
+Visible failure:
+
+```text
+failed webhook moves checkout-created payment to failed
+
+have: checkout_created|not_applicable|false
+want: failed|cancelled|false
+```
+
+The same run also showed zero `vendor_events`, `payment_events`, and `audit_events` rows for valid mock webhook outcomes.
+
+#### Deeper trace
+
+For `event_type = mock.payment.failed`, the intended path is:
+
+1. Require admin/trusted-server authority.
+2. Normalize `mock.payment.failed` to target payment status `failed`.
+3. Find the payment by mock `provider_reference`.
+4. Allow transition only when current payment status is `pending` or `checkout_created`.
+5. Insert/reuse `vendor_events`.
+6. Set `payments.status = failed` and `release_status = cancelled`.
+7. Insert `payment_events`.
+8. Append `audit_events`.
+
+The test fixture is correct:
+
+- payment `00000000-0000-0000-0000-000000009402`
+- `provider_name = mock`
+- `provider_reference = ticket-8a-failed`
+- starting `status = checkout_created`
+- starting `release_status = not_applicable`
+
+So the failure was not caused by the test using the wrong provider reference or by the failed-payment transition matrix rejecting `checkout_created`.
+
+#### Actual root cause
+
+The first fix qualified the `SELECT` queries, but the function still used:
+
+```sql
+on conflict (provider_name, provider_event_id) do nothing
+```
+
+inside `admin_process_verified_mock_payment_webhook(...)`, whose input parameter is also named `provider_event_id`.
+
+In PL/pgSQL this conflict target can still collide with the function parameter name. The function therefore failed at the `vendor_events` idempotency insert before the trusted payment update, `payment_events` insert, or `audit_events` append could commit. PostgreSQL rolled back the whole function call, leaving the payment at `checkout_created`.
+
+#### Fix applied
+
+- Removed the ambiguous `ON CONFLICT (provider_name, provider_event_id)` clause from the Ticket 8A function.
+- Replaced it with an explicit `INSERT ... RETURNING id` inside a `unique_violation` handler.
+- If a concurrent or duplicate vendor event already exists, the function now re-selects the existing `vendor_events` row by explicit table alias.
+- The duplicate payload-hash mismatch path remains audit-flagged without payment mutation.
+- Existing payment-event idempotency is still checked before inserting a new `payment_events` row.
+- No frontend grants were added.
+- Append-only protections remain unchanged.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/012_mock_payment_webhook_processing.sql`
+- `hardening_progress.md`
+
+#### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase test db supabase/tests/database/payment_webhooks.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.
