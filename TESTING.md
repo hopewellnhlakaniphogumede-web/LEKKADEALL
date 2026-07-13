@@ -34,6 +34,7 @@ supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
 supabase test db supabase/tests/database/payout_release_controls.test.sql
 supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+supabase test db supabase/tests/database/payment_webhooks.test.sql
 ```
 
 The workflow fails if any migration or pgTAP test fails.
@@ -60,6 +61,7 @@ Common useful steps:
 - **Run cash payment policy pgTAP tests**: MVP cash-disabled enforcement, cash/off-platform payment method rejection, customer/provider cash mutation denial, payout-release-like cash event blocking, and Ticket 1/2/5/6/7A/7B smoke protections.
 - **Run payout release controls pgTAP tests**: internal/manual-sandbox release eligibility, release pause/resume, active refund/dispute/provider blocker enforcement, append-only payment/audit ledgers, idempotency, and Ticket 1/2/5/6/7A/7B/7C smoke protections.
 - **Run mock payment checkout pgTAP tests**: mock/sandbox hosted-checkout creation, production fail-closed mock-mode validation, mock paid/failed outcome recording, vendor/payment/audit event idempotency, no credential storage, and Ticket 1/2/5/6/7A/7B/7C/7D smoke protections.
+- **Run payment webhook pgTAP tests**: trusted mock/sandbox webhook database processing after signature verification, `vendor_events` idempotency, duplicate/out-of-order handling, no raw webhook body storage, append-only ledgers, frontend mutation denial, and Ticket 1/2/5/6/7A/7B/7C/7D/7E smoke protections.
 
 pgTAP failures usually show which assertion failed and the assertion message. Use that message to find the relevant block in the `.test.sql` file.
 
@@ -85,6 +87,7 @@ supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
 supabase test db supabase/tests/database/payout_release_controls.test.sql
 supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+supabase test db supabase/tests/database/payment_webhooks.test.sql
 supabase stop --no-backup
 ```
 

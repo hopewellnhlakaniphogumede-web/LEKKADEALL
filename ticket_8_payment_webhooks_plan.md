@@ -6,11 +6,15 @@ Plan secure payment webhook handling for LEKKADEALL without implementing live we
 
 Ticket 8 should turn payment-provider callbacks into trusted, idempotent, auditable state transitions while preserving the protections from Tickets 1, 2, 5, 6, and 7A-7E.
 
-## Planning-only status
+## Current implementation status
 
-This document is planning-only.
+Ticket 8A has now implemented the database-side mock/sandbox webhook foundation only:
 
-Do not create migrations, server routes, Edge Functions, webhook handlers, provider adapters, secrets, or UI for Ticket 8 until the implementation ticket is explicitly requested.
+- `outputs/marketplace-production-foundation/supabase/migrations/012_mock_payment_webhook_processing.sql`
+- `admin_process_verified_mock_payment_webhook(...)`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payment_webhooks.test.sql`
+
+This does not implement live webhook routes, Edge Functions, provider adapters, real signature verification, provider secrets, real card/EFT processing, or UI. Those remain future Ticket 8 work.
 
 ## Current starting point
 
@@ -23,6 +27,8 @@ Already implemented:
 - Cash/off-platform payments are disabled for MVP.
 - Mock/sandbox checkout and mock paid/failed outcome recording exist through trusted database functions.
 - Mock mode fails closed in production through `validate_payment_provider_mode(...)`.
+- Mock/sandbox database webhook processing exists for already signature-verified events through `admin_process_verified_mock_payment_webhook(...)`.
+- `payment_webhooks.test.sql` covers mock paid/failed processing, duplicate provider event IDs, different-payload-hash duplicates, out-of-order events, paid-after-refunded manual review, raw webhook metadata rejection, append-only ledgers, and Ticket 1/2/5/6/7A/7B/7C/7D/7E smoke protections.
 
 Still missing:
 
@@ -33,7 +39,7 @@ Still missing:
 - live provider event parsing
 - webhook reconciliation against provider lookup APIs
 - safe production secret loading
-- automated tests for signed/idempotent webhook processing
+- application/server tests for raw-body signed webhook verification
 
 ## 1. Signed webhook verification
 
@@ -185,14 +191,11 @@ The actual provider secret names can be finalized when vendors are chosen.
 
 ## 9. Mock/sandbox webhook tests
 
-Ticket 8 should start with mock/sandbox webhook processing before live provider support.
+Ticket 8A started with database-side mock/sandbox webhook processing before live provider support.
 
-Mock/sandbox tests should prove:
+The current pgTAP tests prove:
 
-- valid mock signature is accepted
-- invalid mock signature is rejected
-- raw body hash is used
-- parsed-but-reserialized JSON does not bypass verification
+- trusted mock/sandbox webhook processing accepts already verified events only through an admin/server function
 - duplicate mock provider event ID is idempotent
 - duplicate provider event with different payload hash does not mutate state
 - paid event updates payment once
@@ -200,6 +203,15 @@ Mock/sandbox tests should prove:
 - checkout-created-after-paid does not downgrade status
 - paid-after-refunded is rejected or manual-review only
 - accepted webhook writes `vendor_events`, `payment_events`, and `audit_events`
+- raw webhook body/signature/secret metadata is rejected and not stored
+- normal customers/providers cannot call the webhook-processing function
+
+Still needed outside pgTAP/application-server tests:
+
+- valid mock signature is accepted by a future HTTP route
+- invalid mock signature is rejected before database mutation
+- raw body hash is computed from exact raw request bytes
+- parsed-but-reserialized JSON does not bypass verification
 - failed signature writes no payment state
 
 ## 10. Future live provider integration requirements
@@ -220,17 +232,17 @@ Before enabling a live payment provider:
 
 ## 11. pgTAP/database tests required
 
-Add a future test file, likely:
+Implemented Ticket 8A database test file:
 
 - `outputs/marketplace-production-foundation/supabase/tests/database/payment_webhooks.test.sql`
 
-Required database assertions:
+Implemented database assertions:
 
 - `vendor_events` remains frontend-inaccessible.
 - `vendor_events` remains idempotent on `(provider_name, provider_event_id)`.
 - `payment_events` remains append-only.
 - `audit_events` remains append-only.
-- trusted webhook function can record a signed/verified paid event.
+- trusted webhook function can record an already-verified mock/sandbox paid event.
 - trusted webhook function writes exactly one `vendor_events` row.
 - trusted webhook function writes exactly one `payment_events` row.
 - trusted webhook function writes exactly one `audit_events` row.
@@ -252,7 +264,7 @@ Required database assertions:
 - Ticket 7D payout release controls remain intact.
 - Ticket 7E mock checkout protections remain intact.
 
-HTTP/raw-body signature tests may require application/server tests in addition to pgTAP because pgTAP cannot fully prove framework raw-body handling.
+HTTP/raw-body signature tests still require application/server tests in addition to pgTAP because pgTAP cannot fully prove framework raw-body handling.
 
 ## 12. Definition of done
 

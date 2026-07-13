@@ -68,6 +68,9 @@ jobs:
       - name: Run mock payment checkout pgTAP tests
         run: supabase test db supabase/tests/database/mock_payment_checkout.test.sql
 
+      - name: Run payment webhook pgTAP tests
+        run: supabase test db supabase/tests/database/payment_webhooks.test.sql
+
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true

@@ -1689,3 +1689,90 @@ Ticket 8 planning covers:
 ### Next step
 
 Review and approve the Ticket 8 plan before any webhook route, migration, handler, adapter, provider secret, or UI work is implemented.
+
+## Ticket 8A — Mock/sandbox payment webhook database foundation
+
+### Implementation status
+
+Implemented locally; awaiting GitHub Actions verification.
+
+### Issue addressed
+
+Ticket 8A adds trusted database-side processing for mock/sandbox payment webhook events after a future server route has already verified the webhook signature. It does not implement live webhook routes or real signature verification.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/012_mock_payment_webhook_processing.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payment_webhooks.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `production_hardening_plan.md`
+- `ticket_8_payment_webhooks_plan.md`
+- `hardening_progress.md`
+
+### Fix applied
+
+- Added `admin_process_verified_mock_payment_webhook(...)` as a `SECURITY DEFINER` function with explicit `search_path`.
+- Required platform-admin/trusted-server authority through the existing admin check.
+- Added safe mock webhook event handling for:
+  - `mock.checkout.created`
+  - `mock.payment.paid`
+  - `mock.payment.failed`
+  - `mock.payment.expired`
+  - `mock.payment.cancelled`
+- Used `vendor_events` as the idempotency boundary on `(provider_name, provider_event_id)`.
+- Prevented duplicate provider event IDs from duplicating `payment_events`.
+- Audit-flagged duplicate provider event IDs with different `payload_hash` without mutating payment state.
+- Prevented out-of-order events from regressing payment state.
+- Routed paid-after-refunded to manual review without mutating payment status.
+- Rejected raw webhook body/signature/secret/payment-credential metadata.
+- Wrote safe `vendor_events`, `payment_events`, and `audit_events` rows for accepted mock/sandbox webhook outcomes.
+
+### Tests added
+
+- `payment_webhooks.test.sql` with 48 pgTAP assertions.
+
+The test covers:
+
+- frontend users cannot read/write `vendor_events`
+- `payment_events` and `audit_events` remain append-only
+- mock paid webhook updates payment once
+- paid/failed webhooks write `vendor_events`, `payment_events`, and `audit_events`
+- duplicate provider event IDs are idempotent
+- duplicate provider event IDs with different payload hashes do not mutate payment state
+- failed-after-paid does not regress payment status
+- checkout-created-after-paid does not downgrade paid status
+- paid-after-refunded does not mutate payment status
+- invalid mock event type is rejected
+- normal customers/providers cannot call the webhook-processing function
+- frontend users cannot directly mark payments paid
+- raw webhook body/signature/secret material is not stored
+- Ticket 1/2/5/6/7A/7B/7C/7D/7E smoke protections remain intact
+
+### CI wiring
+
+Added `payment_webhooks.test.sql` to the `Supabase database tests` GitHub Actions workflow after `mock_payment_checkout.test.sql`.
+
+### Tests to rerun
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase db reset
+supabase test db supabase/tests/database/payment_webhooks.test.sql
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow.
+
+I could not run Supabase/pgTAP locally in this environment because the local shell does not have the Supabase CLI/database tooling available.
+
+### Remaining risks / non-goals
+
+- Ticket 8A does not implement a live HTTP webhook route.
+- Ticket 8A does not verify real signatures or raw request bodies.
+- Ticket 8A does not add real webhook secrets.
+- Ticket 8A does not process real card/EFT/bank payments.
+- Ticket 8A does not implement live provider reconciliation.
+- Ticket 8A does not build UI.
+- Final production webhook work still needs a server route/Edge Function that verifies the exact raw body before calling the database function.
