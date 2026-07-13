@@ -1932,7 +1932,16 @@ Then rerun the full `Supabase database tests` GitHub Actions workflow.
 
 ### Implementation status
 
-Implemented locally; awaiting GitHub Actions verification.
+CI-verified.
+
+### Ticket 8B CI verification — 2026-07-13
+
+- **Workflow name:** Supabase database tests
+- **Latest run:** Fix Ticket 8B webhook signature type error
+- **Run status:** Success
+- **Status:** Ticket 8B is CI-verified.
+
+Ticket 8B implements mock/sandbox webhook route raw-body signature verification only. It does **not** implement live provider adapters, real payment webhooks, real provider credentials, real card/EFT processing, real payout webhooks, or UI.
 
 ### Issue addressed
 
@@ -2087,3 +2096,21 @@ Then rerun the full `Supabase database tests` GitHub Actions workflow so the web
 - Ticket 8B does not implement real refund or payout webhooks.
 - Ticket 8B does not build UI.
 - Real provider integration still needs vendor-specific signature adapters, sandbox certification, reconciliation, monitoring, and production secret management.
+
+## Ticket 8C — Sandbox provider-specific webhook adapter selection and integration readiness
+
+### Planning status
+
+Planning-only document prepared; no implementation performed.
+
+### File added
+
+- `ticket_8c_sandbox_provider_webhook_adapter_plan.md`
+
+### Scope
+
+Ticket 8C is for selecting and preparing the first real sandbox provider-specific webhook adapter. It covers provider-selection criteria, vendor documentation to request, event mapping, signature-verification readiness, secret-management readiness, reconciliation readiness, compliance/operational readiness, required tests, and definition of done.
+
+### Non-goals
+
+Ticket 8C does **not** implement live provider adapters, real payment webhooks, real provider credentials, real card/EFT processing, real refund webhooks, real payout webhooks, reconciliation jobs, RLS changes, or UI.
