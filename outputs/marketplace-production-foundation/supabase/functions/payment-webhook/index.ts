@@ -100,6 +100,12 @@ function toHex(bytes: ArrayBuffer): string {
     .join('');
 }
 
+function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const exactBuffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(exactBuffer).set(bytes);
+  return exactBuffer;
+}
+
 function concatBytes(...chunks: Uint8Array[]): Uint8Array {
   const totalLength = chunks.reduce((length, chunk) => length + chunk.length, 0);
   const output = new Uint8Array(totalLength);
@@ -114,7 +120,7 @@ function concatBytes(...chunks: Uint8Array[]): Uint8Array {
 }
 
 export async function sha256PayloadHash(rawBody: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', rawBody);
+  const digest = await crypto.subtle.digest('SHA-256', toExactArrayBuffer(rawBody));
   return `sha256:${toHex(digest)}`;
 }
 
@@ -125,13 +131,13 @@ export async function createMockWebhookSignature(
 ): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(secret),
+    toExactArrayBuffer(encoder.encode(secret)),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
   );
   const signedPayload = concatBytes(encoder.encode(`${timestamp}.`), rawBody);
-  const signature = await crypto.subtle.sign('HMAC', key, signedPayload);
+  const signature = await crypto.subtle.sign('HMAC', key, toExactArrayBuffer(signedPayload));
 
   return `sha256=${toHex(signature)}`;
 }

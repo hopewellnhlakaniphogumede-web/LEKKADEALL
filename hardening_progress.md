@@ -2028,6 +2028,56 @@ I could not run the new Deno tests locally in this shell because Deno is not ins
 
 I also did not rerun the Supabase pgTAP suite locally because the local shell does not have the Supabase CLI/database tooling available.
 
+### GitHub Actions mock payment webhook route test failure — 2026-07-13
+
+#### Failure summary
+
+GitHub Actions failed at `Run mock payment webhook route tests` during TypeScript checking for:
+
+- `supabase/functions/payment-webhook/index.ts`
+
+Visible error:
+
+```text
+TS2345: Argument of type 'Uint8Array<ArrayBufferLike>' is not assignable to parameter of type 'BufferSource'.
+```
+
+The failing call was:
+
+```ts
+crypto.subtle.sign('HMAC', key, signedPayload)
+```
+
+#### Root cause
+
+Deno's WebCrypto type definitions require a `BufferSource` backed by a concrete `ArrayBuffer`. The route passed `Uint8Array` values whose generic backing type was inferred as `ArrayBufferLike`, which can include non-`ArrayBuffer` backing stores. Runtime behavior would still use the intended bytes, but TypeScript correctly rejected the narrower WebCrypto type contract.
+
+#### Fix applied
+
+- Added `toExactArrayBuffer(bytes)` to copy the exact bytes from a `Uint8Array` into a fresh concrete `ArrayBuffer`.
+- Updated `crypto.subtle.digest(...)` to hash `toExactArrayBuffer(rawBody)`.
+- Updated `crypto.subtle.importKey(...)` to import `toExactArrayBuffer(encoder.encode(secret))`.
+- Updated `crypto.subtle.sign(...)` to sign `toExactArrayBuffer(signedPayload)`.
+- Kept signature verification based on exact raw request bytes.
+- Did not switch to parsed JSON for signature verification.
+- Did not add `--no-check`.
+- Did not add real webhook secrets or live provider integration.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/functions/payment-webhook/index.ts`
+- `hardening_progress.md`
+
+#### Rerun command
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+deno test supabase/functions/payment-webhook/index.test.ts
+```
+
+Then rerun the full `Supabase database tests` GitHub Actions workflow so the webhook route tests and all existing pgTAP database tests run together.
+
 ### Remaining risks / non-goals
 
 - Ticket 8B implements mock/sandbox webhook route support only.
