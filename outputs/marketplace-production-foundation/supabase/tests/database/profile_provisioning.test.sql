@@ -382,14 +382,13 @@ select ok(
 -- 27-34. Browser denials, own-read behavior, and Ticket 1 protections.
 -- Create a valid Auth identity without a profile so the INSERT denial cannot be
 -- satisfied merely by a foreign-key or duplicate-key failure.
-alter table auth.users disable trigger provision_auth_user_profile_after_insert;
-
 insert into auth.users (id, email) values (
   '00000000-0000-0000-0000-000000009999',
   'direct-insert-denial@lekkadeall.test'
 );
 
-alter table auth.users enable trigger provision_auth_user_profile_after_insert;
+delete from public.profiles
+where id = '00000000-0000-0000-0000-000000009999';
 
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000009902';
@@ -458,8 +457,6 @@ select is(
 );
 
 -- 35-41. Simulate a pre-migration Auth user and exercise safe backfill.
-alter table auth.users disable trigger provision_auth_user_profile_after_insert;
-
 insert into auth.users (
   id,
   email,
@@ -472,7 +469,8 @@ insert into auth.users (
   '{"role":"service_role"}'::jsonb
 );
 
-alter table auth.users enable trigger provision_auth_user_profile_after_insert;
+delete from public.profiles
+where id = '00000000-0000-0000-0000-000000009903';
 
 select is(
   (select count(*) from public.profiles where id = '00000000-0000-0000-0000-000000009903'),

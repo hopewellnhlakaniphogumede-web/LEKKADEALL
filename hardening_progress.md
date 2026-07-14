@@ -2345,3 +2345,46 @@ Static review confirms that Ticket 9B adds no frontend code, credential, service
 The Ticket 9A-1 frontend regression suite was run with the bundled Node runtime and passed **8/8 tests**. The new pgTAP file was also statically checked: its declared plan and assertion count both equal **44**.
 
 Docker, the Supabase CLI, and Deno are not available in this shell, so the database reset, pgTAP execution, and webhook route tests were not run locally. The updated GitHub Actions workflow is the authoritative database/webhook integration and regression gate for this implementation.
+
+### GitHub Actions profile-provisioning test failure — 2026-07-14
+
+#### Failure summary
+
+The `Run secure profile provisioning pgTAP tests` step reported:
+
+```text
+Bad plan. You planned 44 tests but ran 26.
+Tests: 26
+Failed: 0
+```
+
+All 26 assertions that ran passed. The plan count was not inflated: the file still contains 44 intentional assertions. Execution terminated before assertion 27.
+
+#### Root cause
+
+The first SQL statement after assertion 26 attempted to run:
+
+```sql
+alter table auth.users disable trigger provision_auth_user_profile_after_insert;
+```
+
+The test used trigger toggling to create an Auth user without an automatically provisioned profile. Altering the Supabase-managed `auth.users` table requires ownership-level DDL that is not available to the pgTAP test connection in CI. The SQL error terminated the file before assertions 27–44, and pgTAP consequently reported a bad plan rather than failed assertions.
+
+The same unsupported trigger-toggle pattern appeared again in the later backfill fixture and would also have terminated execution.
+
+#### Fix applied
+
+- Kept the pgTAP plan at 44 because all 44 security assertions remain intentional.
+- Removed both `ALTER TABLE auth.users DISABLE/ENABLE TRIGGER` blocks from the test.
+- The direct-insert denial fixture now creates an Auth user normally, allows the production trigger to run, and deletes only that test user's provisioned `public.profiles` row before impersonating the browser role.
+- The backfill fixture uses the same approach: create normally, delete only the test profile, then call the private idempotent helper with `migration_backfill`.
+- This creates a valid Auth identity with a missing profile without changing trigger state or requiring ownership of `auth.users`.
+- The production migration, trigger, helper, audit logging, function revocations, RLS policies, grants, and Ticket 1 protections were not weakened or changed.
+
+#### Verification
+
+- Static assertion count remains **44 planned / 44 present**.
+- No trigger-disable or trigger-enable DDL remains in `profile_provisioning.test.sql`.
+- The test still covers fixed customer/active provisioning, hostile metadata rejection, idempotency, no overwrite, browser insert/delete denial, own/cross-user reads, role/status protection, privacy-safe audit logging, and backfill.
+- The Ticket 9A-1 frontend regression suite remains **8/8 passing** locally.
+- Docker, Supabase CLI, and Deno remain unavailable locally, so the corrected pgTAP suite and full database/webhook regressions require GitHub Actions verification.
