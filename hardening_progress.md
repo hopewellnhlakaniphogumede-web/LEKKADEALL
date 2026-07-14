@@ -2126,3 +2126,111 @@ Ticket 8C does **not** implement live provider adapters, real payment webhooks, 
 - The current decision remains **no provider ready for selection yet**.
 - All unresolved candidate capabilities, commercial terms, compliance arrangements, and operational details remain **needs vendor confirmation**.
 - This update is planning-only. No provider adapter, credentials, migration, test, payment processing, refund/payout execution, reconciliation job, RLS change, or UI was added.
+
+## Ticket 9A-1 — Customer/provider frontend shell
+
+**Date:** 14 July 2026  
+**Status:** Implemented locally; frontend shell tests pass. Existing webhook and pgTAP regression suites remain wired in GitHub Actions and require the next CI run for verification.
+
+### Scope implemented
+
+- Added a new LEKKADEALL-branded, dependency-free static frontend shell under `outputs/lekkadeall-frontend-shell`.
+- Added public landing and service-discovery routes.
+- Added non-transmitting authentication route shells for sign in, registration, forgot password, reset password, and auth callback.
+- Added customer and provider dashboard shells with safe signed-out and empty states.
+- Added a read-only profile/settings shell.
+- Added access-denied, account-restricted, loading, empty, error, signed-out, restricted, and not-found states.
+- Added shared public/application headers, navigation, page-state components, responsive layouts, and accessible focus/skip-link behavior.
+- Added `MockPaymentBanner` with the exact wording: **“Mock/sandbox — no real money moved”**.
+- Added clean-path static entry files for all Ticket 9A-1 routes.
+- Added dependency-free tests using Node's built-in test runner and wired them into the existing GitHub Actions workflow before the Deno/Supabase test steps.
+
+### Files changed
+
+- `outputs/lekkadeall-frontend-shell/index.html`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/404.html`
+- `outputs/lekkadeall-frontend-shell/services/index.html`
+- `outputs/lekkadeall-frontend-shell/auth/sign-in/index.html`
+- `outputs/lekkadeall-frontend-shell/auth/register/index.html`
+- `outputs/lekkadeall-frontend-shell/auth/forgot-password/index.html`
+- `outputs/lekkadeall-frontend-shell/auth/reset-password/index.html`
+- `outputs/lekkadeall-frontend-shell/auth/callback/index.html`
+- `outputs/lekkadeall-frontend-shell/app/customer/index.html`
+- `outputs/lekkadeall-frontend-shell/app/provider/index.html`
+- `outputs/lekkadeall-frontend-shell/app/settings/index.html`
+- `outputs/lekkadeall-frontend-shell/access-denied/index.html`
+- `outputs/lekkadeall-frontend-shell/account-restricted/index.html`
+- `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+### Security behavior
+
+- No Supabase browser client was added because the repository does not yet have an approved public client/configuration module. Service discovery therefore renders a safe empty shell rather than making an unreviewed request.
+- Auth forms are shells only. Submission is intercepted locally, values are cleared, and nothing is transmitted.
+- Dashboard and settings routes show safe placeholders rather than querying broad or unfinished read models.
+- Profile/settings is read-only and contains no direct table update.
+- Client source contains no application-table insert/update/delete calls, admin/private function calls, mock webhook processing calls, service-role access, or secret values.
+- No `/admin` route or admin dashboard was added.
+- No exact-address submission, reveal, persistence, logging, or telemetry was added.
+- No cash/off-platform option, payment-method form, card/CVV field, bank-login field, real checkout, real payment/refund/payout action, or identity-provider flow was added.
+
+### Intentionally not implemented
+
+- Supabase Auth integration or session-backed route authorisation;
+- service-category database reads;
+- customer/provider dashboard read models;
+- profile editing;
+- request creation/publication, bid submission/acceptance, booking progress/completion, or address handling;
+- mock checkout creation or mock outcome controls;
+- real payment-provider integration, credentials, checkout, refunds, payouts, webhooks, or reconciliation;
+- identity verification;
+- admin dashboard/actions;
+- disputes, reviews, consent workflows, support cases, notifications, or chat;
+- migrations, RLS/grant/policy changes, database functions, or storage-policy changes.
+
+### How to preview
+
+From the repository root:
+
+```powershell
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+Then open `http://localhost:4173/`. Stop the preview with `Ctrl+C`.
+
+### Frontend tests
+
+Run from the repository root:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs
+```
+
+Local result: **8/8 tests passed**.
+
+The tests cover:
+
+- every required shell route and absence of an admin route;
+- exact `MockPaymentBanner` wording;
+- safe loading, empty, error, signed-out, restricted, and not-found states;
+- safe service-discovery fallback without a Supabase client;
+- auth shells without privileged role/status selection;
+- absence of client database writes, sensitive functions, secrets, cash markers, and payment credential fields;
+- existence of clean-path static entry files.
+
+### CI database/webhook regression verification
+
+The existing `Supabase database tests` workflow remains the regression gate. Ticket 9A-1 adds the frontend shell test step but does not remove or weaken any existing step. On every push and pull request, CI still:
+
+1. runs the mock webhook Deno tests;
+2. verifies Docker and committed non-secret local Supabase configuration;
+3. starts the local Supabase stack and applies all migrations with `supabase db reset`;
+4. runs the existing role escalation, baseline RLS, exact-address privacy, marketplace state-machine, payment ledger, refund ledger, cash policy, payout-release, mock-checkout, and payment-webhook pgTAP suites.
+
+The Deno and pgTAP suites were not run locally for Ticket 9A-1 because Deno, the Supabase CLI, and the local Supabase stack are not available in this shell. No database, webhook, migration, RLS, grant, policy, or function file changed; the next GitHub Actions run is the verification source for no database regression.
