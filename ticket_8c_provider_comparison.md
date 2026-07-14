@@ -31,11 +31,11 @@ A provider is ready for selection only if all of these are confirmed:
 
 The ranked shortlist for vendor confirmation is:
 
-1. **Peach Payments — provisional technical leader.** Public documentation covers hosted checkout, ZAR, HMAC-SHA256 webhook security with timestamp and webhook ID, status lookup, refunds, payouts, payout webhooks, reconciliation tooling, and sandbox facilities. Whether Peach can provide a compliant marketplace collection/hold/release or split-settlement structure for LEKKADEALL is **needs vendor confirmation**.
-2. **Stitch — strong technical alternative.** Public documentation covers Stitch-hosted card UI, signed webhook delivery, event IDs/timestamps, test payment simulation, refunds, payout APIs, payout lookup, and payout webhooks. A compliant marketplace hold/release or split-settlement structure and product availability/commercial terms for LEKKADEALL are **needs vendor confirmation**.
-3. **TradeSafe — marketplace/escrow model leader, webhook-security blocker.** Public material explicitly describes marketplace integration, escrow holding, allocations, release, refunds, disputes, a sandbox application, GraphQL API, and callbacks. Its public callback security documentation describes IP allowlisting or a secret embedded in the callback URL; it does not document a signed raw-body callback with timestamp replay protection. A stronger signed callback mechanism is **needs vendor confirmation** and is a hard blocker for the Ticket 8C adapter.
+1. **Stitch — next technical candidate.** Public documentation covers Stitch-hosted card UI, signed webhook delivery, event IDs/timestamps, test payment simulation, refunds, payout APIs, payout lookup, and payout webhooks. A compliant marketplace hold/release or split-settlement structure and product availability/commercial terms for LEKKADEALL are **needs vendor confirmation**.
+2. **TradeSafe — marketplace/escrow model candidate, webhook-security blocker.** Public material explicitly describes marketplace integration, escrow holding, allocations, release, refunds, disputes, a sandbox application, GraphQL API, and callbacks. Its public callback security documentation describes IP allowlisting or a secret embedded in the callback URL; it does not document a signed raw-body callback with timestamp replay protection. A stronger signed callback mechanism is **needs vendor confirmation** and is a hard blocker for the Ticket 8C adapter.
+3. **Netcash / PayFast / Ozow — lower-priority candidates.** Each remains unsuitable for first-adapter selection unless it confirms both a compliant marketplace hold/release model and signed webhook suitability. All unresolved requirements remain **needs vendor confirmation**.
 
-Netcash, PayFast, and Ozow remain comparison candidates but should not be the first adapter unless the blockers below are resolved.
+**Peach Payments is removed from the shortlist. Peach Payments is not suitable for LEKKADEALL marketplace model — vendor confirmed no marketplace support.** Its documented technical capabilities do not overcome this business-model hard-gate failure.
 
 ## Provider comparison
 
@@ -43,7 +43,7 @@ Netcash, PayFast, and Ozow remain comparison candidates but should not be the fi
 |---|---|---|---|---|---|---|
 | South African/ZAR fit | Public docs list South Africa and ZAR | Public refund/payment examples use ZAR; South African commercial availability for this use case is **needs vendor confirmation** | South African marketplace/escrow service | Pay Now transaction amount is documented as ZAR | South African payment product; exact LEKKADEALL onboarding scope is **needs vendor confirmation** | Public integration docs say only ZA banks and ZAR are supported |
 | Hosted customer payment surface | Hosted Checkout and hosted Payment Links documented | Stitch-hosted once-off card UI documented; hosted coverage for every proposed payment method is **needs vendor confirmation** | Payment link/payment page described | Pay Now hosted form and payment links documented | Redirected PayFast payment flow documented | Hosted payment page/payment-link API documented |
-| Marketplace hold/release suitability | Payouts exist, but compliant marketplace holding, split settlement, beneficiary onboarding, and delayed release are **needs vendor confirmation** | Payouts/refunds exist, but compliant marketplace holding, split settlement, beneficiary onboarding, and delayed release are **needs vendor confirmation** | Explicit escrow, allocations, buyer acceptance, seller/marketplace release, amendment/refund, and dispute model | Split payments between Netcash accounts are documented; delayed conditional release, refund/dispute holds, and legal marketplace structure are **needs vendor confirmation** | One receiving merchant per split transaction is documented; delayed release, provider onboarding, refund/dispute holds, and legal marketplace structure are **needs vendor confirmation** | Payout API is documented; split settlement, compliant holding, provider onboarding, and delayed release are **needs vendor confirmation** |
+| Marketplace hold/release suitability | **Not suitable for LEKKADEALL marketplace model — vendor confirmed no marketplace support** | Payouts/refunds exist, but compliant marketplace holding, split settlement, beneficiary onboarding, and delayed release are **needs vendor confirmation** | Explicit escrow, allocations, buyer acceptance, seller/marketplace release, amendment/refund, and dispute model | Split payments between Netcash accounts are documented; delayed conditional release, refund/dispute holds, and legal marketplace structure are **needs vendor confirmation** | One receiving merchant per split transaction is documented; delayed release, provider onboarding, refund/dispute holds, and legal marketplace structure are **needs vendor confirmation** | Payout API is documented; split settlement, compliant holding, provider onboarding, and delayed release are **needs vendor confirmation** |
 | Webhook/callback authentication | Optional webhook HMAC-SHA256 uses timestamp, webhook ID, URL, and payload; activation and exact production configuration are **needs vendor confirmation** | Signed webhooks documented; current Svix signing/replay rules and stable event-ID contract for selected products are **needs vendor confirmation** | Public docs show IP allowlisting or a URL secret, not signed raw-body verification; stronger mechanism is **needs vendor confirmation** | Public evidence reviewed did not establish signed exact-message webhooks, timestamp replay protection, or unique event IDs: **needs vendor confirmation** | ITN uses an MD5 field signature plus IP, amount, and server-confirmation checks; no modern raw-body HMAC/timestamp contract was found | Response uses an ordered-field SHA-512 hash; exact raw-body signing, timestamp replay protection, and unique event IDs are **needs vendor confirmation** |
 | Durable event ID for `vendor_events` | `x-webhook-id` documented | Event ID documented in webhook guidance | Transaction/allocation/drawdown IDs exist; a unique callback-delivery ID is **needs vendor confirmation** | **needs vendor confirmation** | `pf_payment_id` exists, but uniqueness and stability across all event types/retries are **needs vendor confirmation** | Transaction ID exists; unique notification-delivery ID and retry semantics are **needs vendor confirmation** |
 | Sandbox webhook determinism | Sandbox and payment-method testing documented; deterministic webhook scenarios for all required states are **needs vendor confirmation** | Test-client completion simulation triggers a webhook; complete deterministic matrices are **needs vendor confirmation** | Sandbox application/playground documented; signed callback fixtures and deterministic state simulations are **needs vendor confirmation** | Test account and provider-shaped webhook fixtures are **needs vendor confirmation** | Sandbox/test flow exists; deterministic webhook fixtures for all LEKKADEALL states are **needs vendor confirmation** | Public docs state notification responses are not sent for test transactions, which blocks representative sandbox webhook testing unless the vendor supplies another facility: **needs vendor confirmation** |
@@ -52,29 +52,11 @@ Netcash, PayFast, and Ozow remain comparison candidates but should not be the fi
 | Payout API/status events | Payout API and signed payout status webhooks documented | Payout/disbursement API, status query, and webhook updates documented | Release/drawdown and payout behavior documented; callback authentication remains a blocker | Split payments documented; later bank payout/release API and status webhooks are **needs vendor confirmation** | Split payment is documented; later payout/release API and status webhooks are **needs vendor confirmation** | Payout API and outcome notifications are advertised; signed status webhook details are **needs vendor confirmation** |
 | Pricing and settlement timing | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** |
 | POPIA/DPA/operator terms | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** | **needs vendor confirmation** |
-| Overall readiness | **Conditional shortlist #1** | **Conditional shortlist #2** | **Conditional shortlist #3; security blocker** | **Not ready** | **Not ready** | **Not ready** |
+| Overall readiness | **Not suitable — vendor-confirmed marketplace-model failure** | **Conditional shortlist #1** | **Conditional shortlist #2; security blocker** | **Lower priority; not ready** | **Lower priority; not ready** | **Lower priority; not ready** |
 
 ## Provider-specific findings
 
-### 1. Peach Payments
-
-Why it leads technically:
-
-- Peach documents redirect-based Hosted Checkout, a returned checkout URL, ZAR support, and sandbox endpoints.
-- Checkout webhooks can use HMAC-SHA256 over a provider-defined message containing timestamp, webhook ID, URL, and payload. The webhook ID is explicitly described as supporting replay prevention and idempotency.
-- Checkout status can be queried by checkout ID or a unique merchant transaction ID.
-- Refund requests and refund webhook states are documented.
-- Payout APIs, payout status webhooks, and reconciliation resources are documented.
-
-Open gates:
-
-- contractually supported marketplace model, fund flow, merchant-of-record position, and whether customer funds can remain controlled until LEKKADEALL's release gates pass: **needs vendor confirmation**;
-- split settlement or beneficiary/sub-merchant onboarding and KYC model: **needs vendor confirmation**;
-- exact HMAC feature enablement in sandbox and production, canonical URL rules behind Supabase Edge Functions, timestamp tolerance, secret rotation, retry/event-ID guarantees, and representative fixtures: **needs vendor confirmation**;
-- payment-method-specific refund, chargeback, and payout coverage: **needs vendor confirmation**;
-- fees, reserves, settlement timing, DPA/operator terms, support SLA, and incident escalation: **needs vendor confirmation**.
-
-### 2. Stitch
+### 1. Stitch
 
 Why it remains a strong alternative:
 
@@ -90,7 +72,7 @@ Open gates:
 - current Svix signed-message construction, tolerance, event-ID uniqueness, secret rotation, test fixtures, and event ordering: **needs vendor confirmation**;
 - pricing, reserves, settlement timing, DPA/operator terms, onboarding approval, support SLA, and incident escalation: **needs vendor confirmation**.
 
-### 3. TradeSafe
+### 2. TradeSafe
 
 Why it best matches the marketplace state model:
 
@@ -108,19 +90,29 @@ Other open gates:
 - callback retry schedule, event ordering, delivery-ID uniqueness, secret rotation, and reconciliation procedures: **needs vendor confirmation**;
 - suitability for services rather than only goods, inspection/release timing, cancellation/refund handling, provider KYC, dispute roles, fees, settlement timing, DPA/operator terms, and support SLA: **needs vendor confirmation**.
 
-### 4. Netcash
+### Excluded from shortlist: Peach Payments
+
+Peach Payments confirmed directly to the user that it does not support marketplace. Therefore:
+
+- **Peach Payments is not suitable for LEKKADEALL marketplace model — vendor confirmed no marketplace support.**
+- Peach is no longer the provisional technical leader and is not a candidate for the first provider-specific sandbox adapter.
+- Its documented hosted checkout, HMAC webhook, lookup, refund, payout, reconciliation, ZAR, and sandbox capabilities remain technically relevant, but they cannot satisfy LEKKADEALL's marketplace-model hard gate.
+- No further Peach technical confirmation is required for Ticket 8C unless Peach later provides a materially different, written marketplace product position.
+- Historical unresolved commercial details such as fees, reserves, settlement timing, DPA/operator terms, support SLA, and incident escalation remain **needs vendor confirmation**, but resolving them would not change the current exclusion.
+
+### 3. Netcash
 
 Public documentation supports Pay Now hosted payment collection in ZAR and split payments to another Netcash account. That may support commissions, but it does not by itself establish LEKKADEALL's required conditional hold/release model.
 
 Before reconsidering Netcash, obtain confirmation of signed exact-message webhooks, timestamp/replay rules, unique event IDs, retry semantics, deterministic sandbox delivery, payment lookup, refunds, chargebacks, later provider payouts, conditional release/holds, provider onboarding, pricing, settlement, DPA/operator terms, and marketplace approval. All are **needs vendor confirmation**.
 
-### 5. PayFast
+### 4. PayFast
 
 PayFast documents redirected payment processing, ZAR identifiers, ITN notifications, and split payments to one receiving merchant. Its ITN security model uses an MD5 signature over URL-encoded fields together with IP validation, amount validation, and a server validation call. This can be authenticated when implemented exactly, but it does not match the preferred modern raw-body HMAC plus timestamp/event-ID model.
 
 Before reconsidering PayFast, obtain a current signed-webhook product with exact-message verification, replay tolerance, unique delivery IDs, deterministic fixtures, refund and payout lifecycle events, compliant delayed provider release, provider onboarding, reconciliation API, pricing, settlement, DPA/operator terms, and marketplace approval. All are **needs vendor confirmation**.
 
-### 6. Ozow
+### 5. Ozow
 
 Ozow documents a hosted payment flow, ZAR/ZA bank support, a response hash, and transaction lookup by Ozow ID or merchant reference. It also advertises payout APIs and outcome notifications.
 
@@ -128,7 +120,7 @@ The public integration page says normal test transactions do not send notificati
 
 ## Questions for the vendor calls
 
-Ask Peach, Stitch, and TradeSafe the same written questions so answers are comparable:
+Ask Stitch and TradeSafe the same written questions so answers are comparable. Ask Netcash, PayFast, or Ozow only if LEKKADEALL decides to investigate the lower-priority group:
 
 1. Will you contractually approve a South African services marketplace where the customer pays at booking and the provider is paid only after completion, subject to refund/dispute/release holds?
 2. Who is merchant of record, who legally holds funds, and what licence/regulated arrangement covers the flow?
@@ -145,9 +137,10 @@ Ask Peach, Stitch, and TradeSafe the same written questions so answers are compa
 
 Ticket 8C should select the first sandbox adapter only after written answers close every hard gate.
 
-- Select **Peach Payments** if its marketplace collection/holding/release structure is approved and the documented webhook HMAC can be enabled and exercised in sandbox.
-- Otherwise select **Stitch** if it confirms the marketplace fund flow and supplies the current signed-webhook and sandbox contract.
+- Do not select **Peach Payments**: it is not suitable for LEKKADEALL marketplace model — vendor confirmed no marketplace support.
+- Select **Stitch** if it confirms the marketplace fund flow and supplies the current signed-webhook and sandbox contract.
 - Select **TradeSafe** only if it supplies a cryptographically signed, replay-resistant callback mechanism meeting the Ticket 8B security properties.
+- Consider **Netcash, PayFast, or Ozow** only if a candidate confirms both a compliant marketplace hold/release structure and signed webhook suitability, along with the other hard gates.
 - If none closes those gates, retain the current **no provider ready** decision and do not implement a provider adapter.
 
 The future implementation ticket must freeze the selected provider documentation version, event mapping, signature vector fixtures, secret names (placeholders only in source control), reconciliation behavior, and the complete test matrix before code is merged.

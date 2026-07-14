@@ -2114,3 +2114,15 @@ Ticket 8C is for selecting and preparing the first real sandbox provider-specifi
 ### Non-goals
 
 Ticket 8C does **not** implement live provider adapters, real payment webhooks, real provider credentials, real card/EFT processing, real refund webhooks, real payout webhooks, reconciliation jobs, RLS changes, or UI.
+
+### Provider comparison update — 13 July 2026
+
+- Peach Payments confirmed directly to the user that it does not support marketplace.
+- Peach Payments is therefore **not suitable for the LEKKADEALL marketplace model — vendor confirmed no marketplace support** and has been removed from the Ticket 8C shortlist.
+- The revised shortlist is:
+  1. Stitch — next technical candidate, pending marketplace/hold/release confirmation.
+  2. TradeSafe — marketplace/escrow model candidate, pending stronger signed webhook/callback confirmation.
+  3. Netcash / PayFast / Ozow — lower priority unless they confirm marketplace hold/release and signed webhook suitability.
+- The current decision remains **no provider ready for selection yet**.
+- All unresolved candidate capabilities, commercial terms, compliance arrangements, and operational details remain **needs vendor confirmation**.
+- This update is planning-only. No provider adapter, credentials, migration, test, payment processing, refund/payout execution, reconciliation job, RLS change, or UI was added.
