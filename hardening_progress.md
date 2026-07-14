@@ -2234,3 +2234,114 @@ The existing `Supabase database tests` workflow remains the regression gate. Tic
 4. runs the existing role escalation, baseline RLS, exact-address privacy, marketplace state-machine, payment ledger, refund ledger, cash policy, payout-release, mock-checkout, and payment-webhook pgTAP suites.
 
 The Deno and pgTAP suites were not run locally for Ticket 9A-1 because Deno, the Supabase CLI, and the local Supabase stack are not available in this shell. No database, webhook, migration, RLS, grant, policy, or function file changed; the next GitHub Actions run is the verification source for no database regression.
+
+## Ticket 9B — Secure Auth profile provisioning
+
+### Issue fixed
+
+Supabase Auth could create an `auth.users` row without a matching `public.profiles` row. The Ticket 9A-2 frontend correctly refused to insert that application row, leaving new registrations in the fail-closed “account setup unavailable” state.
+
+Ticket 9B adds an atomic, trusted database provisioning path. Normal Auth insertion now creates exactly one fixed-default customer profile without trusting browser input or Auth metadata.
+
+### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/013_secure_profile_provisioning.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/profile_provisioning.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+### Database implementation
+
+- Added private `SECURITY DEFINER` helper `private.ensure_auth_user_profile(uuid, text)` with `search_path = pg_catalog` and explicit schema-qualified references.
+- Added private `SECURITY DEFINER` trigger function `private.provision_auth_user_profile()` with the same safe search-path contract.
+- Added `provision_auth_user_profile_after_insert`, an `AFTER INSERT` trigger on `auth.users`.
+- Every newly provisioned profile uses only fixed database-owned values:
+  - `id = NEW.id`
+  - `role = customer`
+  - `account_status = active`
+  - `display_name = New customer`
+  - `city = Potchefstroom`
+  - phone, verification timestamps, suburb, and avatar remain null
+- The implementation never reads `raw_user_meta_data`, `raw_app_meta_data`, query parameters, or registration payloads.
+- Profile creation uses `ON CONFLICT (id) DO NOTHING`. It does not use an updating upsert and cannot overwrite an existing profile.
+- The private functions reject unsupported provisioning sources and are non-executable by `public`, `anon`, `authenticated`, and `service_role`.
+- No `provider_profiles`, provider approval, verification, admin, support, identity, payment, address, or marketplace record is created.
+- No profile insert/delete grants or RLS policies were added for browser roles.
+
+### Backfill and audit behavior
+
+- The trigger is installed before backfill to close the deployment race.
+- Existing `auth.users` rows without profiles are provisioned with the same fixed safe defaults.
+- Existing profiles are skipped and never modified.
+- The migration fails if any Auth user remains without a profile after backfill.
+- A newly created profile writes one append-only `system.profile_provisioned` audit event through the existing private audit helper.
+- Audit metadata contains only a fixed source (`auth_trigger` or `migration_backfill`) and version marker. It contains no email, phone, token, Auth metadata, address, or registration payload.
+
+### Regression fixture updates
+
+The shared pgTAP seed and Ticket 7D test previously inserted Auth users and then manually inserted their profiles. Because Ticket 9B now provisions those rows automatically, the fixtures were changed to update their test-only provider/admin states under the existing Ticket 1 privileged test bypass. They do not disable the production provisioning trigger or grant frontend insert access.
+
+### Tests added
+
+`profile_provisioning.test.sql` contains 44 assertions covering:
+
+- trigger/function presence, `SECURITY DEFINER`, safe search paths, and revoked execution;
+- fixed customer/active/neutral profile creation;
+- hostile user/app metadata rejection;
+- no provider/admin/support profile creation;
+- privacy-safe audit logging;
+- idempotent replay and no overwrite;
+- authenticated profile insert/delete denial;
+- own-profile read and cross-user denial;
+- direct role/account-status escalation denial;
+- existing-user backfill and repeated-backfill safety; and
+- Ticket 1 privileged-field and Ticket 2 RLS regression smoke checks.
+
+### CI wiring
+
+The `Supabase database tests` workflow now runs:
+
+```bash
+supabase test db supabase/tests/database/profile_provisioning.test.sql
+```
+
+after the role-escalation and baseline-RLS suites. All existing frontend, Deno webhook, migration, and pgTAP steps remain in place.
+
+### How to run
+
+From `outputs/marketplace-production-foundation`:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/role_escalation.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/profile_provisioning.test.sql
+supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/payments_ledger.test.sql
+supabase test db supabase/tests/database/refunds_ledger.test.sql
+supabase test db supabase/tests/database/cash_payment_policy.test.sql
+supabase test db supabase/tests/database/payout_release_controls.test.sql
+supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+supabase test db supabase/tests/database/payment_webhooks.test.sql
+```
+
+Also run from the repository root:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs
+cd outputs/marketplace-production-foundation
+deno test supabase/functions/payment-webhook/index.test.ts
+```
+
+### Verification status
+
+Static review confirms that Ticket 9B adds no frontend code, credential, service-role key, profile insert/delete grant or policy, provider onboarding, admin dashboard, payment-provider integration, or changes to payment/refund/payout/webhook/address/dispute/identity flows.
+
+The Ticket 9A-1 frontend regression suite was run with the bundled Node runtime and passed **8/8 tests**. The new pgTAP file was also statically checked: its declared plan and assertion count both equal **44**.
+
+Docker, the Supabase CLI, and Deno are not available in this shell, so the database reset, pgTAP execution, and webhook route tests were not run locally. The updated GitHub Actions workflow is the authoritative database/webhook integration and regression gate for this implementation.

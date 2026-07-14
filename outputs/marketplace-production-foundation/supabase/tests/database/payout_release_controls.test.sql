@@ -11,9 +11,20 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-000000000013', 'provider-c-unapproved@lekkadeall.test'),
   ('00000000-0000-0000-0000-000000000014', 'provider-d-suspended@lekkadeall.test');
 
-insert into public.profiles (id, role, display_name, city, account_status) values
-  ('00000000-0000-0000-0000-000000000013', 'provider', 'Provider C Unapproved', 'Potchefstroom', 'active'),
-  ('00000000-0000-0000-0000-000000000014', 'provider', 'Provider D Suspended', 'Potchefstroom', 'suspended');
+set local lekkadeall.allow_privileged_profile_update = 'on';
+
+update public.profiles as p
+set role = 'provider'::public.user_role,
+    display_name = v.display_name,
+    city = 'Potchefstroom',
+    account_status = v.account_status
+from (values
+  ('00000000-0000-0000-0000-000000000013'::uuid, 'Provider C Unapproved', 'active'),
+  ('00000000-0000-0000-0000-000000000014'::uuid, 'Provider D Suspended', 'suspended')
+) as v(id, display_name, account_status)
+where p.id = v.id;
+
+set local lekkadeall.allow_privileged_profile_update = 'off';
 
 insert into public.provider_profiles (
   user_id, business_name, verification_status, verification_reference,

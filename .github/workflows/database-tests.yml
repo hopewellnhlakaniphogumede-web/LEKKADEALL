@@ -59,6 +59,9 @@ jobs:
       - name: Run baseline RLS pgTAP tests
         run: supabase test db supabase/tests/database/baseline_rls.test.sql
 
+      - name: Run secure profile provisioning pgTAP tests
+        run: supabase test db supabase/tests/database/profile_provisioning.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 

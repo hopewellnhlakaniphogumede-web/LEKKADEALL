@@ -8,12 +8,26 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-000000000012', 'provider-b@lekkadeall.test'),
   ('00000000-0000-0000-0000-000000000099', 'admin@lekkadeall.test');
 
-insert into public.profiles (id, role, display_name, city, account_status) values
-  ('00000000-0000-0000-0000-000000000001', 'customer', 'Customer A', 'Potchefstroom', 'active'),
-  ('00000000-0000-0000-0000-000000000002', 'customer', 'Customer B', 'Potchefstroom', 'active'),
-  ('00000000-0000-0000-0000-000000000011', 'provider', 'Provider A', 'Potchefstroom', 'active'),
-  ('00000000-0000-0000-0000-000000000012', 'provider', 'Provider B', 'Potchefstroom', 'active'),
-  ('00000000-0000-0000-0000-000000000099', 'admin', 'Admin User', 'Potchefstroom', 'active');
+-- Ticket 9B provisions every Auth user as a customer/active profile. Tests that
+-- need historical provider/admin fixtures adjust those rows through the same
+-- test-only privileged bypass already used by the Ticket 1 regression suite.
+set local lekkadeall.allow_privileged_profile_update = 'on';
+
+update public.profiles as p
+set role = v.role::public.user_role,
+    display_name = v.display_name,
+    city = v.city,
+    account_status = v.account_status
+from (values
+  ('00000000-0000-0000-0000-000000000001'::uuid, 'customer', 'Customer A', 'Potchefstroom', 'active'),
+  ('00000000-0000-0000-0000-000000000002'::uuid, 'customer', 'Customer B', 'Potchefstroom', 'active'),
+  ('00000000-0000-0000-0000-000000000011'::uuid, 'provider', 'Provider A', 'Potchefstroom', 'active'),
+  ('00000000-0000-0000-0000-000000000012'::uuid, 'provider', 'Provider B', 'Potchefstroom', 'active'),
+  ('00000000-0000-0000-0000-000000000099'::uuid, 'admin', 'Admin User', 'Potchefstroom', 'active')
+) as v(id, role, display_name, city, account_status)
+where p.id = v.id;
+
+set local lekkadeall.allow_privileged_profile_update = 'off';
 
 insert into public.provider_profiles (
   user_id, business_name, verification_status, verification_reference,

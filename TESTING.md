@@ -32,6 +32,7 @@ deno test supabase/functions/payment-webhook/index.test.ts
 supabase db reset
 supabase test db supabase/tests/database/role_escalation.test.sql
 supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
@@ -61,6 +62,7 @@ Common useful steps:
 - **Run mock payment webhook route tests**: raw-body HMAC verification, missing/invalid signatures, stale timestamps, exact payload hashing, no database call before verification, safe metadata forwarding, runtime-only mock secret/app-env config, and production mock-mode fail-closed behavior.
 - **Run role escalation pgTAP tests**: role, provider verification, privileged-column, and audit protections.
 - **Run baseline RLS pgTAP tests**: table-level RLS, service categories, provider services, vendor events, and baseline privacy protections.
+- **Run secure profile provisioning pgTAP tests**: `auth.users` trigger provisioning, fixed customer/active defaults, hostile metadata rejection, idempotency/no-overwrite behavior, privacy-safe audit events, existing-user backfill, frontend insert/delete denial, own-profile RLS, and Ticket 1/2 regression checks.
 - **Run exact address privacy pgTAP tests**: exact address isolation, safe request summaries, confirmed-booking reveal, address audit events, and public-description address checks.
 - **Run marketplace state machine pgTAP tests**: request draft/publish/cancel, provider bid submission/withdrawal, bid acceptance, booking creation, direct workflow mutation denial, booking integrity constraints, completion confirmation after `in_progress`, and Ticket 1/2/5 smoke protections.
 - **Run payment ledger pgTAP tests**: constrained payment status values, payment/release direct mutation denial, booking-party payment visibility, append-only payment events, idempotent trusted payment event recording, and Ticket 1/2/5/6 smoke protections.
@@ -90,6 +92,7 @@ supabase start
 supabase db reset
 supabase test db supabase/tests/database/role_escalation.test.sql
 supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
