@@ -2446,7 +2446,11 @@ Ticket 9B added no frontend code, provider onboarding, payment-provider code, ad
 
 ### Ticket 9A-2 implementation — Supabase Auth and safe read-only data — 2026-07-15
 
-**Status:** Implemented locally; GitHub Actions verification pending.
+**Status:** CI-verified.
+
+- **Latest successful run:** Implement Ticket 9A-2 Supabase auth and safe reads
+- **Run status:** Success
+- **Ticket status:** CI-verified
 
 #### What was implemented
 
@@ -2485,6 +2489,14 @@ Ticket 9B added no frontend code, provider onboarding, payment-provider code, ad
 
 No migration, RLS policy, grant, database function, webhook, or Supabase database test file was changed.
 
+#### Tests added or updated
+
+- Added `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs` for public-client configuration, metadata-free registration, callback input handling, profile-backed route guards, explicit read projections, fixed table allowlists, placeholder-only configuration, and prohibited frontend capability checks.
+- Updated `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs` for wired Auth forms, safe application states, exact mock-payment wording, required route coverage, absence of an admin route, and frontend mutation/secret regression checks.
+- Updated `.github/workflows/database-tests.yml` to install the exact frozen frontend dependency and run all frontend `*.test.mjs` files before the existing Deno webhook and pgTAP database suites.
+- Local frontend result: **15/15 tests passed**.
+- GitHub Actions result: **Success**. The frontend tests, Deno webhook tests, migration reset, Ticket 9B profile-provisioning suite, Ticket 1 and Ticket 2 protections, and all remaining pgTAP regressions completed successfully.
+
 #### Local setup, preview, and tests
 
 From the repository root:
@@ -2515,3 +2527,13 @@ Local result: **15/15 tests passed** using the bundled Node runtime. CI installs
 - No identity provider, real payment provider, checkout, card/CVV/bank-login/payment-method form, cash, or off-platform payment option.
 - No credential, service-role key, webhook secret, provider secret, identity secret, admin credential, or real project value.
 - No migration, RLS, grant, policy, database-function, or webhook change or weakening.
+
+#### CI-verified security confirmations
+
+- No service-role key or other server-only Supabase key was added.
+- No real credential, project value, payment/provider secret, webhook secret, identity secret, database credential, or admin credential was added.
+- No `/admin` route or admin dashboard was added.
+- No profile editing or browser-side profile insertion was added.
+- No exact-address submission, storage, query, or reveal flow was added.
+- No marketplace mutation was added: there is no request publication/cancellation, bidding, booking completion, refund, payout, dispute, review, consent, support, notification, chat, application-table insert/update/upsert/delete, or application RPC.
+- No real payment-provider adapter, API call, checkout, payment-method form, cash option, or off-platform payment flow was added.
