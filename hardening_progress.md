@@ -2388,3 +2388,58 @@ The same unsupported trigger-toggle pattern appeared again in the later backfill
 - The test still covers fixed customer/active provisioning, hostile metadata rejection, idempotency, no overwrite, browser insert/delete denial, own/cross-user reads, role/status protection, privacy-safe audit logging, and backfill.
 - The Ticket 9A-1 frontend regression suite remains **8/8 passing** locally.
 - Docker, Supabase CLI, and Deno remain unavailable locally, so the corrected pgTAP suite and full database/webhook regressions require GitHub Actions verification.
+
+### Ticket 9B CI verification — 2026-07-15
+
+- **Latest successful run:** Fix Ticket 9B profile provisioning pgTAP plan
+- **Run status:** Success
+- **Ticket status:** CI-verified
+
+#### What was implemented
+
+- A private, schema-qualified `SECURITY DEFINER` provisioning helper and trigger function with a safe `search_path`.
+- An `AFTER INSERT` trigger on `auth.users` that creates exactly one matching `public.profiles` row using fixed database-owned defaults: `role = customer`, `account_status = active`, and `display_name = New customer`.
+- Idempotent `ON CONFLICT (id) DO NOTHING` behavior that never updates or overwrites an existing profile.
+- A safe backfill for existing Auth users without profiles, using the same fixed defaults and leaving existing profiles unchanged.
+- Minimal privacy-safe `system.profile_provisioned` audit events containing only a fixed source and version marker.
+- A 44-assertion pgTAP suite covering provisioning, hostile metadata, idempotency, no overwrite, browser denials, RLS visibility, role/status protection, audit behavior, and backfill.
+- CI wiring for the new profile-provisioning pgTAP suite while retaining all existing frontend, webhook, migration, and database regression steps.
+
+#### Initial failure
+
+The first Ticket 9B GitHub Actions run reached the secure profile-provisioning pgTAP step but stopped after 26 of 44 planned assertions. All 26 assertions that ran passed; pgTAP reported a bad plan because SQL execution terminated before assertion 27.
+
+#### Root cause
+
+The test attempted ownership-level `ALTER TABLE auth.users DISABLE/ENABLE TRIGGER` statements to simulate an existing Auth user without a profile. The Supabase-managed `auth.users` table could not be altered by the pgTAP CI connection, so execution ended immediately after assertion 26.
+
+#### Fix applied
+
+- Kept all 44 intentional security assertions rather than reducing the plan.
+- Removed both trigger-disable/enable blocks from the test.
+- Reworked the direct-insert and backfill fixtures to create Auth users normally, allow the production trigger to provision them, and then delete only the relevant test profile before exercising the denial or backfill path.
+- Left the production migration, trigger, helper, function revocations, grants, policies, audit protections, and role-escalation protections unchanged.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/013_secure_profile_provisioning.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/profile_provisioning.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/rls_test_seed.inc`
+- `outputs/marketplace-production-foundation/supabase/tests/database/payout_release_controls.test.sql`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### CI-verified security outcomes
+
+- New Auth users receive exactly one matching `customer` / `active` profile with neutral approved defaults.
+- Hostile `raw_user_meta_data` and `raw_app_meta_data` values cannot select role, account status, provider approval, verification/review status, admin/support authority, identity state, payment state, or address data.
+- Existing profiles are not overwritten by trigger replay or backfill.
+- Browser users still cannot directly insert or delete `public.profiles` rows.
+- Ticket 1 role/account-status escalation protections remain intact.
+- Ticket 2 RLS, grants, own-profile visibility, and cross-user denial protections remain intact.
+- All existing GitHub Actions frontend, Deno webhook, migration, and pgTAP regression steps completed successfully in the green run.
+
+#### Explicit non-goals preserved
+
+Ticket 9B added no frontend code, provider onboarding, payment-provider code, admin dashboard, real credential, service-role key, frontend profile insert/delete grant or policy, or RLS weakening.
