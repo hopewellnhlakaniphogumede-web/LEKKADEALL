@@ -1,4 +1,4 @@
-const PROTECTED_ROUTES = new Set(['/app/customer', '/app/provider', '/app/settings']);
+const PROTECTED_ROUTES = new Set(['/app/customer', '/app/customer/requests/new', '/app/provider', '/app/settings']);
 const RESTRICTED_STATUSES = new Set(['restricted', 'suspended', 'closed']);
 
 export function isProtectedRoute(pathname) {
@@ -17,7 +17,7 @@ export function resolveRouteAccess(pathname, session, profile, options = {}) {
   if (profile.account_status !== 'active') return { kind: 'accessDenied' };
 
   if (profile.role === 'customer') {
-    return ['/app/customer', '/app/settings'].includes(pathname)
+    return ['/app/customer', '/app/customer/requests/new', '/app/settings'].includes(pathname)
       ? { kind: 'allowed', role: 'customer' }
       : { kind: 'accessDenied' };
   }

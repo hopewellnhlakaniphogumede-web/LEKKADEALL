@@ -31,7 +31,7 @@ jobs:
         working-directory: .
         run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
 
-      - name: Run Ticket 9A-2 frontend auth and safe-read tests
+      - name: Run Ticket 9A-3 draft creation and existing frontend tests
         working-directory: .
         run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 

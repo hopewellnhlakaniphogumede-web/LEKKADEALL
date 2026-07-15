@@ -20,6 +20,7 @@ import {
   readOwnSettingsProfile,
 } from './safe-reads.js';
 import { defaultRouteForProfile, isProtectedRoute, resolveRouteAccess } from './route-guards.js';
+import { createCustomerDraftRequest, validateCustomerDraft } from './request-draft.js';
 import { normalizePath, renderRoute } from './shell.js';
 
 const root = document.querySelector('#app');
@@ -38,8 +39,12 @@ const state = {
   customer: null,
   providerStatus: null,
   settingsProfile: null,
+  requestDraft: {
+    values: {}, errors: {}, message: '', submitting: false, requestId: null,
+  },
 };
 let refreshSequence = 0;
+let draftSubmissionInFlight = false;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -50,6 +55,7 @@ const pageTitles = Object.freeze({
   '/auth/reset-password': 'Reset password',
   '/auth/callback': 'Authentication callback',
   '/app/customer': 'Customer workspace',
+  '/app/customer/requests/new': 'Create request draft',
   '/app/provider': 'Provider workspace',
   '/app/settings': 'Settings',
   '/access-denied': 'Access denied',
@@ -73,6 +79,7 @@ function view() {
     customer: state.customer,
     providerStatus: state.providerStatus,
     settingsProfile: state.settingsProfile,
+    requestDraft: state.requestDraft,
   };
 }
 
@@ -88,6 +95,12 @@ function clearPersonalState() {
   state.customer = null;
   state.providerStatus = null;
   state.settingsProfile = null;
+}
+
+function resetRequestDraft() {
+  state.requestDraft = {
+    values: {}, errors: {}, message: '', submitting: false, requestId: null,
+  };
 }
 
 async function loadRouteProfile() {
@@ -113,8 +126,9 @@ async function refreshRoute() {
   const sequence = ++refreshSequence;
   const path = currentPath();
   state.formMessage = '';
+  if (path !== '/app/customer/requests/new') resetRequestDraft();
 
-  if (path === '/services') {
+  if (path === '/services' || path === '/app/customer/requests/new') {
     if (!state.client) {
       state.categoriesStatus = 'unconfigured';
     } else {
@@ -149,6 +163,8 @@ async function refreshRoute() {
 
     if (path === '/app/customer') {
       await loadCustomerData(sequence);
+    } else if (path === '/app/customer/requests/new') {
+      // Categories were loaded above. Draft state remains in memory only while this route is active.
     } else if (path === '/app/provider') {
       state.providerStatus = await readOwnProviderStatus(state.client, state.session.user.id);
     } else if (path === '/app/settings') {
@@ -167,6 +183,9 @@ async function refreshRoute() {
 async function navigate(url, { replace = false } = {}) {
   const next = new URL(url, window.location.origin);
   if (next.origin !== window.location.origin) return;
+  if (currentPath() === '/app/customer/requests/new' && normalizePath(next.pathname) !== '/app/customer/requests/new') {
+    resetRequestDraft();
+  }
   window.history[replace ? 'replaceState' : 'pushState']({}, '', `${next.pathname}${next.search}`);
   render({ scroll: true });
   await refreshRoute();
@@ -247,6 +266,71 @@ async function submitAuthForm(form) {
   render();
 }
 
+async function submitCustomerDraftForm(form) {
+  if (draftSubmissionInFlight || currentPath() !== '/app/customer/requests/new') return;
+  if (!state.client || !state.session?.user?.id || state.access?.kind !== 'allowed'
+      || state.routeProfile?.role !== 'customer' || state.routeProfile?.account_status !== 'active') {
+    state.requestDraft.message = 'Only an active customer can create a request draft.';
+    render();
+    return;
+  }
+
+  const formData = new FormData(form);
+  const values = {
+    category: String(formData.get('category') ?? ''),
+    title: String(formData.get('title') ?? ''),
+    description: String(formData.get('description') ?? ''),
+    suburb: String(formData.get('suburb') ?? ''),
+    city: String(formData.get('city') ?? ''),
+    requestedStart: String(formData.get('requested-start') ?? ''),
+    budget: String(formData.get('budget') ?? ''),
+  };
+  const validation = validateCustomerDraft(values, state.categories);
+  state.requestDraft = {
+    values, errors: validation.errors, message: validation.ok ? '' : 'Review the highlighted fields before creating the draft.',
+    submitting: false, requestId: null,
+  };
+  if (!validation.ok) {
+    render();
+    return;
+  }
+
+  const actorId = state.session.user.id;
+  draftSubmissionInFlight = true;
+  state.requestDraft.submitting = true;
+  state.requestDraft.errors = {};
+  state.requestDraft.message = 'Creating your private draft…';
+  render();
+
+  let result;
+  try {
+    result = await createCustomerDraftRequest(state.client, validation.values);
+  } catch {
+    result = {
+      ok: false,
+      requestId: null,
+      message: 'The draft could not be confirmed. Refresh your drafts before trying again.',
+    };
+  }
+  draftSubmissionInFlight = false;
+
+  if (currentPath() !== '/app/customer/requests/new' || state.session?.user?.id !== actorId
+      || state.access?.kind !== 'allowed' || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active') {
+    resetRequestDraft();
+    return;
+  }
+  if (result.ok) {
+    state.requestDraft = {
+      values: {}, errors: {}, message: '', submitting: false, requestId: result.requestId,
+    };
+  } else {
+    state.requestDraft.submitting = false;
+    state.requestDraft.message = result.message;
+  }
+  render();
+}
+
 async function initialize() {
   await loadRuntimeConfig();
   const publicConfig = readPublicConfig();
@@ -273,7 +357,10 @@ async function initialize() {
     state.session = session;
     state.sessionExpired = event === 'SIGNED_OUT' && hadSession;
     if (event === 'PASSWORD_RECOVERY') state.recoveryReady = true;
-    if (!session) clearPersonalState();
+    if (!session) {
+      clearPersonalState();
+      resetRequestDraft();
+    }
     await refreshRoute();
   });
 
@@ -286,6 +373,7 @@ document.addEventListener('click', async (event) => {
   const signOutButton = event.target.closest('[data-auth-action="sign-out"]');
   if (signOutButton) {
     clearPersonalState();
+    resetRequestDraft();
     state.session = null;
     state.sessionExpired = false;
     render();
@@ -311,6 +399,12 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const requestForm = event.target.closest('[data-draft-request-form]');
+  if (requestForm) {
+    event.preventDefault();
+    await submitCustomerDraftForm(requestForm);
+    return;
+  }
   const form = event.target.closest('[data-auth-form]');
   if (!form) return;
   event.preventDefault();

@@ -2,7 +2,7 @@
 
 ## Frontend shell, database, and webhook route tests in CI
 
-GitHub Actions runs the Ticket 9A-2 frontend Auth/safe-read tests, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
+GitHub Actions runs the Ticket 9A-3 draft-creation tests plus the Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
 
 Workflow file:
 
@@ -58,7 +58,7 @@ In GitHub:
 
 Common useful steps:
 
-- **Run Ticket 9A-2 frontend auth and safe-read tests**: required routes and safe states, exact mock-payment wording, anon-only client configuration, metadata-free registration, protected-profile route decisions, explicit projections, fixed read sources, absence of an admin route, no application writes/RPC/broad selects, and clean-path entry files.
+- **Run Ticket 9A-3 draft creation and existing frontend tests**: required routes and safe states, exact mock-payment wording, anon-only client configuration, protected-profile route decisions, active-category reads, draft validation, privacy detection, integer ZAR conversion, explicit SAST conversion, the single allowlisted draft RPC, null ciphertext, no blocked RPCs/direct DML/broad selects, and clean-path entry files.
 - **Apply migrations with database reset**: migration/schema errors usually appear here.
 - **Run mock payment webhook route tests**: raw-body HMAC verification, missing/invalid signatures, stale timestamps, exact payload hashing, no database call before verification, safe metadata forwarding, runtime-only mock secret/app-env config, and production mock-mode fail-closed behavior.
 - **Run role escalation pgTAP tests**: role, provider verification, privileged-column, and audit protections.
@@ -138,3 +138,38 @@ The frontend tests verify:
 - the exact `Mock/sandbox — no real money moved` banner wording.
 
 GitHub Actions installs the locked frontend dependency, runs all `*.test.mjs` files, and then continues through the existing Deno webhook, migration reset, and pgTAP suites. A denied safe read remains a placeholder; it is not grounds to modify RLS, grants, policies, or database functions.
+
+## Ticket 9A-3 customer draft-creation verification
+
+Ticket 9A-3 adds `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs` and updates the existing shell/Auth tests. The frontend still uses Node's built-in test runner.
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+Preview the route after copying the public runtime-config template as documented above:
+
+```powershell
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+Open `http://localhost:4173/app/customer/requests/new/`. A valid configured Supabase project and active customer session are required to submit. Never use a service-role key or real server secret in the browser configuration.
+
+The Ticket 9A-3 tests verify:
+
+- the route is protected by the existing session plus own-profile role/status guard;
+- only IDs from the active category projection are accepted;
+- title, description, suburb, city, requested start, and optional budget validation;
+- required exact-address/contact privacy warnings and local sensitive-pattern detection;
+- budget conversion by string/BigInt-safe integer logic, including overflow rejection;
+- requested-start conversion to an explicit SAST `+02:00` timestamp;
+- exactly one allowlisted marketplace RPC: `customer_create_draft_request`;
+- `p_precise_address_ciphertext` is always `null`;
+- success is rendered only after a returned request UUID;
+- RPC failures are generic and are never automatically retried;
+- no publish/address RPC, direct application-table DML, `select('*')`, persistent form storage, geolocation, admin/service-role capability, exact-address/contact/payment field, or real payment code exists.
+
+Local implementation result: **25/25 frontend tests passed**. The Deno webhook and pgTAP suites were not changed; GitHub Actions remains the complete integration and database-security regression gate.

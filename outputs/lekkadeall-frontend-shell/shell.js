@@ -1,3 +1,5 @@
+import { REQUEST_PRIVACY_WARNING } from './request-draft.js';
+
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
 export const ROUTES = Object.freeze([
@@ -9,6 +11,7 @@ export const ROUTES = Object.freeze([
   '/auth/reset-password',
   '/auth/callback',
   '/app/customer',
+  '/app/customer/requests/new',
   '/app/provider',
   '/app/settings',
   '/access-denied',
@@ -247,17 +250,90 @@ function customerDashboard(view) {
   const payments = view.customer?.payments?.data ?? [];
   const requestContent = view.customer?.requests?.ok === false
     ? pageState('error', 'Requests unavailable', 'Existing RLS or column grants did not permit this read.')
-    : dataList(requests, (request) => `<article><span>${escapeHtml(request.status)}</span><strong>${escapeHtml(request.title)}</strong><small>${escapeHtml(request.suburb)}, ${escapeHtml(request.city)}</small></article>`, 'No requests to show', 'Request creation is intentionally not implemented.');
+    : dataList(requests, (request) => `<article><span>${escapeHtml(request.status)}</span><strong>${escapeHtml(request.title)}</strong><small>${escapeHtml(request.suburb)}, ${escapeHtml(request.city)}</small></article>`, 'No requests to show', 'Create a private draft when you are ready.');
   const bookingContent = view.customer?.bookings?.ok === false
     ? pageState('error', 'Bookings unavailable', 'No broader booking query was attempted.')
     : dataList(bookings, (booking) => `<article><span>${escapeHtml(booking.status)}</span><strong>${escapeHtml(booking.public_reference)}</strong><small>${formatMoney(booking.service_amount_minor, booking.currency)}</small></article>`, 'No bookings to show', 'Booking actions and completion are intentionally not implemented.');
 
   return appPage('Customer workspace', `
-    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER WORKSPACE</p><h1>Your safe account view.</h1><p>Only RLS-protected request, booking and sandbox-payment summaries are read.</p></div><span class="button button-disabled" aria-disabled="true">New request — later</span></section>
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER WORKSPACE</p><h1>Your safe account view.</h1><p>Only RLS-protected request, booking and sandbox-payment summaries are read.</p></div><a class="button button-primary" href="/app/customer/requests/new" data-nav>Create request draft</a></section>
     <section class="metrics-grid" aria-label="Customer summary"><div>${metricCard('Requests', String(requests.length), 'Own rows only')}</div><div>${metricCard('Bookings', String(bookings.length), 'Booking-party rows only')}</div><div>${metricCard('Payments', String(payments.length), 'Read-only sandbox statuses')}</div></section>
     ${mockPaymentBanner()}
     <section class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><span>REQUESTS</span><h2>Your requests</h2></div><span class="status-chip">Read-only</span></div>${requestContent}</article><article class="panel"><div class="panel-heading"><div><span>BOOKINGS</span><h2>Your timeline</h2></div><span class="status-chip">Read-only</span></div>${bookingContent}</article></section>
   `);
+}
+
+function requestFieldError(name, errors = {}) {
+  return errors[name]
+    ? `<small id="${escapeHtml(name)}-error" class="field-error">${escapeHtml(errors[name])}</small>`
+    : '';
+}
+
+function requestDraftForm(view) {
+  const draft = view.requestDraft ?? {};
+  const values = draft.values ?? {};
+  const errors = draft.errors ?? {};
+  const options = (view.categories ?? []).map((category) => `
+    <option value="${escapeHtml(category.id)}" ${values.category === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('');
+
+  return `
+    <form class="request-form" data-draft-request-form autocomplete="off" novalidate>
+      <section class="request-form-section">
+        <div class="section-number">01</div><div><h2>Choose a service</h2><p>Only active service categories are available.</p></div>
+        <label class="full-field">Service category<select name="category" required><option value="">Choose a category</option>${options}</select>${requestFieldError('category', errors)}</label>
+      </section>
+      <section class="request-form-section">
+        <div class="section-number">02</div><div><h2>Describe the public job</h2><p>Use general work details only.</p></div>
+        <aside class="privacy-warning" role="note"><strong>Public information warning</strong><p>${escapeHtml(REQUEST_PRIVACY_WARNING)}</p></aside>
+        <div class="form-field-grid">
+          <label class="full-field">Public job title<input name="title" type="text" minlength="3" maxlength="120" value="${escapeHtml(values.title ?? '')}" required>${requestFieldError('title', errors)}</label>
+          <label class="full-field">Public description<textarea name="description" minlength="10" maxlength="3000" rows="7" required>${escapeHtml(values.description ?? '')}</textarea>${requestFieldError('description', errors)}</label>
+        </div>
+      </section>
+      <section class="request-form-section">
+        <div class="section-number">03</div><div><h2>Add the approximate area</h2><p>Suburb and city only.</p></div>
+        <div class="form-field-grid">
+          <label>Suburb only<input name="suburb" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.suburb ?? '')}" required>${requestFieldError('suburb', errors)}</label>
+          <label>City only<input name="city" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.city ?? '')}" required>${requestFieldError('city', errors)}</label>
+        </div>
+      </section>
+      <section class="request-form-section">
+        <div class="section-number">04</div><div><h2>Schedule and budget</h2><p>The requested start is entered in South Africa time.</p></div>
+        <div class="form-field-grid">
+          <label>Requested start — South Africa time (SAST, UTC+2)<input name="requested-start" type="datetime-local" value="${escapeHtml(values.requestedStart ?? '')}" required>${requestFieldError('requestedStart', errors)}</label>
+          <label>Optional budget in ZAR<input name="budget" type="text" inputmode="decimal" placeholder="1500.00" value="${escapeHtml(values.budget ?? '')}">${requestFieldError('budget', errors)}</label>
+        </div>
+      </section>
+      <section class="request-review">
+        <p>${escapeHtml(REQUEST_PRIVACY_WARNING)}</p>
+        <div class="blocked-notice"><strong>Draft only</strong><span>Publishing and the private exact-address step are not available until the encryption boundary is verified.</span></div>
+        <button class="button button-primary" type="submit" ${draft.submitting ? 'disabled' : ''}>${draft.submitting ? 'Creating draft…' : 'Create private draft'}</button>
+        <p class="form-message" data-draft-message role="status">${escapeHtml(draft.message ?? '')}</p>
+      </section>
+    </form>`;
+}
+
+function customerRequestCreatePage(view) {
+  if (view.access?.kind !== 'allowed' || view.access?.role !== 'customer') {
+    const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
+    return appPage('Create request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Create a private draft.</h1></div></section>${accessState(deniedAccess)}`);
+  }
+  if (view.requestDraft?.requestId) {
+    return appPage('Create request draft', `
+      <section class="draft-created"><p class="eyebrow">DRAFT CREATED</p><h1>Your request draft is saved.</h1><p>The trusted backend returned request ID <code>${escapeHtml(view.requestDraft.requestId)}</code>. It remains a private draft.</p><div class="blocked-notice"><strong>Publishing remains unavailable</strong><span>Exact-address collection and publishing are blocked until the encryption boundary is verified.</span></div><a class="button button-secondary" href="/app/customer" data-nav>Return to customer dashboard</a></section>`);
+  }
+  let content;
+  if (view.categoriesStatus === 'loading' || view.categoriesStatus === 'idle') {
+    content = pageState('loading', 'Loading active categories', 'The form will open after the safe category read completes.');
+  } else if (view.categoriesStatus === 'error') {
+    content = pageState('error', 'Categories are unavailable', 'No draft can be created without an active category.');
+  } else if (!view.categories?.length) {
+    content = pageState('empty', 'No active categories', 'Draft creation is unavailable until an active category exists.');
+  } else {
+    content = requestDraftForm(view);
+  }
+  return appPage('Create request draft', `
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Create a private draft.</h1><p>This workflow creates a draft only. It cannot publish, collect an exact address, or contact providers.</p></div><a class="button button-secondary" href="/app/customer" data-nav>Back to dashboard</a></section>${content}`);
 }
 
 function providerDashboard(view) {
@@ -328,6 +404,7 @@ export function renderRoute(pathname, searchParams = new URLSearchParams(), view
   if (authCopy[path]) return authPage(path, view);
   if (path === '/auth/callback') return authCallbackPage(view);
   if (path === '/app/customer') return customerDashboard(view);
+  if (path === '/app/customer/requests/new') return customerRequestCreatePage(view);
   if (path === '/app/provider') return providerDashboard(view);
   if (path === '/app/settings') return settingsPage(view);
   if (path === '/access-denied') return accessDeniedPage(view);

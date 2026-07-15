@@ -64,6 +64,8 @@ test('route guards use session plus protected profile role and status', () => {
   assert.deepEqual(resolveRouteAccess('/app/customer', null, null), { kind: 'signedOut' });
   assert.deepEqual(resolveRouteAccess('/app/customer', session, null), { kind: 'missingProfile' });
   assert.deepEqual(resolveRouteAccess('/app/customer', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests/new', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests/new', session, { role: 'provider', account_status: 'active' }), { kind: 'accessDenied' });
   assert.deepEqual(resolveRouteAccess('/app/provider', session, { role: 'customer', account_status: 'active' }), { kind: 'accessDenied' });
   assert.deepEqual(resolveRouteAccess('/app/provider', session, { role: 'provider', account_status: 'suspended' }), { kind: 'restricted', accountStatus: 'suspended' });
   assert.deepEqual(resolveRouteAccess('/app/settings', session, { role: 'admin', account_status: 'active' }), { kind: 'accessDenied' });
@@ -111,7 +113,7 @@ test('all reads use a fixed table allowlist and explicit projections', async () 
 });
 
 test('browser modules contain no application DML, RPC, broad select or blocked source', async () => {
-  const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config'));
+  const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config') && name !== 'request-draft.js');
   const source = (await Promise.all(moduleNames.map((name) => readFile(join(root, name), 'utf8')))).join('\n');
   const forbidden = [
     '.insert(', '.update(', '.upsert(', '.delete(', '.rpc(', ".select('*')", '.select("*")',

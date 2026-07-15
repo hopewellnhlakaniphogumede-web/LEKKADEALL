@@ -2537,3 +2537,79 @@ Local result: **15/15 tests passed** using the bundled Node runtime. CI installs
 - No exact-address submission, storage, query, or reveal flow was added.
 - No marketplace mutation was added: there is no request publication/cancellation, bidding, booking completion, refund, payout, dispute, review, consent, support, notification, chat, application-table insert/update/upsert/delete, or application RPC.
 - No real payment-provider adapter, API call, checkout, payment-method form, cash option, or off-platform payment flow was added.
+
+### Ticket 9A-3 implementation — Customer request draft creation — 2026-07-15
+
+**Status:** Implemented locally; GitHub Actions verification pending.
+
+#### What was implemented
+
+- Added the protected `/app/customer/requests/new` route and its clean-path static entry file.
+- Added a customer-dashboard entry point labelled “Create request draft”.
+- Extended the existing Ticket 9A-2 session/profile guard so only an authenticated profile with `role = customer` and `account_status = active` can access or submit the route.
+- Reused the existing explicit `id,slug,name` active-category projection. Category IDs are accepted only when present in the currently loaded active result.
+- Added draft-only fields for category, public title, public description, suburb, city, requested start in SAST/UTC+2, and optional ZAR budget.
+- Added the exact Ticket 9A-3 privacy warning beside the public content fields and again before submission.
+- Added conservative local privacy detection for street/house/unit/room material, GPS coordinates, South African phone formats, email/URL/contact instructions, and access codes across every public text field.
+- Added title, description, suburb, city, category, calendar, future-time, and budget validation matching the reviewed plan.
+- Added explicit SAST conversion to an ISO 8601 timestamp carrying `+02:00` and a 15-minute client safety buffer.
+- Added optional ZAR conversion using string parsing and BigInt-safe integer arithmetic only. Blank becomes `null`; invalid formats, more than two decimals, negatives, and PostgreSQL integer overflow are rejected.
+- Added one marketplace RPC boundary: `customer_create_draft_request(...)`. The reviewed eight-parameter payload always passes `p_precise_address_ciphertext: null`.
+- Added an in-memory single-flight guard. Ambiguous failures are generic and are not automatically retried.
+- Added draft-created confirmation only after the backend returns a valid request UUID. The confirmation explains that the row remains a private draft and that publishing/exact-address handling are unavailable.
+- Form values remain in memory only while the route is active. They are not placed in URLs, logs, analytics, telemetry, `localStorage`, or `sessionStorage`.
+
+#### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/lekkadeall-frontend-shell/request-draft.js`
+- `outputs/lekkadeall-frontend-shell/route-guards.js`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/app/customer/requests/new/index.html`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+No dependency/package version, migration, RLS policy, grant, database function, Supabase database test, or webhook file was changed.
+
+#### Tests added or updated
+
+- Added `request-draft.test.mjs` for the exact privacy warning, public-content risk detection, validation boundaries, active-category allowlisting, SAST conversion, integer ZAR conversion, overflow rejection, exact RPC name/payload, null ciphertext, one-call failure behavior, customer-only rendering, draft-only confirmation, blocked capabilities, and single-flight/no-retry source checks.
+- Updated `frontend-shell.test.mjs` for the new registered route and clean-path entry file while preserving all Ticket 9A-1 coverage.
+- Updated `auth-safe-reads.test.mjs` for customer/provider guard decisions on the new route and to keep Ticket 9A-2 modules RPC-free while permitting only the reviewed Ticket 9A-3 RPC boundary.
+- Updated the GitHub Actions frontend step label; the existing glob already runs every `*.test.mjs` file before the unchanged Deno and pgTAP gates.
+- Local result: **25/25 frontend tests passed** using the bundled Node runtime.
+
+#### Local test and preview instructions
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+Copy-Item outputs/lekkadeall-frontend-shell/runtime-config.example.js outputs/lekkadeall-frontend-shell/runtime-config.local.js
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+With valid public browser configuration and an active customer session, open:
+
+```text
+http://localhost:4173/app/customer/requests/new/
+```
+
+#### What remains blocked
+
+- No exact-address input, map, GPS/geolocation, phone/contact field, private-address ciphertext production, address storage, address read, or reveal.
+- No request publish, open, edit, cancel, delete, or automatic ambiguous-failure retry.
+- No address or publication RPC is called.
+- No bidding, provider onboarding, booking completion, payment, refund, payout/release, dispute, review, support, consent, notification, chat, identity, or admin feature.
+- No direct application-table insert/update/upsert/delete and no `select('*')`.
+- No service-role key, real credential, real payment-provider adapter/API, checkout, payment-method form, cash, or off-platform payment UI.
+- No migration, RLS, grant, policy, database-function, database-test, or webhook change or weakening.
+
+The exact-address step and publication remain blocked until a separately reviewed encryption boundary and complete backend public-field validation are verified.
