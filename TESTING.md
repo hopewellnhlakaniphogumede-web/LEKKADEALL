@@ -2,17 +2,17 @@
 
 ## Frontend shell, database, and webhook route tests in CI
 
-GitHub Actions runs the Ticket 9A-1 frontend shell tests, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
+GitHub Actions runs the Ticket 9A-2 frontend Auth/safe-read tests, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
 
 Workflow file:
 
 - `.github/workflows/database-tests.yml`
 
-The workflow runs on `ubuntu-latest`, uses Node's built-in test runner for the dependency-free frontend shell, installs Deno, runs the mock payment webhook route tests, verifies Docker is available, installs the Supabase CLI, verifies the committed local Supabase config, starts the local Supabase stack, applies all local migrations with `supabase db reset`, then runs the pgTAP database tests.
+The workflow runs on `ubuntu-latest`, installs the exact locked Supabase browser package with pnpm, uses Node's built-in test runner for the frontend, installs Deno, runs the mock payment webhook route tests, verifies Docker is available, installs the Supabase CLI, verifies the committed local Supabase config, starts the local Supabase stack, applies all local migrations with `supabase db reset`, then runs the pgTAP database tests.
 
 It does not use production secrets. It uses only:
 
-- dependency-free static frontend files and Node built-in tests under `outputs/lekkadeall-frontend-shell`
+- a frozen frontend lockfile, the pinned public Supabase browser package, and Node built-in tests under `outputs/lekkadeall-frontend-shell`
 - deterministic mock webhook test values in application tests
 - local Supabase migrations under `outputs/marketplace-production-foundation/supabase/migrations`
 - committed non-secret local Supabase config at `outputs/marketplace-production-foundation/supabase/config.toml`
@@ -27,7 +27,8 @@ CI does not run `supabase init`. The local config is committed so the test envir
 From `outputs/marketplace-production-foundation`, CI runs:
 
 ```bash
-node --test ../lekkadeall-frontend-shell/tests/frontend-shell.test.mjs
+pnpm install --dir ../lekkadeall-frontend-shell --frozen-lockfile
+node --test ../lekkadeall-frontend-shell/tests/*.test.mjs
 deno test supabase/functions/payment-webhook/index.test.ts
 supabase db reset
 supabase test db supabase/tests/database/role_escalation.test.sql
@@ -57,7 +58,7 @@ In GitHub:
 
 Common useful steps:
 
-- **Run Ticket 9A-1 frontend shell tests**: required route coverage, exact mock-payment wording, safe state rendering, absence of an admin route, non-transmitting auth shells, no direct database writes or sensitive function calls, and clean-path static entry files.
+- **Run Ticket 9A-2 frontend auth and safe-read tests**: required routes and safe states, exact mock-payment wording, anon-only client configuration, metadata-free registration, protected-profile route decisions, explicit projections, fixed read sources, absence of an admin route, no application writes/RPC/broad selects, and clean-path entry files.
 - **Apply migrations with database reset**: migration/schema errors usually appear here.
 - **Run mock payment webhook route tests**: raw-body HMAC verification, missing/invalid signatures, stale timestamps, exact payload hashing, no database call before verification, safe metadata forwarding, runtime-only mock secret/app-env config, and production mock-mode fail-closed behavior.
 - **Run role escalation pgTAP tests**: role, provider verification, privileged-column, and audit protections.
@@ -85,7 +86,8 @@ Requirements:
 From the repository root:
 
 ```powershell
-node --test outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 cd outputs/marketplace-production-foundation
 deno test supabase/functions/payment-webhook/index.test.ts
 supabase start
@@ -105,3 +107,34 @@ supabase stop --no-backup
 ```
 
 Do not run `supabase init` in CI and do not add production credentials or production project references to local test configuration. The committed `supabase/config.toml` is local-only and must not contain database passwords, service-role keys, JWT signing secrets, payment keys, identity-verification keys, production Supabase project refs/URLs, or production project secrets. The mock webhook route tests use deterministic local test values only; do not replace them with live provider secrets.
+
+## Ticket 9A-2 frontend Auth and safe-read verification
+
+Ticket 9A-2 uses Node's built-in test runner and the exact `@supabase/supabase-js` version locked in `outputs/lekkadeall-frontend-shell/pnpm-lock.yaml`. No separate browser-test framework was added.
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+For a local preview, copy the placeholder template to the ignored runtime file and supply only public browser values:
+
+```powershell
+Copy-Item outputs/lekkadeall-frontend-shell/runtime-config.example.js outputs/lekkadeall-frontend-shell/runtime-config.local.js
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+The documented placeholder names are `PUBLIC_APP_ENV`, `PUBLIC_APP_URL`, `PUBLIC_SUPABASE_URL`, and `PUBLIC_SUPABASE_ANON_KEY`. A service-role key or any payment, webhook, provider, identity, database, or admin secret is forbidden in browser configuration.
+
+The frontend tests verify:
+
+- the anon-only browser-client boundary and pinned local package;
+- sign-in/registration/recovery wiring without registration metadata;
+- route decisions from session plus the own `public.profiles` row, including missing-profile, expired-session, restricted/suspended/closed, wrong-role, and unknown-role fail-closed states;
+- active-category reads and own profile/provider/customer summary reads through explicit projections only;
+- no `select('*')`, application-table insert/update/upsert/delete, application RPC, admin route, blocked-table read, frontend secret, exact-address field, payment-method form, or privileged workflow call;
+- the exact `Mock/sandbox — no real money moved` banner wording.
+
+GitHub Actions installs the locked frontend dependency, runs all `*.test.mjs` files, and then continues through the existing Deno webhook, migration reset, and pgTAP suites. A denied safe read remains a placeholder; it is not grounds to modify RLS, grants, policies, or database functions.

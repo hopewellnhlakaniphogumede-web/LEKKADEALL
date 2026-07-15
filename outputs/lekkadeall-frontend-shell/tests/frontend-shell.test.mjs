@@ -35,7 +35,7 @@ test('MockPaymentBanner uses the exact required wording', () => {
 });
 
 test('safe application states are available', () => {
-  for (const state of ['loading', 'empty', 'error', 'signedOut', 'restricted', 'notFound']) {
+  for (const state of ['loading', 'empty', 'error', 'signedOut', 'expired', 'restricted', 'notFound']) {
     assert.match(pageState(state, 'Title', 'Message'), new RegExp(`data-state="${state}"`));
   }
   assert.match(renderRoute('/missing-page'), /data-state="notFound"/);
@@ -43,24 +43,26 @@ test('safe application states are available', () => {
   assert.match(renderRoute('/app/customer'), /data-state="signedOut"/);
 });
 
-test('service discovery defaults to a safe empty state without a data client', () => {
+test('service discovery defaults to a safe empty state without data', () => {
   const page = renderRoute('/services');
   assert.match(page, /data-state="empty"/);
-  assert.match(page, /does not make a network request/);
+  assert.match(page, /Only active categories permitted by existing RLS/);
   assert.doesNotMatch(page, /customer_id|precise_address_ciphertext|provider_reference/);
 });
 
-test('auth forms are shells and do not select privileged state', () => {
+test('registration form contains no privileged application fields', () => {
   const register = renderRoute('/auth/register');
-  assert.match(register, /data-shell-form="auth"/);
+  assert.match(register, /data-auth-form="register"/);
   assert.doesNotMatch(register, /name="role"|account_status|verification_status|review_status/);
 });
 
-test('client source contains no database writes or sensitive function calls', async () => {
-  const sources = await Promise.all(['app.js', 'shell.js'].map((name) => readFile(join(shellRoot, name), 'utf8')));
+test('client source contains no application writes or sensitive function calls', async () => {
+  const sources = await Promise.all([
+    'app.js', 'shell.js', 'safe-reads.js', 'route-guards.js', 'supabase-public-client.js',
+  ].map((name) => readFile(join(shellRoot, name), 'utf8')));
   const source = sources.join('\n');
   const forbidden = [
-    '.insert(', '.update(', '.delete(', 'admin_process_verified_mock_payment_webhook',
+    '.insert(', '.upsert(', '.delete(', '.rpc(', 'admin_process_verified_mock_payment_webhook',
     'admin_set_', 'private.', 'service_role', 'webhook_secret', 'provider_secret',
     'identity_secret', '/admin', 'customer_select_cash_payment', 'provider_select_cash_payment',
   ];

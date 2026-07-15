@@ -22,9 +22,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Run Ticket 9A-1 frontend shell tests
+      - name: Set up pnpm for the pinned public browser client
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Install pinned frontend dependency
         working-directory: .
-        run: node --test outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs
+        run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+
+      - name: Run Ticket 9A-2 frontend auth and safe-read tests
+        working-directory: .
+        run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2

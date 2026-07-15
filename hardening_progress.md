@@ -2443,3 +2443,75 @@ The test attempted ownership-level `ALTER TABLE auth.users DISABLE/ENABLE TRIGGE
 #### Explicit non-goals preserved
 
 Ticket 9B added no frontend code, provider onboarding, payment-provider code, admin dashboard, real credential, service-role key, frontend profile insert/delete grant or policy, or RLS weakening.
+
+### Ticket 9A-2 implementation — Supabase Auth and safe read-only data — 2026-07-15
+
+**Status:** Implemented locally; GitHub Actions verification pending.
+
+#### What was implemented
+
+- Added a single public Supabase browser-client boundary using the exact locked `@supabase/supabase-js` package, public project URL, and anon key only.
+- Added placeholder-only `.env.example` and runtime-config template files; the local runtime file is ignored by Git.
+- Wired sign in, customer registration, forgot-password, reset-password, PKCE Auth callback, session restoration, Auth state changes, and sign out.
+- Registration sends only email, password, and the approved callback URL. It sends no user/app metadata and relies on Ticket 9B to provision the fixed customer/active `public.profiles` row.
+- Added session-backed customer, provider, and settings route guards. Role and `account_status` are resolved only from the signed-in user's RLS-protected `public.profiles` row, never Auth metadata or URL/query values.
+- Added fail-closed handling for missing profiles, signed-out and expired sessions, restricted/suspended/closed accounts, role mismatches, admin/support roles, and unknown roles.
+- Added active `service_categories` discovery with the explicit `id,slug,name` projection.
+- Added explicit, read-only own-profile/settings, own-provider-status, customer request summary, booking-party summary, and associated sandbox-payment summary reads where existing RLS and column grants permit them.
+- Denied reads show a safe placeholder. No broader query, privileged fallback, RPC, or database-security change is attempted.
+- Preserved the exact `Mock/sandbox — no real money moved` wording.
+
+#### Files changed
+
+- `.gitignore`
+- `.github/workflows/database-tests.yml`
+- `outputs/lekkadeall-frontend-shell/.env.example`
+- `outputs/lekkadeall-frontend-shell/package.json`
+- `outputs/lekkadeall-frontend-shell/pnpm-lock.yaml`
+- `outputs/lekkadeall-frontend-shell/runtime-config.example.js`
+- `outputs/lekkadeall-frontend-shell/public-config.js`
+- `outputs/lekkadeall-frontend-shell/supabase-public-client.js`
+- `outputs/lekkadeall-frontend-shell/auth-session.js`
+- `outputs/lekkadeall-frontend-shell/route-guards.js`
+- `outputs/lekkadeall-frontend-shell/safe-reads.js`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+No migration, RLS policy, grant, database function, webhook, or Supabase database test file was changed.
+
+#### Local setup, preview, and tests
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+Copy-Item outputs/lekkadeall-frontend-shell/runtime-config.example.js outputs/lekkadeall-frontend-shell/runtime-config.local.js
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+Only `PUBLIC_APP_ENV`, `PUBLIC_APP_URL`, `PUBLIC_SUPABASE_URL`, and `PUBLIC_SUPABASE_ANON_KEY` are documented. The example values are placeholders. The ignored local file must contain only public browser configuration.
+
+Run the frontend suite with:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+Local result: **15/15 tests passed** using the bundled Node runtime. CI installs the frozen lockfile, runs both frontend test files, then retains all existing Deno webhook, Supabase migration reset, Ticket 9B provisioning, Ticket 1/2 security, and remaining pgTAP regression steps.
+
+#### Intentionally not implemented
+
+- No `/admin` route or admin dashboard.
+- No profile editing, provider onboarding, or browser profile insertion.
+- No exact-address submission or reveal.
+- No request creation/publication/cancellation, bidding, booking completion, refunds, payouts, disputes, reviews, consent, support, notifications, or chat.
+- No application-table insert/update/upsert/delete and no application RPC.
+- No identity provider, real payment provider, checkout, card/CVV/bank-login/payment-method form, cash, or off-platform payment option.
+- No credential, service-role key, webhook secret, provider secret, identity secret, admin credential, or real project value.
+- No migration, RLS, grant, policy, database-function, or webhook change or weakening.
