@@ -2540,7 +2540,11 @@ Local result: **15/15 tests passed** using the bundled Node runtime. CI installs
 
 ### Ticket 9A-3 implementation — Customer request draft creation — 2026-07-15
 
-**Status:** Implemented locally; GitHub Actions verification pending.
+**Status:** CI-verified.
+
+- **Latest successful run:** Implement Ticket 9A-3 customer request draft creation
+- **Run status:** Success
+- **Ticket status:** CI-verified
 
 #### What was implemented
 
@@ -2584,6 +2588,7 @@ No dependency/package version, migration, RLS policy, grant, database function, 
 - Updated `auth-safe-reads.test.mjs` for customer/provider guard decisions on the new route and to keep Ticket 9A-2 modules RPC-free while permitting only the reviewed Ticket 9A-3 RPC boundary.
 - Updated the GitHub Actions frontend step label; the existing glob already runs every `*.test.mjs` file before the unchanged Deno and pgTAP gates.
 - Local result: **25/25 frontend tests passed** using the bundled Node runtime.
+- GitHub Actions result: **Success**. The Ticket 9A-3 frontend suite, Ticket 9A-1/9A-2 frontend regressions, Deno webhook tests, migration reset, Ticket 1/2/5/6/9B security suites, and all remaining pgTAP database tests completed successfully.
 
 #### Local test and preview instructions
 
@@ -2602,7 +2607,7 @@ With valid public browser configuration and an active customer session, open:
 http://localhost:4173/app/customer/requests/new/
 ```
 
-#### What remains blocked
+#### Intentionally not implemented and still blocked
 
 - No exact-address input, map, GPS/geolocation, phone/contact field, private-address ciphertext production, address storage, address read, or reveal.
 - No request publish, open, edit, cancel, delete, or automatic ambiguous-failure retry.
@@ -2613,3 +2618,17 @@ http://localhost:4173/app/customer/requests/new/
 - No migration, RLS, grant, policy, database-function, database-test, or webhook change or weakening.
 
 The exact-address step and publication remain blocked until a separately reviewed encryption boundary and complete backend public-field validation are verified.
+
+#### CI-verified blocked-feature confirmations
+
+- **Exact address:** no exact-address input, ciphertext production, storage call, read, reveal, map, GPS, or geolocation flow was added.
+- **Publishing:** no request publication route, button, or `customer_publish_request(...)` call was added.
+- **Provider bidding:** no provider onboarding, open-request feed, bid form, bid submission, bid acceptance, or withdrawal action was added.
+- **Booking:** no booking creation, confirmation, completion, timeline mutation, or address reveal was added.
+- **Payment:** no real or mock checkout action, payment-method form, cash/off-platform option, payment mutation, or provider payment integration was added.
+- **Refund and payout:** no refund request/decision, payout, release, settlement, or reconciliation control was added.
+- **Dispute:** no dispute creation, evidence, decision, or status mutation was added.
+- **Admin:** no `/admin` route, admin dashboard, admin credential, or privileged function call was added.
+- **Profile editing:** no profile update form, direct profile write, provider-profile edit, or role/status mutation was added.
+- **Database security:** no migration, RLS policy, grant, database policy, database function, database test, or webhook was changed.
+- **Real provider integrations:** no real payment, identity, address/map, notification, support, or other external-provider SDK, credential, API call, or adapter was added.
