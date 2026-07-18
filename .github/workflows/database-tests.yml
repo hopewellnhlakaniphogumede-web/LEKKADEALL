@@ -31,7 +31,7 @@ jobs:
         working-directory: .
         run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
 
-      - name: Run Ticket 9A-3 draft creation and existing frontend tests
+      - name: Run Ticket 9A-5 validation and existing frontend tests
         working-directory: .
         run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 
@@ -73,6 +73,9 @@ jobs:
 
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
+
+      - name: Run server public-field validation pgTAP tests
+        run: supabase test db supabase/tests/database/public_field_validation.test.sql
 
       - name: Run marketplace state machine pgTAP tests
         run: supabase test db supabase/tests/database/marketplace_state_machine.test.sql

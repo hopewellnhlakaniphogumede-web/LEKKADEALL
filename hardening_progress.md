@@ -2632,3 +2632,60 @@ The exact-address step and publication remain blocked until a separately reviewe
 - **Profile editing:** no profile update form, direct profile write, provider-profile edit, or role/status mutation was added.
 - **Database security:** no migration, RLS policy, grant, database policy, database function, database test, or webhook was changed.
 - **Real provider integrations:** no real payment, identity, address/map, notification, support, or other external-provider SDK, credential, API call, or adapter was added.
+
+### Ticket 9A-5 implementation — Server-side public-field validation — 2026-07-18
+
+**Status:** Implemented; GitHub Actions verification pending.
+
+#### What was implemented
+
+- Added one private authoritative PostgreSQL validation boundary for the eventually public `service_requests` fields `title`, `description`, `suburb`, and `city`.
+- Added NFC/whitespace/description-CRLF canonicalisation and stored only the same canonical values that are validated.
+- Added required/blank, character and UTF-8 byte limits, title/suburb/city single-line rules, approved description LF handling, unsupported control-character checks, bidi/zero-width/invisible-character checks, and plain-text markup/script-like rejection.
+- Added conservative server detection for numbered English/Afrikaans-style streets, unit/room/flat/apartment/floor/block identifiers, house/stand/erf/plot/farm/site identifiers, named complex/building details with location cues, decimal/labelled/DMS GPS data, South African phone numbers, emails, URLs/domains, social handles, WhatsApp/off-platform contact instructions, and gate/access/security credentials.
+- Added privacy-aware contextual rules so representative South African localities, township extension/zone/section/ward/phase names, ordinary quantities, ZAR amounts, product models, apostrophes, and terms such as “complex electrical fault” or “stand mixer” are not blanket-rejected.
+- Integrated the shared assertion into `customer_create_draft_request(...)` before any request/address/audit insert. Invalid title, description, suburb, or city therefore aborts draft creation atomically.
+- Replaced the draft RPC search path with fixed `pg_catalog` and schema-qualified every application/private/auth reference while preserving authentication, active-customer, active-category, schedule, budget, private-address, audit, transaction-reset, signature, and existing execute-grant behavior.
+- Added `enforce_service_request_public_fields` as a `BEFORE INSERT OR UPDATE OF title, description, suburb, city, status` trigger. It validates every insert/public-field edit and every attempted transition to `open`; status-only non-opening transitions remain possible for legacy rows.
+- Preserved `service_request_description_has_exact_address_risk(text)` as the Ticket 5 compatibility preflight and made it delegate to the same private classifier.
+- Revoked direct execution of all six private helpers from `PUBLIC`, `anon`, `authenticated`, and `service_role`.
+- Added fixed field-level `22023` errors that never echo submitted text, matched substrings, regexes, or sensitive content.
+- No `customer_update_draft_request(...)` function was added.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/014_server_public_field_validation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/public_field_validation.test.sql`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Tests added or updated
+
+- Added `public_field_validation.test.sql` with an exact **95-test** pgTAP plan covering private-function permissions/search paths, structural validation, privacy/contact classifiers, safe South African false-positive fixtures, compatibility behavior, hostile client RPC calls, no-row-on-failure behavior, safe errors, trigger insert/update enforcement, canonical storage, simulated legacy-draft opening rejection, RLS/direct-DML protection, and Ticket 5 address-column regression coverage.
+- Added a dedicated GitHub Actions step immediately after the Ticket 5 exact-address suite so the new migration and focused pgTAP test run before the marketplace state-machine and payment regressions.
+- Updated the existing Ticket 9A-3 frontend RPC-failure test to use a realistic Ticket 9A-5 `22023` validation error and prove that browser output remains generic, does not echo server detail, and is not retried.
+- Static assertion count check: the pgTAP file resolves to exactly **95 assertions** (`plan(95)`).
+- Local frontend result: **25/25 passed** using the bundled Node runtime.
+- Local database result: not run because this host exposes neither Docker nor the Supabase CLI. GitHub Actions remains the migration, focused pgTAP, full pgTAP, and Deno integration gate.
+
+#### Security and scope confirmations
+
+- Invalid public fields are rejected inside the database even when a hostile client skips Ticket 9A-3 JavaScript.
+- Failed validation creates no request row, private-address row, or success audit event.
+- Browser roles cannot directly execute private validation helpers and still cannot insert/update/delete `service_requests`.
+- Ticket 9A-3 local validation remains defence in depth only; a server rejection overrides a local pass and is shown generically.
+- No frontend `customer_publish_request(...)` call, route, button, or optimistic open state was added. The existing backend function was not granted any new caller; attempted opening now receives the additional trigger validation backstop.
+- No exact-address input, collection, plaintext, ciphertext production, storage call, read, reveal, map, GPS/geolocation field, KMS, key-management, or encryption code was added.
+- No provider onboarding/bidding, booking mutation, payment, refund, payout/release, dispute, review, support, consent, notification, chat, identity, profile editing, or admin dashboard was added.
+- No service-role key, real credential, provider secret, production project reference, or real provider integration was added.
+- No frontend direct table write or `select('*')` was added.
+- No RLS policy was weakened or added. Existing Ticket 1 role/account-status, Ticket 2 RLS/grants, Ticket 5 address privacy, and Ticket 6 state-machine controls remain in place and are covered by the unchanged full CI suites.
+
+#### Still blocked
+
+- Ticket 9A-5 is not CI-verified until GitHub Actions successfully applies migration 014 and passes the focused 95-assertion suite plus every existing pgTAP, Deno webhook, and frontend test.
+- Exact-address collection/storage/reveal remains blocked by Ticket 9A-4's encryption and key-management requirements.
+- Request publication remains unavailable in the frontend and must not be enabled until Ticket 9A-4 address readiness and the complete production-readiness review pass.
+- Draft editing remains blocked; `customer_update_draft_request(...)` is reserved for a separate reviewed ticket.

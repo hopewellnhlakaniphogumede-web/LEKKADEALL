@@ -115,9 +115,9 @@ test('trusted mutation calls only the reviewed RPC with null ciphertext', async 
   });
 });
 
-test('RPC failures are generic and are not retried', async () => {
+test('Ticket 9A-5 server validation failures stay generic and are not retried', async () => {
   let calls = 0;
-  const client = { rpc: async () => { calls += 1; return { data: null, error: { code: 'unknown', message: 'private backend detail' } }; } };
+  const client = { rpc: async () => { calls += 1; return { data: null, error: { code: '22023', message: 'Public title contains private or unsupported information' } }; } };
   const result = await createCustomerDraftRequest(client, {
     categoryId, title: 'Safe title', description: 'Safe description text', suburb: 'Woodstock', city: 'Cape Town',
     requestedStart: '2026-07-20T09:30:00+02:00', budgetMinor: null,
@@ -125,7 +125,7 @@ test('RPC failures are generic and are not retried', async () => {
   assert.equal(calls, 1);
   assert.equal(result.ok, false);
   assert.equal(result.message, 'The draft could not be confirmed. Refresh your drafts before trying again.');
-  assert.doesNotMatch(result.message, /private backend detail|unknown/);
+  assert.doesNotMatch(result.message, /Public title|private or unsupported|22023/);
 });
 
 test('customer request page is customer-only, draft-only, and contains no sensitive fields', () => {

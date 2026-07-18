@@ -2,7 +2,7 @@
 
 ## Frontend shell, database, and webhook route tests in CI
 
-GitHub Actions runs the Ticket 9A-3 draft-creation tests plus the Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
+GitHub Actions runs the Ticket 9A-5 server public-field validation tests, Ticket 9A-3 draft-creation tests, Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
 
 Workflow file:
 
@@ -35,6 +35,7 @@ supabase test db supabase/tests/database/role_escalation.test.sql
 supabase test db supabase/tests/database/baseline_rls.test.sql
 supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
@@ -65,6 +66,7 @@ Common useful steps:
 - **Run baseline RLS pgTAP tests**: table-level RLS, service categories, provider services, vendor events, and baseline privacy protections.
 - **Run secure profile provisioning pgTAP tests**: `auth.users` trigger provisioning, fixed customer/active defaults, hostile metadata rejection, idempotency/no-overwrite behavior, privacy-safe audit events, existing-user backfill, frontend insert/delete denial, own-profile RLS, and Ticket 1/2 regression checks.
 - **Run exact address privacy pgTAP tests**: exact address isolation, safe request summaries, confirmed-booking reveal, address audit events, and public-description address checks.
+- **Run server public-field validation pgTAP tests**: private helper permissions/search paths, canonical and structural validation, exact-location/contact/GPS/URL/social/access-code detection across title/description/suburb/city, South African false-positive fixtures, hostile draft-RPC calls, trigger backstops, safe errors, and atomic rejection when an unsafe legacy draft attempts to become open.
 - **Run marketplace state machine pgTAP tests**: request draft/publish/cancel, provider bid submission/withdrawal, bid acceptance, booking creation, direct workflow mutation denial, booking integrity constraints, completion confirmation after `in_progress`, and Ticket 1/2/5 smoke protections.
 - **Run payment ledger pgTAP tests**: constrained payment status values, payment/release direct mutation denial, booking-party payment visibility, append-only payment events, idempotent trusted payment event recording, and Ticket 1/2/5/6 smoke protections.
 - **Run refund ledger pgTAP tests**: booking-party refund requests, refund amount constraints, admin-only refund decisions, manual/sandbox refund outcomes, payment refunded totals/status transitions, append-only refund events, idempotency, and Ticket 1/2/5/6/7A smoke protections.
@@ -96,6 +98,7 @@ supabase test db supabase/tests/database/role_escalation.test.sql
 supabase test db supabase/tests/database/baseline_rls.test.sql
 supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
+supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
@@ -173,3 +176,43 @@ The Ticket 9A-3 tests verify:
 - no publish/address RPC, direct application-table DML, `select('*')`, persistent form storage, geolocation, admin/service-role capability, exact-address/contact/payment field, or real payment code exists.
 
 Local implementation result: **25/25 frontend tests passed**. The Deno webhook and pgTAP suites were not changed; GitHub Actions remains the complete integration and database-security regression gate.
+
+## Ticket 9A-5 server public-field validation verification
+
+Ticket 9A-5 adds migration `014_server_public_field_validation.sql` and the dedicated `public_field_validation.test.sql` pgTAP suite. The migration creates one private authoritative classifier/assertion boundary for `title`, `description`, `suburb`, and `city`; integrates it into `customer_create_draft_request(...)`; adds a table trigger for inserts, public-field changes, and transitions to `open`; and keeps the Ticket 5 description preflight by delegating it to the shared classifier.
+
+From the repository root, run the frontend regression suite:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+From `outputs/marketplace-production-foundation`, run the migration and focused database suite:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/public_field_validation.test.sql
+supabase stop --no-backup
+```
+
+Then run every pgTAP command listed in **Running the same tests locally** above for the full regression gate.
+
+The focused Ticket 9A-5 suite plans exactly **95 assertions** covering:
+
+- private helper existence, `SECURITY DEFINER` configuration, fixed `pg_catalog` search paths, and denied direct execution for `PUBLIC`, `anon`, `authenticated`, and `service_role`;
+- retained RLS and denied browser insert/update/delete privileges;
+- null/blank, character/byte length, NFC/trim/CRLF canonicalisation, single-line/multiline, control, bidi/invisible, and markup rules;
+- street/property/unit/complex, GPS, South African phone, email, URL, social/contact, and gate/security-code detection;
+- representative South African locality, numbered-locality, quantity, model, punctuation, and context-sensitive false-positive fixtures;
+- compatibility behavior for `service_request_description_has_exact_address_risk(...)`;
+- hostile direct RPC calls rejecting each public field without creating a row or leaking the matched value;
+- table-trigger rejection of privileged/internal unsafe insert/update attempts; and
+- atomic rejection when a simulated legacy unsafe draft attempts to transition to `open`.
+
+The existing frontend rejection test now supplies a Ticket 9A-5-style `22023` database error and proves the browser returns its fixed generic message without echoing the server field/reason text or retrying. Local frontend result: **25/25 passed** using the bundled Node runtime.
+
+This host did not expose Docker or the Supabase CLI, so the migration and pgTAP suite were not executed locally. GitHub Actions runs `supabase db reset`, the focused 95-assertion suite, and every existing pgTAP/Deno/frontend regression before Ticket 9A-5 may be marked CI-verified.
+
+Ticket 9A-5 does not add a frontend publication call, exact-address collection, KMS/encryption, a draft-update RPC, direct frontend table DML, provider bidding, payments, admin features, credentials, or service-role keys. The existing database publication function is not newly exposed in the frontend; the new trigger only adds a fail-closed validation backstop for any attempted transition to `open`.
