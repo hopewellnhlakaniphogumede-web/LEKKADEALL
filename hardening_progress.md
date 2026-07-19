@@ -2689,3 +2689,55 @@ The exact-address step and publication remain blocked until a separately reviewe
 - Exact-address collection/storage/reveal remains blocked by Ticket 9A-4's encryption and key-management requirements.
 - Request publication remains unavailable in the frontend and must not be enabled until Ticket 9A-4 address readiness and the complete production-readiness review pass.
 - Draft editing remains blocked; `customer_update_draft_request(...)` is reserved for a separate reviewed ticket.
+
+### Ticket 9A-5 CI failure correction — public-field validation pgTAP — 2026-07-19
+
+**Status:** Corrected locally; replacement GitHub Actions verification pending.
+
+#### Failure summary
+
+- Failed workflow step: **Run server public-field validation pgTAP tests**.
+- Test file: `supabase/tests/database/public_field_validation.test.sql`.
+- Reported result: **95 planned, 78 run, 1 failed**.
+- Failed assertion: **test 77**.
+- TAP also reported a bad plan because SQL execution terminated before assertions 79-95.
+
+#### What test 77 checks
+
+Test 77 is the no-partial-write assertion after four hostile draft-creation calls. The four preceding assertions independently submit an unsafe title, description, suburb, and city through `customer_create_draft_request(...)` and expect each call to be rejected. Test 77 then checks that those rejected calls did not create any request rows.
+
+#### Root cause
+
+The validator did not allow unsafe content, and the four field-specific rejection assertions completed before test 77. The failure was in the test expectation:
+
+- The test had already executed `SET LOCAL ROLE authenticated` for Customer A.
+- Its `count(*)` therefore respected `service_requests` RLS and could see only Customer A's seeded request rows.
+- The assertion incorrectly expected the global seed count of `3`, which includes Customer B's RLS-hidden rows.
+
+The early termination had a second independent test defect. The next privacy-leak assertion used `unlike(...)`, which is not a pgTAP assertion in the installed extension. PostgreSQL stopped on that undefined function after test 78, so tests 79-95 never ran. The supported pgTAP SQL-LIKE negative assertion is `unalike(...)`.
+
+#### Fix applied
+
+- Added a temporary RLS-visible baseline count captured under the same authenticated Customer A context immediately before the hostile calls.
+- Test 77 now compares the post-rejection Customer A-visible count with that baseline. Any successfully inserted hostile draft would belong to Customer A and would be visible, so the corrected assertion still proves no partial request row was created without bypassing RLS.
+- Replaced the invalid `unlike(...)` call with `unalike(...)` and the correct `%14 Long Street%` SQL-LIKE pattern.
+- Kept `plan(95)` unchanged. No hostile-input or South African false-positive fixture was removed.
+
+#### Files changed for this correction
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/public_field_validation.test.sql`
+- `hardening_progress.md`
+
+#### Verification after the correction
+
+- Static recount confirms the file still resolves to exactly **95 assertions** and retains `plan(95)`.
+- Ticket 9A frontend regression result: **25/25 passed** with the bundled Node runtime.
+- Local pgTAP and Deno execution is unavailable on this host because it has no Supabase CLI, PostgreSQL client, Docker, or Deno. The replacement GitHub Actions run remains the authoritative focused pgTAP, full pgTAP, and Deno verification gate.
+
+#### Security confirmations
+
+- Migration `014_server_public_field_validation.sql` and all validation functions/triggers are unchanged; this correction does not weaken the validator.
+- Unsafe title, description, suburb, and city inputs remain database-rejected through `customer_create_draft_request(...)` and the table trigger.
+- Browser roles still cannot execute private validation helpers or directly write `service_requests`.
+- All hostile-input and safe South African false-positive tests remain in the 95-assertion suite.
+- No request-publication UI/call, exact-address collection, KMS/encryption, RLS/grant/role/status/address/state-machine change, frontend DML, provider onboarding, bidding, booking, payment, refund, payout, dispute, review, support, chat, or admin feature was added.

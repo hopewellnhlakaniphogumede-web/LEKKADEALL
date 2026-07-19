@@ -14,6 +14,13 @@ create temporary table ticket9a5_ids (
 
 grant select, insert, update, delete on table ticket9a5_ids to authenticated;
 
+create temporary table ticket9a5_counts (
+  name text primary key,
+  value bigint not null
+) on commit drop;
+
+grant select, insert on table ticket9a5_counts to authenticated;
+
 create function pg_temp.try_create_public_field_draft(
   p_title text,
   p_description text,
@@ -483,6 +490,10 @@ select is(
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
 
+insert into ticket9a5_counts (name, value)
+select 'customer_a_visible_requests_before_rejections', count(*)
+from public.service_requests;
+
 select is(
   pg_temp.try_create_public_field_draft(
     'Repair at 14 Long Street',
@@ -529,8 +540,12 @@ select is(
 
 select is(
   (select count(*) from public.service_requests),
-  3::bigint,
-  'rejected draft calls create no request rows'
+  (
+    select value
+    from ticket9a5_counts
+    where name = 'customer_a_visible_requests_before_rejections'
+  ),
+  'rejected draft calls create no customer-visible request rows under RLS'
 );
 
 select is(
@@ -544,14 +559,14 @@ select is(
   'draft rejection uses the reviewed privacy-safe field message'
 );
 
-select unlike(
+select unalike(
   pg_temp.public_field_draft_error(
     'Repair at 14 Long Street',
     'Repair the living room walls safely.',
     'Die Bult',
     'Potchefstroom'
   ),
-  '14 Long Street',
+  '%14 Long Street%',
   'draft rejection does not echo the matched sensitive text'
 );
 
