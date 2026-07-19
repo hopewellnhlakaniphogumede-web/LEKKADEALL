@@ -31,7 +31,7 @@ jobs:
         working-directory: .
         run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
 
-      - name: Run Ticket 9A-5 validation and existing frontend tests
+      - name: Run Ticket 9A-7 cancellation and existing frontend tests
         working-directory: .
         run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 
@@ -79,6 +79,9 @@ jobs:
 
       - name: Run marketplace state machine pgTAP tests
         run: supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+
+      - name: Run customer draft cancellation pgTAP tests
+        run: supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
 
       - name: Run payment ledger pgTAP tests
         run: supabase test db supabase/tests/database/payments_ledger.test.sql

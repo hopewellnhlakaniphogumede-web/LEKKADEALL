@@ -162,18 +162,21 @@ test('draft confirmation appears only with a returned request ID', () => {
   assert.match(created, /It remains a private draft/);
 });
 
-test('request module is the only RPC boundary and blocked capabilities are absent', async () => {
+test('only reviewed request mutation modules contain RPC boundaries and blocked capabilities are absent', async () => {
   const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config'));
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
   const requestSource = entries.find(([name]) => name === 'request-draft.js')[1];
-  const otherSource = entries.filter(([name]) => name !== 'request-draft.js').map(([, source]) => source).join('\n');
+  const cancellationSource = entries.find(([name]) => name === 'request-cancellation.js')[1];
+  const otherSource = entries.filter(([name]) => !['request-draft.js', 'request-cancellation.js'].includes(name)).map(([, source]) => source).join('\n');
   assert.equal((requestSource.match(/\.rpc\(/g) ?? []).length, 1);
   assert.match(requestSource, /\.rpc\(CUSTOMER_CREATE_DRAFT_RPC, payload\)/);
+  assert.equal((cancellationSource.match(/\.rpc\(/g) ?? []).length, 1);
+  assert.match(cancellationSource, /\.rpc\(CUSTOMER_CANCEL_DRAFT_RPC, \{/);
   assert.doesNotMatch(otherSource, /\.rpc\(/);
   const allSource = entries.map(([, source]) => source).join('\n');
   const forbidden = [
     '.insert(', '.update(', '.upsert(', '.delete(', ".select('*')", '.select("*")',
-    'customer_publish_request', 'customer_upsert_service_request_address',
+    'customer_cancel_request', 'customer_publish_request', 'customer_upsert_service_request_address',
     'customer_get_service_request_address', 'reveal_confirmed_booking_address',
     'localStorage', 'sessionStorage', 'geolocation', 'service_role', 'SUPABASE_SERVICE_ROLE_KEY',
   ];

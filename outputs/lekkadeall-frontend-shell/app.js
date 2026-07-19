@@ -22,6 +22,13 @@ import {
 } from './safe-reads.js';
 import { defaultRouteForProfile, isProtectedRoute, resolveRouteAccess } from './route-guards.js';
 import { createCustomerDraftRequest, validateCustomerDraft } from './request-draft.js';
+import {
+  DRAFT_CANCELLATION_AMBIGUOUS_MESSAGE,
+  DRAFT_CANCELLATION_SUCCESS_MESSAGE,
+  DRAFT_CANCELLATION_UNAVAILABLE_MESSAGE,
+  cancelCustomerDraft,
+} from './request-cancellation.js';
+import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
 const root = document.querySelector('#app');
@@ -40,6 +47,9 @@ const state = {
   customer: null,
   customerRequestList: null,
   customerRequestDetail: null,
+  customerDraftCancellation: {
+    requestId: null, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
+  },
   providerStatus: null,
   settingsProfile: null,
   requestDraft: {
@@ -48,6 +58,8 @@ const state = {
 };
 let refreshSequence = 0;
 let draftSubmissionInFlight = false;
+let draftCancellationInFlight = false;
+let draftCancellationSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -84,6 +96,7 @@ function view() {
     customer: state.customer,
     customerRequestList: state.customerRequestList,
     customerRequestDetail: state.customerRequestDetail,
+    customerDraftCancellation: state.customerDraftCancellation,
     providerStatus: state.providerStatus,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
@@ -104,6 +117,15 @@ function clearPersonalState() {
   state.customerRequestDetail = null;
   state.providerStatus = null;
   state.settingsProfile = null;
+  resetCustomerDraftCancellation();
+}
+
+function resetCustomerDraftCancellation(requestId = null) {
+  draftCancellationSequence += 1;
+  draftCancellationInFlight = false;
+  state.customerDraftCancellation = {
+    requestId, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
+  };
 }
 
 function resetRequestDraft() {
@@ -197,6 +219,7 @@ async function refreshRoute() {
       state.categories = [];
       render();
       const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+      resetCustomerDraftCancellation(requestId);
       const [request] = await Promise.all([
         readOwnCustomerRequestDetail(state.client, requestId),
         loadRequestCategories(sequence),
@@ -371,6 +394,84 @@ async function submitCustomerDraftForm(form) {
   render();
 }
 
+async function submitCustomerDraftCancellation() {
+  const path = currentPath();
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  const detail = state.customerRequestDetail;
+  if (draftCancellationInFlight || path !== '/app/customer/requests/detail') return;
+  if (!state.client || !state.session?.user?.id || !isCustomerRequestId(requestId)
+      || state.access?.kind !== 'allowed' || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active' || !detail?.ok
+      || detail.data?.id !== requestId || detail.data?.status !== 'draft'
+      || state.customerDraftCancellation.requestId !== requestId
+      || !state.customerDraftCancellation.confirming) {
+    resetCustomerDraftCancellation(requestId);
+    state.customerDraftCancellation.message = DRAFT_CANCELLATION_UNAVAILABLE_MESSAGE;
+    render();
+    return;
+  }
+
+  const actorId = state.session.user.id;
+  const cancellationSequence = ++draftCancellationSequence;
+  draftCancellationInFlight = true;
+  state.customerDraftCancellation.submitting = true;
+  state.customerDraftCancellation.message = '';
+  render();
+
+  const result = await cancelCustomerDraft(state.client, requestId);
+
+  if (cancellationSequence !== draftCancellationSequence) return;
+
+  if (currentPath() !== '/app/customer/requests/detail'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed'
+      || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active') {
+    resetCustomerDraftCancellation();
+    return;
+  }
+
+  if (!result.ok) {
+    draftCancellationInFlight = false;
+    state.customerDraftCancellation.confirming = false;
+    state.customerDraftCancellation.submitting = false;
+    state.customerDraftCancellation.blocked = true;
+    state.customerDraftCancellation.message = result.message;
+    render();
+    return;
+  }
+
+  let freshDetail;
+  try {
+    freshDetail = await readOwnCustomerRequestDetail(state.client, requestId);
+  } catch {
+    freshDetail = { ok: false, data: null };
+  }
+  if (cancellationSequence !== draftCancellationSequence) return;
+  draftCancellationInFlight = false;
+
+  if (currentPath() !== '/app/customer/requests/detail'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed') {
+    resetCustomerDraftCancellation();
+    return;
+  }
+
+  state.customerDraftCancellation.confirming = false;
+  state.customerDraftCancellation.submitting = false;
+  if (freshDetail.ok && freshDetail.data?.id === requestId
+      && freshDetail.data?.status === 'cancelled') {
+    state.customerRequestDetail = freshDetail;
+    state.customerDraftCancellation.confirmed = true;
+    state.customerDraftCancellation.message = DRAFT_CANCELLATION_SUCCESS_MESSAGE;
+  } else {
+    state.customerDraftCancellation.confirmed = false;
+    state.customerDraftCancellation.blocked = true;
+    state.customerDraftCancellation.message = DRAFT_CANCELLATION_AMBIGUOUS_MESSAGE;
+  }
+  render();
+}
+
 async function initialize() {
   await loadRuntimeConfig();
   const publicConfig = readPublicConfig();
@@ -429,6 +530,25 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  const cancellationAction = event.target.closest('[data-cancel-draft-action]');
+  if (cancellationAction) {
+    const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+    const action = cancellationAction.dataset.cancelDraftAction;
+    if (action === 'open' && state.customerRequestDetail?.ok
+        && state.customerRequestDetail.data?.id === requestId
+        && state.customerRequestDetail.data?.status === 'draft'
+        && state.access?.kind === 'allowed' && state.access?.role === 'customer') {
+      state.customerDraftCancellation = {
+        requestId, confirming: true, submitting: false, confirmed: false, blocked: false, message: '',
+      };
+      render();
+    } else if (action === 'keep') {
+      resetCustomerDraftCancellation(requestId);
+      render();
+    }
+    return;
+  }
+
   const toggle = event.target.closest('[data-menu-toggle]');
   if (toggle) {
     const nav = document.querySelector('#primary-nav');
@@ -439,6 +559,12 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const cancellationForm = event.target.closest('[data-cancel-draft-form]');
+  if (cancellationForm) {
+    event.preventDefault();
+    await submitCustomerDraftCancellation();
+    return;
+  }
   const requestForm = event.target.closest('[data-draft-request-form]');
   if (requestForm) {
     event.preventDefault();

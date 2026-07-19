@@ -2919,3 +2919,64 @@ The early termination had a second independent test defect. The next privacy-lea
 - No migration, RLS policy, grant, database policy/function, webhook, pgTAP file, or database seed/helper changed.
 - No service-role key, real credential, provider secret, webhook secret, identity secret, production project reference, or real provider integration was added.
 - Ticket 1 role/account-status protection, Ticket 2 RLS/grants, Ticket 5 address privacy, Ticket 6 state-machine controls, Ticket 9A-5 public-field validation, and every existing database/webhook security boundary remain unchanged.
+
+### Ticket 9A-7 implementation — Customer draft-only cancellation — 2026-07-19
+
+**Status:** Implemented locally; GitHub Actions verification pending.
+
+- **CI result:** Pending. Do not mark Ticket 9A-7 CI-verified until the updated workflow completes successfully.
+
+#### What was implemented
+
+- Added migration `015_customer_draft_cancellation.sql` with `public.customer_cancel_draft_request(p_request_id uuid) returns public.request_status`.
+- The function is `SECURITY DEFINER`, `VOLATILE`, has fixed `search_path = pg_catalog`, uses explicit schema-qualified references, contains no dynamic SQL, and derives actor identity only from `auth.uid()`.
+- The function locks the actor's `public.profiles` row before requiring `role = 'customer'` and `account_status = 'active'`, then locks only the owned request identified by `id = p_request_id` and `customer_id = auth.uid()`.
+- Cancellation is allowed only when the locked row is exactly `draft`, has no publication/award/cancellation timestamp inconsistency, and has no bid or booking. Missing, cross-customer, non-draft, inconsistent, provider-selected/bid-bearing, and booked requests fail with generic privacy-safe errors.
+- The controlled Ticket 6 transition changes only `status`, `cancelled_at`, and `updated_at`. Ownership, category, title, description, suburb, city, requested start, budget, and other workflow fields remain unchanged.
+- The function appends exactly one fixed audit event with action `customer.service_request_draft_cancelled` and fixed reason `Customer cancelled own draft through controlled draft-only function`. It records only request ID and the fixed draft-to-cancelled status transition. Audit failure rolls the cancellation back.
+- The function returns only `cancelled::public.request_status`.
+- Revoked execution of the new function from `PUBLIC`, `anon`, and `service_role`; granted it only to `authenticated`. Revoked `authenticated` execution of the broader legacy `customer_cancel_request(uuid,text)`. No direct table grant or RLS policy was added.
+- Updated the Ticket 6 marketplace-state-machine test helper to use the new strict function for draft cancellation.
+- Added a “Cancel draft” control only to the customer request detail page after a fresh RLS-backed read returns an owned `draft` for an active customer. No cancellation action appears on the request list.
+- Added fixed confirmation copy without a reason field. The frontend calls only `customer_cancel_draft_request` with `{ p_request_id: requestId }`, uses single-flight behavior, performs no optimistic status update, and does not automatically retry ambiguous failures.
+- After RPC success, the frontend performs a fresh RLS-backed detail read and shows success only when that read returns the same request with `status = 'cancelled'`. All failures use fixed generic messages and do not echo backend detail.
+
+#### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/marketplace-production-foundation/supabase/migrations/015_customer_draft_cancellation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/customer_draft_cancellation.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql`
+- `outputs/lekkadeall-frontend-shell/request-cancellation.js`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/tests/request-cancellation.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/customer-request-read.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `rls_policy_matrix.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Tests added or updated
+
+- Added the focused **62-assertion** `customer_draft_cancellation.test.sql` suite. It covers the function contract, fixed authority/search path, execute grants/revokes, no direct authenticated request-table DML grants, authentication, provider/support/admin role and account-status rejection, hostile JWT metadata, ownership, exact draft-only behavior, unchanged fields, fixed audit privacy, duplicate and every supported non-draft state, inconsistent draft timestamps, bid/accepted-bid/booking blockers, direct-DML denial, audit-failure rollback, state-guard reset after success and failure, RLS behavior, and regression data integrity.
+- Updated `marketplace_state_machine.test.sql` so its legitimate draft-cancellation path uses the new narrow function rather than the legacy draft/open function.
+- Added `request-cancellation.test.mjs` and updated the existing Auth/safe-read, request-list/detail, and draft suites for control visibility, fixed confirmation, exact RPC payload, single-flight behavior, fresh RLS re-read, no optimistic change/retry, generic errors, and static blocked-boundary checks.
+- Local frontend result: **43/43 tests passed** using Node's built-in test runner.
+- Static recount confirms the focused pgTAP file contains **62 assertions matching `plan(62)`**.
+- GitHub Actions now runs the focused cancellation pgTAP suite after the marketplace state-machine suite and runs all 43 frontend tests. This host did not expose Docker, the Supabase CLI, PostgreSQL client, or Deno, so local migration/pgTAP/webhook execution was unavailable; full verification remains pending the workflow result.
+
+#### Intentionally blocked and security confirmations
+
+- Request publication remains blocked; the frontend does not call `customer_publish_request(...)`.
+- The frontend does not call the legacy `customer_cancel_request(...)`.
+- Request editing, deletion, duplication, reopening, and archiving remain blocked.
+- Exact-address collection/storage/read/reveal, GPS/maps, KMS, and encryption remain blocked.
+- Provider feed/onboarding/bidding and booking actions remain blocked.
+- Payments, checkout, refunds, payouts, disputes, reviews, support, consent, notifications, chat, identity, profile editing, and the admin dashboard remain blocked.
+- No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, or admin credential was added.
+- No frontend direct application-table insert/update/upsert/delete or `select('*')` was added.
+- No RLS policy or direct table grant was added or weakened. Ticket 1 role/status protection, Ticket 2 RLS, Ticket 5 address privacy, Ticket 6 state machine, Ticket 9A-5 public-field validation, and existing payment/refund/payout/webhook protections remain intact.

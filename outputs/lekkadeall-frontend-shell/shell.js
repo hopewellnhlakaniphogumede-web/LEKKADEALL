@@ -9,6 +9,10 @@ import {
   isAllowedCustomerRequestStatus,
   isCustomerRequestId,
 } from './customer-requests.js';
+import {
+  DRAFT_CANCELLATION_CONFIRM_TEXT,
+  DRAFT_CANCELLATION_CONFIRM_TITLE,
+} from './request-cancellation.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -332,8 +336,28 @@ function customerRequestDetailPage(view) {
 
   const request = result.data;
   const category = activeCategoryLabel(view.categories, request.category_id);
+  const cancellation = view.customerDraftCancellation ?? {};
+  let cancellationContent = '';
+  if (cancellation.message) {
+    cancellationContent = `<p class="draft-cancellation-message ${cancellation.confirmed ? 'is-success' : ''}" role="status">${escapeHtml(cancellation.message)}</p>`;
+  }
+  if (request.status === 'draft' && !cancellation.blocked) {
+    cancellationContent += cancellation.confirming
+      ? `<section class="draft-cancellation-confirmation" role="alertdialog" aria-labelledby="cancel-draft-title" aria-describedby="cancel-draft-description">
+          <h2 id="cancel-draft-title">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TITLE)}</h2>
+          <p id="cancel-draft-description">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TEXT)}</p>
+          <form data-cancel-draft-form>
+            <button class="button button-secondary" type="button" data-cancel-draft-action="keep" ${cancellation.submitting ? 'disabled' : ''}>Keep draft</button>
+            <button class="button button-danger" type="submit" ${cancellation.submitting ? 'disabled' : ''}>${cancellation.submitting ? 'Cancelling draftâ€¦' : 'Cancel draft'}</button>
+          </form>
+        </section>`
+      : `<section class="draft-cancellation-control" aria-label="Draft cancellation">
+          <div><h2>Draft actions</h2><p>Cancellation is enforced as draft-only by the database.</p></div>
+          <button class="button button-danger-outline" type="button" data-cancel-draft-action="open">Cancel draft</button>
+        </section>`;
+  }
   return appPage('Request details', `
-    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>${escapeHtml(request.title)}</h1><p>Read-only details returned through your existing RLS boundary.</p></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>${escapeHtml(request.title)}</h1><p>Protected details returned through your existing RLS boundary.</p></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>
     <article class="request-detail-card">
       <div class="request-detail-status"><span class="status-chip">${escapeHtml(customerRequestStatusLabel(request.status))}</span><span>${escapeHtml(category)}</span></div>
       <section class="request-detail-description"><h2>Public description</h2><p>${escapeHtml(request.description)}</p></section>
@@ -346,7 +370,8 @@ function customerRequestDetailPage(view) {
         <div><dt>Updated</dt><dd>${escapeHtml(formatSastDateTime(request.updated_at))}</dd></div>
       </dl>
     </article>
-    <section class="inline-warning request-boundary-note"><strong>Read-only boundary</strong><p>Cancellation, editing, publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
+    ${cancellationContent}
+    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned draft may be cancelled. Editing, publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
   `);
 }
 

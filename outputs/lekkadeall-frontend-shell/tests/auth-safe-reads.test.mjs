@@ -120,8 +120,9 @@ test('all reads use a fixed table allowlist and explicit projections', async () 
   assert.equal(Object.values(SAFE_PROJECTIONS).some((projection) => projection.includes('precise_address') || projection.includes('provider_reference')), false);
 });
 
-test('browser modules contain no application DML, RPC, broad select or blocked source', async () => {
-  const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config') && name !== 'request-draft.js');
+test('non-mutation browser modules contain no application DML, RPC, broad select or blocked source', async () => {
+  const mutationModules = new Set(['request-draft.js', 'request-cancellation.js']);
+  const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config') && !mutationModules.has(name));
   const source = (await Promise.all(moduleNames.map((name) => readFile(join(root, name), 'utf8')))).join('\n');
   const forbidden = [
     '.insert(', '.update(', '.upsert(', '.delete(', '.rpc(', ".select('*')", '.select("*")',

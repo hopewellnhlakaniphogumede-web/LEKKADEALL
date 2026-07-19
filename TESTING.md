@@ -2,7 +2,7 @@
 
 ## Frontend shell, database, and webhook route tests in CI
 
-GitHub Actions runs the Ticket 9A-6 customer request read tests, Ticket 9A-5 server public-field validation tests, Ticket 9A-3 draft-creation tests, Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
+GitHub Actions runs the Ticket 9A-7 strict draft-cancellation tests, Ticket 9A-6 customer request read tests, Ticket 9A-5 server public-field validation tests, Ticket 9A-3 draft-creation tests, Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
 
 Workflow file:
 
@@ -37,6 +37,7 @@ supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
@@ -59,7 +60,7 @@ In GitHub:
 
 Common useful steps:
 
-- **Run Ticket 9A-6 request reads and existing frontend tests**: required routes and safe states, anon-only client configuration, protected-profile route decisions, the active-category read, draft validation and RPC boundary, the exact request list/detail projection, three-status filter, 20-row bound, UUID validation, `maybeSingle()` detail behavior, generic unavailable state, escaped output, explicit SAST/ZAR display, no blocked RPCs/direct DML/broad selects/persistence, and clean-path entry files.
+- **Run Ticket 9A-7 cancellation and existing frontend tests**: all earlier shell/Auth/draft/read regressions plus detail-only draft cancellation, fixed confirmation without a reason field, the exact allowlisted RPC payload, single-flight behavior, no optimistic update or automatic retry, a fresh RLS-backed detail re-read before success, generic safe errors, and no legacy cancellation/publication/direct DML/broad selects/blocked features.
 - **Apply migrations with database reset**: migration/schema errors usually appear here.
 - **Run mock payment webhook route tests**: raw-body HMAC verification, missing/invalid signatures, stale timestamps, exact payload hashing, no database call before verification, safe metadata forwarding, runtime-only mock secret/app-env config, and production mock-mode fail-closed behavior.
 - **Run role escalation pgTAP tests**: role, provider verification, privileged-column, and audit protections.
@@ -68,6 +69,7 @@ Common useful steps:
 - **Run exact address privacy pgTAP tests**: exact address isolation, safe request summaries, confirmed-booking reveal, address audit events, and public-description address checks.
 - **Run server public-field validation pgTAP tests**: private helper permissions/search paths, canonical and structural validation, exact-location/contact/GPS/URL/social/access-code detection across title/description/suburb/city, South African false-positive fixtures, hostile draft-RPC calls, trigger backstops, safe errors, and atomic rejection when an unsafe legacy draft attempts to become open.
 - **Run marketplace state machine pgTAP tests**: request draft/publish/cancel, provider bid submission/withdrawal, bid acceptance, booking creation, direct workflow mutation denial, booking integrity constraints, completion confirmation after `in_progress`, and Ticket 1/2/5 smoke protections.
+- **Run customer draft cancellation pgTAP tests**: function contract/search path/authority, restrictive grants and legacy revoke, role/account/ownership checks, exact draft-only state enforcement, bid/booking/inconsistent-row rejection, minimal update, fixed privacy-safe audit, audit rollback, duplicate-call handling, state-guard cleanup, and RLS regressions.
 - **Run payment ledger pgTAP tests**: constrained payment status values, payment/release direct mutation denial, booking-party payment visibility, append-only payment events, idempotent trusted payment event recording, and Ticket 1/2/5/6 smoke protections.
 - **Run refund ledger pgTAP tests**: booking-party refund requests, refund amount constraints, admin-only refund decisions, manual/sandbox refund outcomes, payment refunded totals/status transitions, append-only refund events, idempotency, and Ticket 1/2/5/6/7A smoke protections.
 - **Run cash payment policy pgTAP tests**: MVP cash-disabled enforcement, cash/off-platform payment method rejection, customer/provider cash mutation denial, payout-release-like cash event blocking, and Ticket 1/2/5/6/7A/7B smoke protections.
@@ -100,6 +102,7 @@ supabase test db supabase/tests/database/profile_provisioning.test.sql
 supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
@@ -264,3 +267,48 @@ The Ticket 9A-6 frontend tests verify:
 Local implementation result: **33/33 frontend tests passed**. Ticket 9A-6 changes no migration, RLS policy, grant, database policy/function, pgTAP test, Deno webhook function/test, or workflow. GitHub Actions remains the authoritative full pgTAP and Deno regression gate.
 
 Cancellation and `customer_cancel_request(...)` remain intentionally absent. Publication, request editing, exact-address handling, maps/GPS, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts, disputes/reviews/support/chat, profile editing, and the admin dashboard also remain blocked.
+
+## Ticket 9A-7 customer draft-only cancellation verification
+
+Ticket 9A-7 adds migration `015_customer_draft_cancellation.sql`, the focused `customer_draft_cancellation.test.sql` pgTAP suite, `request-cancellation.js`, and `tests/request-cancellation.test.mjs`. It updates the detail page and existing frontend regression suites without adding a dependency or changing a package file.
+
+From the repository root, run all frontend tests:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+For a local preview:
+
+```powershell
+Copy-Item outputs/lekkadeall-frontend-shell/runtime-config.example.js outputs/lekkadeall-frontend-shell/runtime-config.local.js
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+Open `http://localhost:4173/app/customer/requests/detail/?requestId=<owned-draft-uuid>` while signed in as the active customer who owns that draft.
+
+From `outputs/marketplace-production-foundation`, run the migration and focused database suite:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
+supabase stop --no-backup
+```
+
+The focused pgTAP suite plans exactly **62 assertions** covering:
+
+- the `public.customer_cancel_draft_request(uuid) returns public.request_status` contract, `SECURITY DEFINER`, `VOLATILE`, fixed `pg_catalog` search path, explicit actor/request locks, one UUID argument, and absence of dynamic SQL or broad selects;
+- denied execution for `PUBLIC`, `anon`, and `service_role`, authenticated-only execution of the new function, revoked authenticated execution of `customer_cancel_request(uuid,text)`, and no direct authenticated insert/update/delete request-table privileges;
+- signed-out, missing-profile, provider/admin role, restricted/suspended/closed status, hostile JWT-role metadata, and cross-customer rejection;
+- successful exact-draft cancellation, unchanged ownership/public/workflow fields, exactly one fixed privacy-safe audit event, and no email/phone/token/reason/metadata leakage;
+- duplicate calls and open/awarded/cancelled/expired/inconsistent draft rows rejecting without mutation;
+- any bid, accepted bid, or booking rejecting cancellation;
+- direct DML denial, cancellation rollback when audit insertion fails, transition-guard reset, own/cross-customer RLS behavior, and unchanged bid/booking rows.
+
+The frontend suite verifies the detail-only control, fresh-read `draft` requirement, fixed confirmation copy, absence of a cancellation reason field, exact `{ p_request_id: requestId }` payload, single-flight handling, no optimistic status change, no automatic retry, fresh RLS re-read after RPC success, success only when the re-read says `cancelled`, and generic safe errors. Static boundaries prove the frontend does not call the legacy cancellation or publication RPC, use direct application-table DML, use `select('*')`, or add blocked address/provider/booking/payment/admin features.
+
+Local frontend result: **43/43 passed** using Node's built-in test runner. The SQL suite contains **62 assertions matching `plan(62)`**. This host did not expose Docker, the Supabase CLI, PostgreSQL client, or Deno, so the pgTAP and webhook suites could not be executed locally. GitHub Actions remains the authoritative migration, focused pgTAP, full pgTAP, and webhook regression gate. Ticket 9A-7's CI result is **pending** until the workflow completes successfully.
+
+Publication, editing/deletion/duplication/reopening, exact-address handling, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts, disputes/reviews/support/chat, identity/profile editing, and the admin dashboard remain blocked. No service-role key, real credential, direct frontend table write, RLS policy, or direct table grant was added, and existing role/status, address privacy, public-field validation, marketplace state-machine, and payment protections were not weakened.

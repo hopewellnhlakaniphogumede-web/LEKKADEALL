@@ -141,10 +141,7 @@ returns boolean
 language plpgsql
 as $$
 begin
-  perform public.customer_cancel_request(
-    p_request_id,
-    'Ticket 6 cancellation test'
-  );
+  perform public.customer_cancel_draft_request(p_request_id);
 
   return true;
 exception
@@ -840,7 +837,7 @@ select is(
   'published request enters open state'
 );
 
--- 7-9. Customers can cancel own draft/open request only through the function.
+-- 7-9. Customers can cancel an own draft only through the strict function.
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
 
@@ -861,7 +858,7 @@ select ok(
 select is(
   pg_temp.try_cancel_request((select id from ticket6_ids where name = 'cancel_request')),
   true,
-  'customer can cancel own draft request through controlled function'
+  'customer can cancel own draft request through strict controlled function'
 );
 
 reset role;
