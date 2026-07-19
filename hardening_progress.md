@@ -2635,7 +2635,7 @@ The exact-address step and publication remain blocked until a separately reviewe
 
 ### Ticket 9A-5 implementation — Server-side public-field validation — 2026-07-18
 
-**Status:** Implemented; GitHub Actions verification pending.
+**Status:** Implemented and CI-verified.
 
 #### What was implemented
 
@@ -2668,7 +2668,7 @@ The exact-address step and publication remain blocked until a separately reviewe
 - Updated the existing Ticket 9A-3 frontend RPC-failure test to use a realistic Ticket 9A-5 `22023` validation error and prove that browser output remains generic, does not echo server detail, and is not retried.
 - Static assertion count check: the pgTAP file resolves to exactly **95 assertions** (`plan(95)`).
 - Local frontend result: **25/25 passed** using the bundled Node runtime.
-- Local database result: not run because this host exposes neither Docker nor the Supabase CLI. GitHub Actions remains the migration, focused pgTAP, full pgTAP, and Deno integration gate.
+- Local database result: not run because this host exposes neither Docker nor the Supabase CLI. The final successful GitHub Actions run supplied the authoritative migration, focused pgTAP, full pgTAP, and Deno verification.
 
 #### Security and scope confirmations
 
@@ -2685,14 +2685,14 @@ The exact-address step and publication remain blocked until a separately reviewe
 
 #### Still blocked
 
-- Ticket 9A-5 is not CI-verified until GitHub Actions successfully applies migration 014 and passes the focused 95-assertion suite plus every existing pgTAP, Deno webhook, and frontend test.
+- Ticket 9A-5 is CI-verified by the successful **Fix Ticket 9A-5 pgTAP assertion count** run; downstream request publication remains blocked by the separate readiness requirements below.
 - Exact-address collection/storage/reveal remains blocked by Ticket 9A-4's encryption and key-management requirements.
 - Request publication remains unavailable in the frontend and must not be enabled until Ticket 9A-4 address readiness and the complete production-readiness review pass.
 - Draft editing remains blocked; `customer_update_draft_request(...)` is reserved for a separate reviewed ticket.
 
 ### Ticket 9A-5 CI failure correction — public-field validation pgTAP — 2026-07-19
 
-**Status:** Corrected locally; replacement GitHub Actions verification pending.
+**Status:** Correction included in the final successful CI-verified run.
 
 #### Failure summary
 
@@ -2732,7 +2732,7 @@ The early termination had a second independent test defect. The next privacy-lea
 
 - Static recount confirms the file still resolves to exactly **95 assertions** and retains `plan(95)`.
 - Ticket 9A frontend regression result: **25/25 passed** with the bundled Node runtime.
-- Local pgTAP and Deno execution is unavailable on this host because it has no Supabase CLI, PostgreSQL client, Docker, or Deno. The replacement GitHub Actions run remains the authoritative focused pgTAP, full pgTAP, and Deno verification gate.
+- Local pgTAP and Deno execution was unavailable on this host because it had no Supabase CLI, PostgreSQL client, Docker, or Deno. The final successful GitHub Actions run supplied the authoritative focused pgTAP, full pgTAP, and Deno verification.
 
 #### Security confirmations
 
@@ -2744,7 +2744,7 @@ The early termination had a second independent test defect. The next privacy-lea
 
 ### Ticket 9A-5 second CI failure correction — audit assertion role boundary — 2026-07-19
 
-**Status:** Corrected locally; replacement GitHub Actions verification pending.
+**Status:** Correction included in the final successful CI-verified run.
 
 #### Latest failure summary
 
@@ -2782,7 +2782,7 @@ The early termination had a second independent test defect. The next privacy-lea
 
 - Static recount confirms `plan(95)` still matches exactly **95 assertions**.
 - Ticket 9A frontend regression result: **25/25 passed** with the bundled Node runtime.
-- Local pgTAP and Deno execution remains unavailable because this host has no Supabase CLI, PostgreSQL client, Docker, or Deno. The replacement GitHub Actions run remains the authoritative focused pgTAP, full pgTAP, and Deno verification gate.
+- Local pgTAP and Deno execution was unavailable because this host had no Supabase CLI, PostgreSQL client, Docker, or Deno. The final successful GitHub Actions run supplied the authoritative focused pgTAP, full pgTAP, and Deno verification.
 
 #### Security and scope confirmations
 
@@ -2791,3 +2791,54 @@ The early termination had a second independent test defect. The next privacy-lea
 - Safe South African false-positive fixtures and all 95 intended assertions remain in the focused suite.
 - Publication remains unavailable in the frontend, and the legacy-publication test remains a rejection test only.
 - Exact-address collection/reveal, KMS/encryption, provider onboarding/bidding, booking changes, payments/refunds/payouts/disputes, admin features, frontend DML, and unrelated functionality remain blocked and unchanged.
+
+### Ticket 9A-5 CI verification — Server-side public-field validation — 2026-07-19
+
+**Status:** CI-verified.
+
+- **Latest successful run:** Fix Ticket 9A-5 pgTAP assertion count
+- **Run status:** Success
+
+#### What was implemented
+
+- Added migration `014_server_public_field_validation.sql` with one authoritative private validation boundary for the eventually public `service_requests` fields `title`, `description`, `suburb`, and `city`.
+- Added NFC/whitespace canonicalisation, description CRLF-to-LF handling, required/length/byte/single-line or approved-multiline rules, control/bidi/invisible-character rejection, markup rejection, and exact-location/contact/GPS/URL/social/access-code detection.
+- Added conservative South African false-positive handling so reviewed locality names, township extensions/zones/sections, quantities, ZAR amounts, product models, apostrophes, and ordinary service phrases remain usable.
+- Integrated the validator into `customer_create_draft_request(...)` before any request, private-address, or audit insert so invalid public fields fail atomically and create no partial row.
+- Added the `enforce_service_request_public_fields` table trigger as a `BEFORE INSERT OR UPDATE OF title, description, suburb, city, status` backstop. It validates every insert, public-field change, and attempted transition to `open` without enabling publication.
+- Preserved `service_request_description_has_exact_address_risk(text)` by delegating its compatibility decision to the shared private classifier.
+- Kept all private helpers behind fixed `pg_catalog` search paths and revoked direct execution from `PUBLIC`, `anon`, `authenticated`, and `service_role`.
+- Kept database errors privacy-safe with fixed `22023` messages that do not echo submitted text, matched substrings, or regex details.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/migrations/014_server_public_field_validation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/public_field_validation.test.sql`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `.github/workflows/database-tests.yml`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Tests added or updated
+
+- Added the focused **95-assertion** `public_field_validation.test.sql` pgTAP suite covering helper authority/permissions/search paths, structural validation, hostile privacy/contact inputs, safe South African fixtures, Ticket 5 compatibility, trusted draft-RPC rejection, no partial writes, privacy-safe errors, canonical storage, trigger insert/update enforcement, unsafe legacy-opening rejection, audit behavior, RLS/direct-DML protection, and address-column regressions.
+- Added the focused pgTAP suite to `.github/workflows/database-tests.yml` before the marketplace state-machine and payment regression suites.
+- Updated `request-draft.test.mjs` to prove a Ticket 9A-5 `22023` server rejection is displayed generically, does not echo sensitive server detail, and is not retried.
+- The successful GitHub Actions run confirms the focused 95-assertion suite and the existing pgTAP, Deno webhook, and frontend regression gates are green.
+
+#### Initial CI failures, root cause, and fixes
+
+- **First failed run:** pgTAP planned 95, ran 78, and failed test 77. Test 77 incorrectly expected a global seeded request count while running as authenticated Customer A under RLS. It was changed to compare against a Customer A RLS-visible baseline, preserving the no-partial-write proof. The following test also used invalid pgTAP `unlike(...)`; replacing it with `unalike(...)` allowed execution to continue.
+- **Second failed run:** pgTAP planned 95, ran 82, and failed 0 assertions. Assertions 83-95 were present and intentional, but the test attempted to query `public.audit_events` while still running as `authenticated`, which correctly has no audit-ledger access. `RESET ROLE` was moved before the server-side audit assertion.
+- The plan remained **95** throughout. No hostile-input, safe South African fixture, permission, trigger, RPC-boundary, legacy-publication, or Ticket 5 regression assertion was removed, and no validator or production security rule was weakened to make CI pass.
+
+#### Blocked scope and security confirmations
+
+- Request publication remains blocked in the frontend.
+- Exact-address collection, ciphertext production, storage readiness, and reveal remain blocked pending the separately reviewed Ticket 9A-4 encryption/key-management boundary.
+- Provider onboarding and bidding remain blocked.
+- Payments, refunds, payouts, real checkout, and real provider integrations remain blocked.
+- The admin dashboard remains blocked.
+- No KMS or encryption implementation was added.
+- No service-role key, provider credential, webhook secret, identity secret, or other real credential was added.
+- No RLS, grant, role/account-status, Ticket 5 address-privacy, or Ticket 6 marketplace state-machine protection was weakened.
