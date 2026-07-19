@@ -2845,7 +2845,10 @@ The early termination had a second independent test defect. The next privacy-lea
 
 ### Ticket 9A-6 implementation — Customer request list and detail read-only baseline — 2026-07-19
 
-**Status:** Implemented locally; GitHub Actions verification pending.
+**Status:** Implemented and CI-verified.
+
+- **Latest successful run:** Implement Ticket 9A-6 customer request list detail
+- **Run status:** Success
 
 #### What was implemented
 
@@ -2897,7 +2900,8 @@ The early termination had a second independent test defect. The next privacy-lea
 - Added dashboard and post-draft navigation assertions for “View all requests” and “View draft.”
 - Extended static safety checks for no `select('*')`, direct application-table insert/update/upsert/delete, cancellation/publication/address RPC, service-role key, browser persistence, service-worker cache, logs, analytics, or telemetry.
 - Local frontend result: **33/33 tests passed** using Node's built-in test runner.
-- Existing pgTAP database tests, Deno webhook tests, workflow files, migrations, and database seed/helper files were not changed. GitHub Actions remains the authoritative database/webhook integration regression gate.
+- Existing pgTAP database tests, Deno webhook tests, workflow files, migrations, and database seed/helper files were not changed.
+- The successful GitHub Actions run confirms the **33/33 frontend tests**, all existing pgTAP database suites, and the Deno webhook regression suite are green.
 
 #### Intentionally not implemented and security confirmations
 
@@ -2905,7 +2909,10 @@ The early termination had a second independent test defect. The next privacy-lea
 - Publication remains blocked. No `customer_publish_request(...)` call, publication button, optimistic status change, or open-state mutation was added.
 - Request edit/update/delete remains blocked.
 - Exact-address collection/storage/read/reveal, private address data, maps, GPS/geolocation, ciphertext production, KMS, encryption, and key management remain blocked.
-- Provider feed, provider onboarding, bidding, booking changes/completion, payments, checkout, refunds, payouts/releases, disputes, reviews, support, consent, notifications, chat, profile editing, identity integration, and the admin dashboard remain blocked.
+- Provider feed, provider onboarding, and provider bidding remain blocked.
+- Booking screens, workflow actions, and completion mutations remain blocked; pre-existing safe dashboard summary reads were not expanded.
+- Payments, real checkout, refunds, payouts/releases, disputes, reviews, support, consent, notifications, chat, and real provider integrations remain blocked.
+- The admin dashboard and profile editing remain blocked.
 - No direct application-table insert/update/upsert/delete was added. Ticket 9A-3's reviewed `customer_create_draft_request(...)` remains the only frontend marketplace mutation and continues to pass `p_precise_address_ciphertext: null`.
 - No `select('*')`, blocked request column, private-table read, admin/private/webhook function call, or broader fallback query was added.
 - No request content is stored in URLs, `localStorage`, `sessionStorage`, IndexedDB, service-worker caches, logs, analytics, telemetry, or error reports.
