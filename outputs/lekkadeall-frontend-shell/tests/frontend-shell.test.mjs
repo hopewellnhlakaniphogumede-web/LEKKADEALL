@@ -21,7 +21,13 @@ test('required routes exist and no admin route is registered', () => {
     '/auth/reset-password', '/auth/callback', '/app/customer', '/app/provider',
     '/app/settings', '/access-denied', '/account-restricted',
   ];
-  required.splice(required.indexOf('/app/provider'), 0, '/app/customer/requests/new');
+  required.splice(
+    required.indexOf('/app/provider'),
+    0,
+    '/app/customer/requests',
+    '/app/customer/requests/detail',
+    '/app/customer/requests/new',
+  );
   assert.deepEqual(ROUTES, required);
   assert.equal(ROUTES.some((route) => route.startsWith('/admin')), false);
   assert.equal(isKnownRoute('/services/'), true);

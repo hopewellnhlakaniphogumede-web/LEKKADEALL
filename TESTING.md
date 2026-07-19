@@ -2,7 +2,7 @@
 
 ## Frontend shell, database, and webhook route tests in CI
 
-GitHub Actions runs the Ticket 9A-5 server public-field validation tests, Ticket 9A-3 draft-creation tests, Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
+GitHub Actions runs the Ticket 9A-6 customer request read tests, Ticket 9A-5 server public-field validation tests, Ticket 9A-3 draft-creation tests, Ticket 9A-1/9A-2 frontend regressions, mock payment webhook route tests, and Supabase database hardening tests on every push and pull request.
 
 Workflow file:
 
@@ -59,7 +59,7 @@ In GitHub:
 
 Common useful steps:
 
-- **Run Ticket 9A-3 draft creation and existing frontend tests**: required routes and safe states, exact mock-payment wording, anon-only client configuration, protected-profile route decisions, active-category reads, draft validation, privacy detection, integer ZAR conversion, explicit SAST conversion, the single allowlisted draft RPC, null ciphertext, no blocked RPCs/direct DML/broad selects, and clean-path entry files.
+- **Run Ticket 9A-6 request reads and existing frontend tests**: required routes and safe states, anon-only client configuration, protected-profile route decisions, the active-category read, draft validation and RPC boundary, the exact request list/detail projection, three-status filter, 20-row bound, UUID validation, `maybeSingle()` detail behavior, generic unavailable state, escaped output, explicit SAST/ZAR display, no blocked RPCs/direct DML/broad selects/persistence, and clean-path entry files.
 - **Apply migrations with database reset**: migration/schema errors usually appear here.
 - **Run mock payment webhook route tests**: raw-body HMAC verification, missing/invalid signatures, stale timestamps, exact payload hashing, no database call before verification, safe metadata forwarding, runtime-only mock secret/app-env config, and production mock-mode fail-closed behavior.
 - **Run role escalation pgTAP tests**: role, provider verification, privileged-column, and audit protections.
@@ -216,3 +216,51 @@ The existing frontend rejection test now supplies a Ticket 9A-5-style `22023` da
 This host did not expose Docker or the Supabase CLI, so the migration and pgTAP suite were not executed locally. GitHub Actions runs `supabase db reset`, the focused 95-assertion suite, and every existing pgTAP/Deno/frontend regression before Ticket 9A-5 may be marked CI-verified.
 
 Ticket 9A-5 does not add a frontend publication call, exact-address collection, KMS/encryption, a draft-update RPC, direct frontend table DML, provider bidding, payments, admin features, credentials, or service-role keys. The existing database publication function is not newly exposed in the frontend; the new trigger only adds a fail-closed validation backstop for any attempted transition to `open`.
+
+## Ticket 9A-6 customer request list/detail verification
+
+Ticket 9A-6 adds `outputs/lekkadeall-frontend-shell/tests/customer-request-read.test.mjs` and updates the existing frontend shell, Auth/safe-read, and draft tests. It introduces no new dependency or package-file change and continues to use Node's built-in test runner.
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+For a local preview, copy the public placeholder template as documented above and run:
+
+```powershell
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+The implemented routes are:
+
+- `http://localhost:4173/app/customer/requests/`
+- `http://localhost:4173/app/customer/requests/detail/?requestId=<valid-request-uuid>`
+
+Both routes require a session plus an own RLS-protected profile with `role = 'customer'` and `account_status = 'active'`. The static-shell-compatible detail URL contains only the opaque UUID; it does not contain title, description, suburb, city, schedule, budget, status, or other request content.
+
+List and detail use exactly:
+
+```text
+id,category_id,title,description,suburb,city,requested_start,budget_minor,status,created_at,updated_at
+```
+
+The list applies `status IN (draft, open, cancelled)`, `created_at` descending, and `limit(20)`. The detail validates the UUID before querying `service_requests`, applies the same status allowlist, and uses `maybeSingle()`. Malformed, missing, cross-customer, unsupported-status, and RLS-hidden IDs render the same generic unavailable state. Ownership continues to come only from existing RLS; neither query selects or filters on `customer_id`.
+
+The Ticket 9A-6 frontend tests verify:
+
+- session/profile guards for active customer, signed-out, restricted/suspended, and wrong-role states;
+- the exact request projection and exclusion of address, customer, workflow-internal, provider, bid, booking, payment, and audit columns;
+- newest-first ordering, the three-status allowlist, and the 20-row limit;
+- UUID validation before the request query, exact detail filters, and `maybeSingle()` semantics;
+- one generic not-found/unavailable state for every non-visible detail outcome;
+- active-category labels with a safe “Category unavailable” fallback;
+- database-text escaping, explicit `Africa/Johannesburg`/SAST dates, and display-only ZAR budget formatting;
+- dashboard and draft-success navigation to “View all requests” and “View draft”;
+- no `select('*')`, direct application-table insert/update/upsert/delete, cancellation/publication/address RPC, exact-address/payment/admin/provider control, service-role key, credential, browser persistence, logging, analytics, or telemetry.
+
+Local implementation result: **33/33 frontend tests passed**. Ticket 9A-6 changes no migration, RLS policy, grant, database policy/function, pgTAP test, Deno webhook function/test, or workflow. GitHub Actions remains the authoritative full pgTAP and Deno regression gate.
+
+Cancellation and `customer_cancel_request(...)` remain intentionally absent. Publication, request editing, exact-address handling, maps/GPS, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts, disputes/reviews/support/chat, profile editing, and the admin dashboard also remain blocked.

@@ -14,6 +14,7 @@ import {
   readActiveServiceCategories,
   readOwnCustomerBookings,
   readOwnCustomerPayments,
+  readOwnCustomerRequestDetail,
   readOwnCustomerRequests,
   readOwnProviderStatus,
   readOwnRouteProfile,
@@ -37,6 +38,8 @@ const state = {
   categoriesStatus: 'idle',
   categories: [],
   customer: null,
+  customerRequestList: null,
+  customerRequestDetail: null,
   providerStatus: null,
   settingsProfile: null,
   requestDraft: {
@@ -55,6 +58,8 @@ const pageTitles = Object.freeze({
   '/auth/reset-password': 'Reset password',
   '/auth/callback': 'Authentication callback',
   '/app/customer': 'Customer workspace',
+  '/app/customer/requests': 'Your requests',
+  '/app/customer/requests/detail': 'Request details',
   '/app/customer/requests/new': 'Create request draft',
   '/app/provider': 'Provider workspace',
   '/app/settings': 'Settings',
@@ -77,6 +82,8 @@ function view() {
     categoriesStatus: state.categoriesStatus,
     categories: state.categories,
     customer: state.customer,
+    customerRequestList: state.customerRequestList,
+    customerRequestDetail: state.customerRequestDetail,
     providerStatus: state.providerStatus,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
@@ -93,6 +100,8 @@ function render({ scroll = false } = {}) {
 function clearPersonalState() {
   state.routeProfile = null;
   state.customer = null;
+  state.customerRequestList = null;
+  state.customerRequestDetail = null;
   state.providerStatus = null;
   state.settingsProfile = null;
 }
@@ -120,6 +129,14 @@ async function loadCustomerData(sequence) {
   const payments = await readOwnCustomerPayments(state.client, bookingIds);
   if (sequence !== refreshSequence) return;
   state.customer = { requests, bookings, payments };
+}
+
+async function loadRequestCategories(sequence) {
+  const categories = await readActiveServiceCategories(state.client);
+  if (sequence !== refreshSequence) return false;
+  state.categoriesStatus = categories.ok ? 'ready' : 'error';
+  state.categories = categories.ok ? categories.data : [];
+  return true;
 }
 
 async function refreshRoute() {
@@ -163,6 +180,29 @@ async function refreshRoute() {
 
     if (path === '/app/customer') {
       await loadCustomerData(sequence);
+    } else if (path === '/app/customer/requests') {
+      state.customerRequestList = null;
+      state.categoriesStatus = 'loading';
+      state.categories = [];
+      render();
+      const [requests] = await Promise.all([
+        readOwnCustomerRequests(state.client),
+        loadRequestCategories(sequence),
+      ]);
+      if (sequence !== refreshSequence) return;
+      state.customerRequestList = requests;
+    } else if (path === '/app/customer/requests/detail') {
+      state.customerRequestDetail = null;
+      state.categoriesStatus = 'loading';
+      state.categories = [];
+      render();
+      const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+      const [request] = await Promise.all([
+        readOwnCustomerRequestDetail(state.client, requestId),
+        loadRequestCategories(sequence),
+      ]);
+      if (sequence !== refreshSequence) return;
+      state.customerRequestDetail = request;
     } else if (path === '/app/customer/requests/new') {
       // Categories were loaded above. Draft state remains in memory only while this route is active.
     } else if (path === '/app/provider') {

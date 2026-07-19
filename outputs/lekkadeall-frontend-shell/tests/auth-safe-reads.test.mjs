@@ -11,6 +11,7 @@ import {
   readActiveServiceCategories,
   readOwnCustomerBookings,
   readOwnCustomerPayments,
+  readOwnCustomerRequestDetail,
   readOwnCustomerRequests,
   readOwnProviderStatus,
   readOwnRouteProfile,
@@ -65,7 +66,11 @@ test('route guards use session plus protected profile role and status', () => {
   assert.deepEqual(resolveRouteAccess('/app/customer', session, null), { kind: 'missingProfile' });
   assert.deepEqual(resolveRouteAccess('/app/customer', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
   assert.deepEqual(resolveRouteAccess('/app/customer/requests/new', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests/detail', session, { role: 'customer', account_status: 'active' }), { kind: 'allowed', role: 'customer' });
   assert.deepEqual(resolveRouteAccess('/app/customer/requests/new', session, { role: 'provider', account_status: 'active' }), { kind: 'accessDenied' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests', session, { role: 'provider', account_status: 'active' }), { kind: 'accessDenied' });
+  assert.deepEqual(resolveRouteAccess('/app/customer/requests/detail', session, { role: 'provider', account_status: 'active' }), { kind: 'accessDenied' });
   assert.deepEqual(resolveRouteAccess('/app/provider', session, { role: 'customer', account_status: 'active' }), { kind: 'accessDenied' });
   assert.deepEqual(resolveRouteAccess('/app/provider', session, { role: 'provider', account_status: 'suspended' }), { kind: 'restricted', accountStatus: 'suspended' });
   assert.deepEqual(resolveRouteAccess('/app/settings', session, { role: 'admin', account_status: 'active' }), { kind: 'accessDenied' });
@@ -99,16 +104,19 @@ test('all reads use a fixed table allowlist and explicit projections', async () 
   await readOwnSettingsProfile(client, 'user-1');
   await readOwnProviderStatus(client, 'user-1');
   await readOwnCustomerRequests(client);
+  await readOwnCustomerRequestDetail(client, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
   await readOwnCustomerBookings(client);
   await readOwnCustomerPayments(client, ['booking-1']);
   assert.deepEqual(records.map(({ table }) => table), [
     'service_categories', 'profiles', 'profiles', 'provider_profiles',
-    'service_requests', 'bookings', 'payments',
+    'service_requests', 'service_requests', 'bookings', 'payments',
   ]);
   for (const record of records) {
     assert.ok(record.projection && !record.projection.includes('*'), `${record.table} must use an explicit projection`);
   }
   assert.equal(records[0].operations.some((operation) => operation[0] === 'eq' && operation[1] === 'active' && operation[2] === true), true);
+  assert.equal(SAFE_PROJECTIONS.customerRequests, 'id,category_id,title,description,suburb,city,requested_start,budget_minor,status,created_at,updated_at');
+  assert.doesNotMatch(SAFE_PROJECTIONS.customerRequests, /customer_id|closes_at|published_at|cancelled_at|precise_address/);
   assert.equal(Object.values(SAFE_PROJECTIONS).some((projection) => projection.includes('precise_address') || projection.includes('provider_reference')), false);
 });
 

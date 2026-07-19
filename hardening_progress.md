@@ -2842,3 +2842,73 @@ The early termination had a second independent test defect. The next privacy-lea
 - No KMS or encryption implementation was added.
 - No service-role key, provider credential, webhook secret, identity secret, or other real credential was added.
 - No RLS, grant, role/account-status, Ticket 5 address-privacy, or Ticket 6 marketplace state-machine protection was weakened.
+
+### Ticket 9A-6 implementation — Customer request list and detail read-only baseline — 2026-07-19
+
+**Status:** Implemented locally; GitHub Actions verification pending.
+
+#### What was implemented
+
+- Added the protected customer request list route at `/app/customer/requests/`.
+- Added the static-shell-compatible request detail route at `/app/customer/requests/detail/?requestId=<uuid>`. Only the opaque UUID is placed in the URL; request content is never placed in the path, query, or fragment.
+- Added both routes to the existing Ticket 9A-2 session/profile guard. A route read is allowed only for a signed-in own profile with `role = 'customer'` and `account_status = 'active'`; signed-out, expired, missing-profile, restricted/suspended/closed, provider, unknown-role, and unknown-status cases fail closed.
+- Added one shared request-read contract with the exact approved projection:
+
+  ```text
+  id,category_id,title,description,suburb,city,requested_start,budget_minor,status,created_at,updated_at
+  ```
+
+- Added an own-request list read that relies on existing RLS for ownership, filters to `draft`, `open`, and `cancelled`, orders by `created_at` descending, and is bounded to 20 rows. It neither selects nor filters on `customer_id`.
+- Added an own-request detail read that validates the UUID before querying `service_requests`, uses the exact projection, applies the same status allowlist, and uses `maybeSingle()` semantics.
+- Collapsed malformed, missing, cross-customer, unsupported-status, query-denied, and RLS-hidden detail outcomes into one generic “Request not found or unavailable” state without exposing why a row was unavailable.
+- Reused the existing active `service_categories` read for category labels only. An inactive, missing, or unavailable historical category displays “Category unavailable”; no broader category read is attempted.
+- Added request list/summary/detail rendering with HTML escaping for all database text, explicit `Africa/Johannesburg` date formatting and SAST labels, and display-only ZAR formatting from integer `budget_minor` values.
+- Added safe loading, empty, unavailable, generic not-found, signed-out, restricted, and access-denied states for the new routes.
+- Added “View all requests” to the customer dashboard.
+- Added “View draft” and “View all requests” after Ticket 9A-3 receives a valid draft UUID. The detail link performs a new RLS-backed read and does not treat the draft response as authorization.
+- Corrected old shell copy so the frontend no longer incorrectly describes the entire application as read-only now that the separately reviewed Ticket 9A-3 draft RPC exists.
+- Added no dependency and changed no package or lock file.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/customer-requests.js` — new request projection, allowlists, UUID/detail-link helpers, category fallback, and SAST/ZAR display formatters.
+- `outputs/lekkadeall-frontend-shell/safe-reads.js` — narrowed the request projection and added bounded list and validated detail reads.
+- `outputs/lekkadeall-frontend-shell/route-guards.js` — registered the list/detail routes as active-customer protected routes.
+- `outputs/lekkadeall-frontend-shell/app.js` — added in-memory list/detail state and guarded route-loading flows.
+- `outputs/lekkadeall-frontend-shell/shell.js` — added navigation, list/detail rendering, draft-created actions, output escaping usage, and safe route states.
+- `outputs/lekkadeall-frontend-shell/styles.css` — added request list/detail/action layouts and responsive styling.
+- `outputs/lekkadeall-frontend-shell/app/customer/requests/index.html` — clean-path list entry file.
+- `outputs/lekkadeall-frontend-shell/app/customer/requests/detail/index.html` — clean-path detail entry file.
+- `outputs/lekkadeall-frontend-shell/tests/customer-request-read.test.mjs` — new focused Ticket 9A-6 behavior/security suite.
+- `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs` — updated route/clean-path coverage.
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs` — updated guard, table allowlist, and exact request-projection coverage.
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs` — updated successful-draft navigation coverage.
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Tests added or updated
+
+- Added focused tests for the exact list/detail projection and explicit exclusion of `customer_id`, `closes_at`, publication/cancellation timestamps, address material, provider/bid/booking/payment/audit fields, and other unapproved data.
+- Added query-contract tests for the `draft`/`open`/`cancelled` filter, newest-first ordering, 20-row bound, UUID-before-query validation, `id` and status constraints, and `maybeSingle()` detail behavior.
+- Added tests proving malformed, missing, denied/RLS-hidden, and unsupported-status results use the same generic unavailable result and UI state.
+- Added active-customer guard tests for both routes, including wrong-role and suspended-account denial.
+- Added output-escaping tests with hostile HTML-like database text, category fallback tests, deterministic `Africa/Johannesburg`/SAST date tests, and display-only ZAR budget tests.
+- Added dashboard and post-draft navigation assertions for “View all requests” and “View draft.”
+- Extended static safety checks for no `select('*')`, direct application-table insert/update/upsert/delete, cancellation/publication/address RPC, service-role key, browser persistence, service-worker cache, logs, analytics, or telemetry.
+- Local frontend result: **33/33 tests passed** using Node's built-in test runner.
+- Existing pgTAP database tests, Deno webhook tests, workflow files, migrations, and database seed/helper files were not changed. GitHub Actions remains the authoritative database/webhook integration regression gate.
+
+#### Intentionally not implemented and security confirmations
+
+- Cancellation remains blocked. No cancellation control or `customer_cancel_request(...)` call was added.
+- Publication remains blocked. No `customer_publish_request(...)` call, publication button, optimistic status change, or open-state mutation was added.
+- Request edit/update/delete remains blocked.
+- Exact-address collection/storage/read/reveal, private address data, maps, GPS/geolocation, ciphertext production, KMS, encryption, and key management remain blocked.
+- Provider feed, provider onboarding, bidding, booking changes/completion, payments, checkout, refunds, payouts/releases, disputes, reviews, support, consent, notifications, chat, profile editing, identity integration, and the admin dashboard remain blocked.
+- No direct application-table insert/update/upsert/delete was added. Ticket 9A-3's reviewed `customer_create_draft_request(...)` remains the only frontend marketplace mutation and continues to pass `p_precise_address_ciphertext: null`.
+- No `select('*')`, blocked request column, private-table read, admin/private/webhook function call, or broader fallback query was added.
+- No request content is stored in URLs, `localStorage`, `sessionStorage`, IndexedDB, service-worker caches, logs, analytics, telemetry, or error reports.
+- No migration, RLS policy, grant, database policy/function, webhook, pgTAP file, or database seed/helper changed.
+- No service-role key, real credential, provider secret, webhook secret, identity secret, production project reference, or real provider integration was added.
+- Ticket 1 role/account-status protection, Ticket 2 RLS/grants, Ticket 5 address privacy, Ticket 6 state-machine controls, Ticket 9A-5 public-field validation, and every existing database/webhook security boundary remain unchanged.

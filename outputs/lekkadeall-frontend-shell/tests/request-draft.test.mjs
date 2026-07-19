@@ -156,7 +156,9 @@ test('draft confirmation appears only with a returned request ID', () => {
     requestDraft: { values: {}, errors: {}, message: '', submitting: false, requestId },
   });
   assert.match(created, /Your request draft is saved/);
-  assert.match(created, new RegExp(requestId));
+  assert.match(created, new RegExp(`/app/customer/requests/detail/\\?requestId=${requestId}`));
+  assert.match(created, />View draft</);
+  assert.match(created, />View all requests</);
   assert.match(created, /It remains a private draft/);
 });
 

@@ -1,4 +1,14 @@
 import { REQUEST_PRIVACY_WARNING } from './request-draft.js';
+import {
+  CUSTOMER_REQUEST_STATUSES,
+  activeCategoryLabel,
+  customerRequestDetailHref,
+  customerRequestStatusLabel,
+  formatSastDateTime,
+  formatZarBudgetMinor,
+  isAllowedCustomerRequestStatus,
+  isCustomerRequestId,
+} from './customer-requests.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -11,6 +21,8 @@ export const ROUTES = Object.freeze([
   '/auth/reset-password',
   '/auth/callback',
   '/app/customer',
+  '/app/customer/requests',
+  '/app/customer/requests/detail',
   '/app/customer/requests/new',
   '/app/provider',
   '/app/settings',
@@ -86,9 +98,10 @@ function appHeader(section) {
   return `
     <header class="app-header"><div class="header-inner">
       ${brand()}
-      <div class="app-context"><span>Safe read-only access</span><strong>${escapeHtml(section)}</strong></div>
+      <div class="app-context"><span>Protected marketplace access</span><strong>${escapeHtml(section)}</strong></div>
       <nav class="app-nav" aria-label="Application navigation">
         <a href="/app/customer" data-nav>Customer</a>
+        <a href="/app/customer/requests" data-nav>Requests</a>
         <a href="/app/provider" data-nav>Provider</a>
         <a href="/app/settings" data-nav>Settings</a>
         <button type="button" data-auth-action="sign-out">Sign out</button>
@@ -99,9 +112,9 @@ function appHeader(section) {
 function footer() {
   return `
     <footer class="site-footer">
-      <div>${brand()}<p>A careful read-only layer for local service bookings.</p></div>
+      <div>${brand()}<p>A careful account and marketplace layer for local services.</p></div>
       <div class="footer-links"><a href="/services" data-nav>Services</a><a href="/auth/sign-in" data-nav>Sign in</a><span>South Africa</span></div>
-      <small>Ticket 9A-2. No real payments or sensitive marketplace mutations are connected.</small>
+      <small>Ticket 9A-6. No real payments, publication, or sensitive marketplace actions are connected.</small>
     </footer>`;
 }
 
@@ -121,7 +134,7 @@ function landingPage(view) {
         <h1>Good work starts with a <em>clear request.</em></h1>
         <p class="hero-lead">LEKKADEALL helps customers and providers keep safe account and marketplace information easy to follow.</p>
         <div class="hero-actions"><a class="button button-primary" href="/services" data-nav>Browse services <span aria-hidden="true">→</span></a><a class="button button-secondary" href="/auth/register" data-nav>Create an account</a></div>
-        <p class="hero-note">This release does not create requests, accept bids or process payments.</p>
+        <p class="hero-note">This release creates private drafts only; it does not publish requests, accept bids or process payments.</p>
       </div>
       <div class="hero-board" aria-label="Marketplace journey preview">
         <div class="board-top"><span>HOW IT WILL FLOW</span><b>01—04</b></div>
@@ -256,10 +269,84 @@ function customerDashboard(view) {
     : dataList(bookings, (booking) => `<article><span>${escapeHtml(booking.status)}</span><strong>${escapeHtml(booking.public_reference)}</strong><small>${formatMoney(booking.service_amount_minor, booking.currency)}</small></article>`, 'No bookings to show', 'Booking actions and completion are intentionally not implemented.');
 
   return appPage('Customer workspace', `
-    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER WORKSPACE</p><h1>Your safe account view.</h1><p>Only RLS-protected request, booking and sandbox-payment summaries are read.</p></div><a class="button button-primary" href="/app/customer/requests/new" data-nav>Create request draft</a></section>
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER WORKSPACE</p><h1>Your safe account view.</h1><p>Only RLS-protected request, booking and sandbox-payment summaries are read.</p></div><div class="dashboard-actions"><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a><a class="button button-primary" href="/app/customer/requests/new" data-nav>Create request draft</a></div></section>
     <section class="metrics-grid" aria-label="Customer summary"><div>${metricCard('Requests', String(requests.length), 'Own rows only')}</div><div>${metricCard('Bookings', String(bookings.length), 'Booking-party rows only')}</div><div>${metricCard('Payments', String(payments.length), 'Read-only sandbox statuses')}</div></section>
     ${mockPaymentBanner()}
     <section class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><span>REQUESTS</span><h2>Your requests</h2></div><span class="status-chip">Read-only</span></div>${requestContent}</article><article class="panel"><div class="panel-heading"><div><span>BOOKINGS</span><h2>Your timeline</h2></div><span class="status-chip">Read-only</span></div>${bookingContent}</article></section>
+  `);
+}
+
+function customerRequestSummary(request, categories) {
+  const detailHref = customerRequestDetailHref(request.id);
+  if (!detailHref || !isAllowedCustomerRequestStatus(request.status)) return '';
+  const category = activeCategoryLabel(categories, request.category_id);
+  return `
+    <a class="request-summary-card" href="${escapeHtml(detailHref)}" data-nav>
+      <div class="request-summary-top"><span class="status-chip">${escapeHtml(customerRequestStatusLabel(request.status))}</span><time>${escapeHtml(formatSastDateTime(request.created_at))}</time></div>
+      <h2>${escapeHtml(request.title)}</h2>
+      <p>${escapeHtml(category)} · ${escapeHtml(request.suburb)}, ${escapeHtml(request.city)}</p>
+      <dl class="request-summary-meta"><div><dt>Requested start</dt><dd>${escapeHtml(formatSastDateTime(request.requested_start))}</dd></div><div><dt>Budget</dt><dd>${escapeHtml(formatZarBudgetMinor(request.budget_minor))}</dd></div></dl>
+      <span class="request-summary-link">View request <span aria-hidden="true">→</span></span>
+    </a>`;
+}
+
+function customerRequestListPage(view) {
+  if (view.access?.kind !== 'allowed' || view.access?.role !== 'customer') {
+    const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
+    return appPage('Your requests', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUESTS</p><h1>Your requests.</h1></div></section>${accessState(deniedAccess)}`);
+  }
+
+  let content;
+  if (!view.customerRequestList) {
+    content = pageState('loading', 'Loading your requests', 'Only your RLS-visible draft, open, and cancelled requests will be shown.');
+  } else if (!view.customerRequestList.ok) {
+    content = pageState('error', 'Requests are unavailable right now', 'No broader read or elevated fallback was attempted.');
+  } else {
+    const requests = (view.customerRequestList.data ?? [])
+      .filter((request) => isAllowedCustomerRequestStatus(request?.status));
+    content = requests.length
+      ? `<section class="request-list" aria-label="Your requests">${requests.map((request) => customerRequestSummary(request, view.categories)).join('')}</section>`
+      : pageState('empty', 'No requests to show', 'Create a private draft when you are ready.');
+  }
+
+  return appPage('Your requests', `
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUESTS</p><h1>Your requests.</h1><p>Newest first · up to 20 own rows · ${escapeHtml(CUSTOMER_REQUEST_STATUSES.join(', '))} only.</p></div><div class="dashboard-actions"><a class="button button-secondary" href="/app/customer" data-nav>Customer dashboard</a><a class="button button-primary" href="/app/customer/requests/new" data-nav>Create request draft</a></div></section>
+    ${content}
+    <section class="inline-warning request-boundary-note"><strong>Read-only request history</strong><p>Editing, cancellation, publication, exact-address handling, provider bidding and payment actions are not available here.</p></section>
+  `);
+}
+
+function customerRequestDetailPage(view) {
+  if (view.access?.kind !== 'allowed' || view.access?.role !== 'customer') {
+    const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
+    return appPage('Request details', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Request details.</h1></div></section>${accessState(deniedAccess)}`);
+  }
+
+  const result = view.customerRequestDetail;
+  if (!result) {
+    return appPage('Request details', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Request details.</h1></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>${pageState('loading', 'Loading request', 'The request ID is validated before the RLS-backed read.')}`);
+  }
+  if (!result.ok || !result.data || !isAllowedCustomerRequestStatus(result.data.status)) {
+    return appPage('Request details', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Request details.</h1></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>${pageState('notFound', 'Request not found or unavailable', 'The request could not be shown from this account and route.', '/app/customer/requests')}`);
+  }
+
+  const request = result.data;
+  const category = activeCategoryLabel(view.categories, request.category_id);
+  return appPage('Request details', `
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>${escapeHtml(request.title)}</h1><p>Read-only details returned through your existing RLS boundary.</p></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>
+    <article class="request-detail-card">
+      <div class="request-detail-status"><span class="status-chip">${escapeHtml(customerRequestStatusLabel(request.status))}</span><span>${escapeHtml(category)}</span></div>
+      <section class="request-detail-description"><h2>Public description</h2><p>${escapeHtml(request.description)}</p></section>
+      <dl class="request-detail-grid">
+        <div><dt>Suburb</dt><dd>${escapeHtml(request.suburb)}</dd></div>
+        <div><dt>City</dt><dd>${escapeHtml(request.city)}</dd></div>
+        <div><dt>Requested start</dt><dd>${escapeHtml(formatSastDateTime(request.requested_start))}</dd></div>
+        <div><dt>Budget</dt><dd>${escapeHtml(formatZarBudgetMinor(request.budget_minor))}</dd></div>
+        <div><dt>Created</dt><dd>${escapeHtml(formatSastDateTime(request.created_at))}</dd></div>
+        <div><dt>Updated</dt><dd>${escapeHtml(formatSastDateTime(request.updated_at))}</dd></div>
+      </dl>
+    </article>
+    <section class="inline-warning request-boundary-note"><strong>Read-only boundary</strong><p>Cancellation, editing, publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
   `);
 }
 
@@ -318,9 +405,10 @@ function customerRequestCreatePage(view) {
     const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
     return appPage('Create request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Create a private draft.</h1></div></section>${accessState(deniedAccess)}`);
   }
-  if (view.requestDraft?.requestId) {
+  if (isCustomerRequestId(view.requestDraft?.requestId)) {
+    const detailHref = customerRequestDetailHref(view.requestDraft.requestId);
     return appPage('Create request draft', `
-      <section class="draft-created"><p class="eyebrow">DRAFT CREATED</p><h1>Your request draft is saved.</h1><p>The trusted backend returned request ID <code>${escapeHtml(view.requestDraft.requestId)}</code>. It remains a private draft.</p><div class="blocked-notice"><strong>Publishing remains unavailable</strong><span>Exact-address collection and publishing are blocked until the encryption boundary is verified.</span></div><a class="button button-secondary" href="/app/customer" data-nav>Return to customer dashboard</a></section>`);
+      <section class="draft-created"><p class="eyebrow">DRAFT CREATED</p><h1>Your request draft is saved.</h1><p>The trusted backend confirmed the request. It remains a private draft.</p><div class="blocked-notice"><strong>Publishing remains unavailable</strong><span>Exact-address collection and publishing are blocked until the encryption boundary is verified.</span></div><div class="draft-created-actions"><a class="button button-primary" href="${escapeHtml(detailHref)}" data-nav>View draft</a><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></div></section>`);
   }
   let content;
   if (view.categoriesStatus === 'loading' || view.categoriesStatus === 'idle') {
@@ -404,6 +492,8 @@ export function renderRoute(pathname, searchParams = new URLSearchParams(), view
   if (authCopy[path]) return authPage(path, view);
   if (path === '/auth/callback') return authCallbackPage(view);
   if (path === '/app/customer') return customerDashboard(view);
+  if (path === '/app/customer/requests') return customerRequestListPage(view);
+  if (path === '/app/customer/requests/detail') return customerRequestDetailPage(view);
   if (path === '/app/customer/requests/new') return customerRequestCreatePage(view);
   if (path === '/app/provider') return providerDashboard(view);
   if (path === '/app/settings') return settingsPage(view);
