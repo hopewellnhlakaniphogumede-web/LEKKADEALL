@@ -605,6 +605,10 @@ select is(
   'draft RPC stores the validated canonical multiline description'
 );
 
+-- audit_events is intentionally unavailable to authenticated browser roles.
+-- Restore the test-owner role before checking the server-written audit row.
+reset role;
+
 select is(
   (
     select count(*)
@@ -616,8 +620,6 @@ select is(
   1::bigint,
   'successful validated draft creation keeps the privacy-safe audit event'
 );
-
-reset role;
 
 -- 84-93. Table backstop catches direct/internal writes and opening legacy rows.
 set local lekkadeall.allow_marketplace_state_transition = 'on';

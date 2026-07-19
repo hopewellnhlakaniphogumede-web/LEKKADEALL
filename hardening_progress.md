@@ -2741,3 +2741,53 @@ The early termination had a second independent test defect. The next privacy-lea
 - Browser roles still cannot execute private validation helpers or directly write `service_requests`.
 - All hostile-input and safe South African false-positive tests remain in the 95-assertion suite.
 - No request-publication UI/call, exact-address collection, KMS/encryption, RLS/grant/role/status/address/state-machine change, frontend DML, provider onboarding, bidding, booking, payment, refund, payout, dispute, review, support, chat, or admin feature was added.
+
+### Ticket 9A-5 second CI failure correction — audit assertion role boundary — 2026-07-19
+
+**Status:** Corrected locally; replacement GitHub Actions verification pending.
+
+#### Latest failure summary
+
+- Failed workflow step: **Run server public-field validation pgTAP tests**.
+- Test file: `supabase/tests/database/public_field_validation.test.sql`.
+- Latest reported result: **95 planned, 82 run, 0 failed**.
+- The earlier failed assertion was corrected: all assertions that emitted TAP output passed, but SQL execution stopped before test 83 and left tests 83-95 unexecuted.
+
+#### Assertion-count decision
+
+- The intended plan remains **95**, not 82.
+- Tests 83-95 are present and intentional: one successful-draft audit assertion, ten table-trigger/legacy-publication assertions, and two Ticket 5 compatibility assertions.
+- No TODO, skip, conditional TAP block, or intentionally removed assertion accounts for the missing thirteen tests.
+
+#### Root cause
+
+- Tests 73-82 run under `SET LOCAL ROLE authenticated` to exercise `customer_create_draft_request(...)` and the customer's RLS-visible canonical draft values.
+- The next statement, intended to emit test 83, queried `public.audit_events` before `RESET ROLE`.
+- Ticket 2 deliberately executes `REVOKE ALL ON public.audit_events FROM anon, authenticated`; browser roles also have no audit-table RLS policy. The query therefore stopped with an authorization error before pgTAP could emit assertion 83.
+- The existing `RESET ROLE` was one statement too late, after the audit assertion. This was a test harness role-boundary defect, not a missing assertion or validator defect.
+
+#### Fix applied
+
+- Moved `RESET ROLE` to immediately after the authenticated customer verifies the safe draft's canonical title and description.
+- The privacy-safe audit-row assertion now runs as the test owner, while the customer-facing RPC and RLS read assertions remain under `authenticated`.
+- Kept `plan(95)` and every assertion unchanged; no hostile-input, South African false-positive, permission, trigger, RPC-boundary, legacy-publication, or Ticket 5 regression test was removed.
+- No database migration, function, trigger, RLS policy, grant, or application code changed.
+
+#### Files changed for this correction
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/public_field_validation.test.sql`
+- `hardening_progress.md`
+
+#### Verification after the second correction
+
+- Static recount confirms `plan(95)` still matches exactly **95 assertions**.
+- Ticket 9A frontend regression result: **25/25 passed** with the bundled Node runtime.
+- Local pgTAP and Deno execution remains unavailable because this host has no Supabase CLI, PostgreSQL client, Docker, or Deno. The replacement GitHub Actions run remains the authoritative focused pgTAP, full pgTAP, and Deno verification gate.
+
+#### Security and scope confirmations
+
+- Unsafe title, description, suburb, and city values remain rejected by the database validator in `customer_create_draft_request(...)` and by the table trigger.
+- Browser roles remain unable to execute private validators, directly write service requests, or read the audit ledger.
+- Safe South African false-positive fixtures and all 95 intended assertions remain in the focused suite.
+- Publication remains unavailable in the frontend, and the legacy-publication test remains a rejection test only.
+- Exact-address collection/reveal, KMS/encryption, provider onboarding/bidding, booking changes, payments/refunds/payouts/disputes, admin features, frontend DML, and unrelated functionality remain blocked and unchanged.
