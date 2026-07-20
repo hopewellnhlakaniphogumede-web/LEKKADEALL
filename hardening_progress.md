@@ -2922,9 +2922,10 @@ The early termination had a second independent test defect. The next privacy-lea
 
 ### Ticket 9A-7 implementation — Customer draft-only cancellation — 2026-07-19
 
-**Status:** Implemented locally; GitHub Actions verification pending.
+**Status:** CI-verified.
 
-- **CI result:** Pending. Do not mark Ticket 9A-7 CI-verified until the updated workflow completes successfully.
+- **Latest successful run:** Fix Ticket 9A-7 draft cancellation pgTAP setup
+- **Run status:** Success
 
 #### What was implemented
 
@@ -2967,7 +2968,7 @@ The early termination had a second independent test defect. The next privacy-lea
 - Added `request-cancellation.test.mjs` and updated the existing Auth/safe-read, request-list/detail, and draft suites for control visibility, fixed confirmation, exact RPC payload, single-flight behavior, fresh RLS re-read, no optimistic change/retry, generic errors, and static blocked-boundary checks.
 - Local frontend result: **43/43 tests passed** using Node's built-in test runner.
 - Static recount confirms the focused pgTAP file contains **62 assertions matching `plan(62)`**.
-- GitHub Actions now runs the focused cancellation pgTAP suite after the marketplace state-machine suite and runs all 43 frontend tests. This host did not expose Docker, the Supabase CLI, PostgreSQL client, or Deno, so local migration/pgTAP/webhook execution was unavailable; full verification remains pending the workflow result.
+- GitHub Actions runs the focused cancellation pgTAP suite after the marketplace state-machine suite and runs all 43 frontend tests. The successful run confirms the focused 62-assertion suite, existing pgTAP suites, Deno webhook tests, and frontend regressions are green.
 
 #### Intentionally blocked and security confirmations
 
@@ -2983,7 +2984,10 @@ The early termination had a second independent test defect. The next privacy-lea
 
 ### Ticket 9A-7 CI correction — pgTAP stopped after assertion 6 — 2026-07-19
 
-**Status:** Corrected locally; replacement GitHub Actions verification pending.
+**Status:** CI-verified.
+
+- **Latest successful run:** Fix Ticket 9A-7 draft cancellation pgTAP setup
+- **Run status:** Success
 
 #### Failure summary
 
@@ -3020,3 +3024,73 @@ The early termination had a second independent test defect. The next privacy-lea
 - The fixed privacy-safe audit behavior and atomic audit-failure rollback remain unchanged.
 - The frontend still calls only `customer_cancel_draft_request(...)` for cancellation.
 - No publication, exact-address handling, provider bidding, payment, admin dashboard, profile editing, unrelated feature, migration change, RLS change, grant broadening, role/status weakening, address-privacy weakening, public-field-validation weakening, or state-machine weakening was added.
+
+### Ticket 9A-7 CI verification — Customer draft-only cancellation — 2026-07-20
+
+**Status:** CI-verified.
+
+- **Latest successful run:** Fix Ticket 9A-7 draft cancellation pgTAP setup
+- **Run status:** Success
+
+#### Migration and function verified
+
+- Added `outputs/marketplace-production-foundation/supabase/migrations/015_customer_draft_cancellation.sql`.
+- Added `public.customer_cancel_draft_request(p_request_id uuid) returns public.request_status` as a `SECURITY DEFINER`, `VOLATILE` function with fixed `search_path = pg_catalog`, explicit schema-qualified references, and no dynamic SQL.
+- The function derives identity only from `auth.uid()`, locks the protected profile row, requires `role = 'customer'` and `account_status = 'active'`, and locks the owned request using both request ID and customer ID.
+- It permits only an internally consistent `draft` with no bid or booking, updates only `status`, `cancelled_at`, and `updated_at`, and returns only `cancelled::public.request_status`.
+- It appends exactly one fixed privacy-safe `customer.service_request_draft_cancelled` audit event in the same transaction. Audit failure rolls the cancellation back.
+- Execution of the new function remains revoked from `PUBLIC`, `anon`, and `service_role` and granted only to `authenticated`.
+- Authenticated execution of legacy `customer_cancel_request(uuid,text)` remains revoked, so browser users cannot use the broader draft/open cancellation path or submit client-controlled audit reasons.
+
+#### Frontend behavior verified
+
+- Added `outputs/lekkadeall-frontend-shell/request-cancellation.js` and integrated it into the existing request-detail flow.
+- “Cancel draft” appears only on the customer request detail page after a fresh RLS-backed read confirms an owned `draft` for an active customer; it never appears on the request list.
+- The confirmation uses fixed copy, contains no reason or free-text field, and calls only `customer_cancel_draft_request` with `{ p_request_id: requestId }`.
+- The frontend uses UUID validation, single-flight behavior, no optimistic status update, no automatic retry, generic safe errors, and a fresh RLS-backed re-read after RPC success.
+- Success is shown only when the fresh detail read returns the same request with `status = 'cancelled'`; ambiguous results block immediate resubmission until a fresh route read.
+
+#### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/marketplace-production-foundation/supabase/migrations/015_customer_draft_cancellation.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/customer_draft_cancellation.test.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/marketplace_state_machine.test.sql`
+- `outputs/lekkadeall-frontend-shell/request-cancellation.js`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/tests/request-cancellation.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/customer-request-read.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `rls_policy_matrix.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Tests added or updated
+
+- Added the focused 62-assertion `customer_draft_cancellation.test.sql` suite for function configuration, grants/revokes, authentication, role/account status, ownership, hostile JWT metadata, exact draft-only behavior, non-draft/inconsistent-state rejection, bid/provider-selection/booking blockers, unchanged request fields, audit privacy, duplicate calls, audit rollback, transition-guard reset, direct-DML denial, RLS, and regression integrity.
+- Updated `marketplace_state_machine.test.sql` to use the strict draft-only function for its legitimate cancellation path.
+- Added `request-cancellation.test.mjs` and updated the existing Auth/safe-read, request-list/detail, and draft frontend suites for control visibility, confirmation, exact RPC payload, single-flight handling, fresh RLS re-read, safe errors, and blocked client capabilities.
+- Updated `.github/workflows/database-tests.yml` to run the focused Ticket 9A-7 pgTAP suite.
+- The successful GitHub Actions run confirms all 62 focused assertions, all existing pgTAP suites, all frontend tests, and the Deno webhook suite pass.
+
+#### Initial failure, root cause, and fix
+
+- The first CI run planned 62 assertions, emitted 6 passing assertions, and then stopped with a bad-plan summary.
+- Assertions 7–9 used unsupported `like(...)` calls. pgTAP's positive SQL-LIKE assertion is `alike(...)`; assertion 6's negative `unalike(...)` call was valid.
+- Replaced the three invalid `like(...)` calls with `alike(...)` while retaining `plan(62)` and every intended assertion.
+- No migration, production function, security grant, frontend behavior, or security expectation was weakened to make CI pass.
+
+#### Blocked scope and security confirmations
+
+- Publication remains blocked; the frontend does not call `customer_publish_request(...)`.
+- Exact-address collection, storage, encryption, read, reveal, GPS, and maps remain blocked.
+- Provider feed, onboarding, selection, and bidding remain blocked.
+- Payments, checkout, refunds, payouts, disputes, and real payment-provider integration remain blocked.
+- The admin dashboard and profile editing remain blocked.
+- No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, or admin credential was added.
+- No direct frontend application-table insert/update/upsert/delete or `select('*')` was added.
+- No RLS, grant, role/account-status, Ticket 5 address-privacy, Ticket 9A-5 public-field-validation, or Ticket 6 state-machine protection was weakened.
