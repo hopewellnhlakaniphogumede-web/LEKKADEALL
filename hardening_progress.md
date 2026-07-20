@@ -2980,3 +2980,43 @@ The early termination had a second independent test defect. The next privacy-lea
 - No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, or admin credential was added.
 - No frontend direct application-table insert/update/upsert/delete or `select('*')` was added.
 - No RLS policy or direct table grant was added or weakened. Ticket 1 role/status protection, Ticket 2 RLS, Ticket 5 address privacy, Ticket 6 state machine, Ticket 9A-5 public-field validation, and existing payment/refund/payout/webhook protections remain intact.
+
+### Ticket 9A-7 CI correction — pgTAP stopped after assertion 6 — 2026-07-19
+
+**Status:** Corrected locally; replacement GitHub Actions verification pending.
+
+#### Failure summary
+
+- **Failed step:** Run customer draft cancellation pgTAP tests
+- **File:** `supabase/tests/database/customer_draft_cancellation.test.sql`
+- **Reported result:** 62 planned, 6 run, 0 failed; bad plan.
+- The six emitted assertions all passed. SQL execution then stopped before assertion 7, so this was an execution error rather than a failed cancellation-security assertion or a genuine six-test plan.
+
+#### Root cause
+
+- Assertion 6 correctly used pgTAP's `unalike(...)` helper and passed.
+- Assertions 7–9 incorrectly used `like(...)` as though it were pgTAP's positive SQL-LIKE assertion.
+- pgTAP exposes the positive helper as `alike(...)`; it does not expose the three-argument assertion as `like(...)`.
+- The first `select like(...)` statement, which was intended to check that the function definition contains `auth.uid()`, therefore stopped SQL execution before TAP assertion 7 could be emitted. The later profile-lock and request-lock checks had the same latent helper-name error.
+- The migration, seed setup, function signature, enum values, grants, and cancellation implementation were not the cause of this early termination.
+
+#### Fix applied
+
+- Replaced all three invalid positive `like(...)` calls with pgTAP's supported `alike(...)` helper.
+- Kept `plan(62)` and all 62 intended assertions.
+- Removed no contract, permission, role/status, ownership, state, inconsistency, bid, booking, audit, rollback, RLS, or regression coverage.
+- Made no change to `customer_cancel_draft_request(...)`, its restrictive grants, or the legacy-function revoke.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/customer_draft_cancellation.test.sql`
+- `hardening_progress.md`
+
+#### Security and scope confirmations
+
+- `customer_cancel_draft_request(...)` remains limited to authenticated active customers cancelling only their own exact draft.
+- Open, awarded, cancelled, expired, booked, bid-bearing/provider-selected, missing, cross-customer, and inconsistent requests remain rejected.
+- `authenticated` remains unable to execute legacy `customer_cancel_request(uuid,text)`.
+- The fixed privacy-safe audit behavior and atomic audit-failure rollback remain unchanged.
+- The frontend still calls only `customer_cancel_draft_request(...)` for cancellation.
+- No publication, exact-address handling, provider bidding, payment, admin dashboard, profile editing, unrelated feature, migration change, RLS change, grant broadening, role/status weakening, address-privacy weakening, public-field-validation weakening, or state-machine weakening was added.

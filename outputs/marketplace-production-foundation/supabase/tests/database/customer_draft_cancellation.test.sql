@@ -243,19 +243,20 @@ select unalike(
   'strict cancellation contains no dynamic SQL'
 );
 
-select like(
+-- pgTAP names its positive SQL LIKE assertion alike(...).
+select alike(
   lower(pg_get_functiondef('public.customer_cancel_draft_request(uuid)'::regprocedure)),
   '%auth.uid()%',
   'strict cancellation derives actor identity from auth.uid()'
 );
 
-select like(
+select alike(
   lower(pg_get_functiondef('public.customer_cancel_draft_request(uuid)'::regprocedure)),
   '%for share%',
   'strict cancellation locks the actor profile row'
 );
 
-select like(
+select alike(
   lower(pg_get_functiondef('public.customer_cancel_draft_request(uuid)'::regprocedure)),
   '%for update%',
   'strict cancellation locks the owned request row'
