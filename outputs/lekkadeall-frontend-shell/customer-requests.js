@@ -1,6 +1,7 @@
 export const CUSTOMER_REQUEST_PROJECTION = 'id,category_id,title,description,suburb,city,requested_start,budget_minor,status,created_at,updated_at';
 export const CUSTOMER_REQUEST_STATUSES = Object.freeze(['draft', 'open', 'cancelled']);
 export const CUSTOMER_REQUEST_DETAIL_ROUTE = '/app/customer/requests/detail';
+export const CUSTOMER_REQUEST_EDIT_ROUTE = '/app/customer/requests/edit';
 export const CUSTOMER_REQUEST_UNAVAILABLE_REASON = 'not-found-or-unavailable';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,6 +28,11 @@ export function isCustomerRequestId(value) {
 export function customerRequestDetailHref(requestId) {
   if (!isCustomerRequestId(requestId)) return null;
   return `${CUSTOMER_REQUEST_DETAIL_ROUTE}/?requestId=${encodeURIComponent(requestId)}`;
+}
+
+export function customerRequestEditHref(requestId) {
+  if (!isCustomerRequestId(requestId)) return null;
+  return `${CUSTOMER_REQUEST_EDIT_ROUTE}/?requestId=${encodeURIComponent(requestId)}`;
 }
 
 export function isAllowedCustomerRequestStatus(value) {

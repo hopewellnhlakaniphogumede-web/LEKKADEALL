@@ -192,7 +192,7 @@ test('app orchestration is single-flight and re-reads through the existing RLS h
   assert.doesNotMatch(source, /setTimeout|setInterval|\bretry\b/i);
 });
 
-test('only the two reviewed frontend RPC boundaries exist and blocked capabilities remain absent', async () => {
+test('only the three reviewed frontend RPC boundaries exist and blocked capabilities remain absent', async () => {
   const moduleNames = (await readdir(root))
     .filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config'));
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
@@ -200,7 +200,7 @@ test('only the two reviewed frontend RPC boundaries exist and blocked capabiliti
     .filter(([, source]) => source.includes('.rpc('))
     .map(([name]) => name)
     .sort();
-  assert.deepEqual(rpcModules, ['request-cancellation.js', 'request-draft.js']);
+  assert.deepEqual(rpcModules, ['request-cancellation.js', 'request-draft.js', 'request-update.js']);
 
   const cancellationSource = entries.find(([name]) => name === 'request-cancellation.js')[1];
   assert.equal((cancellationSource.match(/\.rpc\(/g) ?? []).length, 1);

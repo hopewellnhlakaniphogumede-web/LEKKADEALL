@@ -13,6 +13,7 @@ import {
 import {
   readActiveServiceCategories,
   readOwnCustomerBookings,
+  readOwnCustomerDraftForEdit,
   readOwnCustomerPayments,
   readOwnCustomerRequestDetail,
   readOwnCustomerRequests,
@@ -28,6 +29,13 @@ import {
   DRAFT_CANCELLATION_UNAVAILABLE_MESSAGE,
   cancelCustomerDraft,
 } from './request-cancellation.js';
+import {
+  DRAFT_EDIT_AMBIGUOUS_MESSAGE,
+  DRAFT_EDIT_SUCCESS_MESSAGE,
+  DRAFT_EDIT_UNAVAILABLE_MESSAGE,
+  customerDraftToEditValues,
+  updateCustomerDraft,
+} from './request-update.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -50,6 +58,7 @@ const state = {
   customerDraftCancellation: {
     requestId: null, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
   },
+  customerDraftEdit: null,
   providerStatus: null,
   settingsProfile: null,
   requestDraft: {
@@ -60,6 +69,8 @@ let refreshSequence = 0;
 let draftSubmissionInFlight = false;
 let draftCancellationInFlight = false;
 let draftCancellationSequence = 0;
+let draftEditInFlight = false;
+let draftEditSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -72,6 +83,7 @@ const pageTitles = Object.freeze({
   '/app/customer': 'Customer workspace',
   '/app/customer/requests': 'Your requests',
   '/app/customer/requests/detail': 'Request details',
+  '/app/customer/requests/edit': 'Edit request draft',
   '/app/customer/requests/new': 'Create request draft',
   '/app/provider': 'Provider workspace',
   '/app/settings': 'Settings',
@@ -97,6 +109,7 @@ function view() {
     customerRequestList: state.customerRequestList,
     customerRequestDetail: state.customerRequestDetail,
     customerDraftCancellation: state.customerDraftCancellation,
+    customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
@@ -118,6 +131,7 @@ function clearPersonalState() {
   state.providerStatus = null;
   state.settingsProfile = null;
   resetCustomerDraftCancellation();
+  resetCustomerDraftEdit();
 }
 
 function resetCustomerDraftCancellation(requestId = null) {
@@ -131,6 +145,22 @@ function resetCustomerDraftCancellation(requestId = null) {
 function resetRequestDraft() {
   state.requestDraft = {
     values: {}, errors: {}, message: '', submitting: false, requestId: null,
+  };
+}
+
+function resetCustomerDraftEdit(requestId = null, loadStatus = 'loading') {
+  draftEditSequence += 1;
+  draftEditInFlight = false;
+  state.customerDraftEdit = requestId === null ? null : {
+    requestId,
+    loadStatus,
+    request: null,
+    values: {},
+    errors: {},
+    message: '',
+    submitting: false,
+    confirmed: false,
+    blocked: false,
   };
 }
 
@@ -166,6 +196,7 @@ async function refreshRoute() {
   const path = currentPath();
   state.formMessage = '';
   if (path !== '/app/customer/requests/new') resetRequestDraft();
+  if (path !== '/app/customer/requests/edit') resetCustomerDraftEdit();
 
   if (path === '/services' || path === '/app/customer/requests/new') {
     if (!state.client) {
@@ -226,6 +257,39 @@ async function refreshRoute() {
       ]);
       if (sequence !== refreshSequence) return;
       state.customerRequestDetail = request;
+    } else if (path === '/app/customer/requests/edit') {
+      const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+      resetCustomerDraftEdit(requestId, 'loading');
+      state.categoriesStatus = 'loading';
+      state.categories = [];
+      render();
+      const [request] = await Promise.all([
+        readOwnCustomerDraftForEdit(state.client, requestId),
+        loadRequestCategories(sequence),
+      ]);
+      if (sequence !== refreshSequence) return;
+      const values = request.ok ? customerDraftToEditValues(request.data) : null;
+      state.customerDraftEdit = values ? {
+        requestId,
+        loadStatus: 'ready',
+        request: request.data,
+        values,
+        errors: {},
+        message: '',
+        submitting: false,
+        confirmed: false,
+        blocked: false,
+      } : {
+        requestId,
+        loadStatus: 'unavailable',
+        request: null,
+        values: {},
+        errors: {},
+        message: DRAFT_EDIT_UNAVAILABLE_MESSAGE,
+        submitting: false,
+        confirmed: false,
+        blocked: true,
+      };
     } else if (path === '/app/customer/requests/new') {
       // Categories were loaded above. Draft state remains in memory only while this route is active.
     } else if (path === '/app/provider') {
@@ -390,6 +454,111 @@ async function submitCustomerDraftForm(form) {
   } else {
     state.requestDraft.submitting = false;
     state.requestDraft.message = result.message;
+  }
+  render();
+}
+
+async function submitCustomerDraftEdit(form) {
+  const path = currentPath();
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  const edit = state.customerDraftEdit;
+  if (draftEditInFlight || path !== '/app/customer/requests/edit') return;
+  if (!state.client || !state.session?.user?.id || !isCustomerRequestId(requestId)
+      || state.access?.kind !== 'allowed' || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active' || edit?.loadStatus !== 'ready'
+      || edit.requestId !== requestId || edit.request?.id !== requestId
+      || edit.request?.status !== 'draft' || edit.blocked) {
+    resetCustomerDraftEdit(requestId, 'unavailable');
+    state.customerDraftEdit.message = DRAFT_EDIT_UNAVAILABLE_MESSAGE;
+    state.customerDraftEdit.blocked = true;
+    render();
+    return;
+  }
+
+  const formData = new FormData(form);
+  const values = {
+    category: String(formData.get('category') ?? ''),
+    title: String(formData.get('title') ?? ''),
+    description: String(formData.get('description') ?? ''),
+    suburb: String(formData.get('suburb') ?? ''),
+    city: String(formData.get('city') ?? ''),
+    requestedStart: String(formData.get('requested-start') ?? ''),
+    budget: String(formData.get('budget') ?? ''),
+  };
+  const validation = validateCustomerDraft(values, state.categories);
+  state.customerDraftEdit.values = values;
+  state.customerDraftEdit.errors = validation.errors;
+  state.customerDraftEdit.message = validation.ok ? '' : 'Review the highlighted fields before saving the draft.';
+  state.customerDraftEdit.confirmed = false;
+  if (!validation.ok) {
+    render();
+    return;
+  }
+
+  const actorId = state.session.user.id;
+  const editSequence = ++draftEditSequence;
+  draftEditInFlight = true;
+  state.customerDraftEdit.submitting = true;
+  state.customerDraftEdit.errors = {};
+  state.customerDraftEdit.message = 'Saving your private draft…';
+  render();
+
+  const result = await updateCustomerDraft(state.client, requestId, validation.values);
+  if (editSequence !== draftEditSequence) return;
+
+  if (currentPath() !== '/app/customer/requests/edit'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed'
+      || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active') {
+    resetCustomerDraftEdit();
+    return;
+  }
+
+  if (!result.ok) {
+    draftEditInFlight = false;
+    state.customerDraftEdit.submitting = false;
+    state.customerDraftEdit.confirmed = false;
+    state.customerDraftEdit.blocked = true;
+    state.customerDraftEdit.message = result.message;
+    render();
+    return;
+  }
+
+  let freshDraft;
+  try {
+    freshDraft = await readOwnCustomerDraftForEdit(state.client, requestId);
+  } catch {
+    freshDraft = { ok: false, data: null };
+  }
+  if (editSequence !== draftEditSequence) return;
+  draftEditInFlight = false;
+
+  const freshValues = freshDraft.ok ? customerDraftToEditValues(freshDraft.data) : null;
+  if (currentPath() !== '/app/customer/requests/edit'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed') {
+    resetCustomerDraftEdit();
+    return;
+  }
+
+  if (freshValues && freshDraft.data?.id === requestId && freshDraft.data?.status === 'draft') {
+    state.customerDraftEdit = {
+      requestId,
+      loadStatus: 'ready',
+      request: freshDraft.data,
+      values: freshValues,
+      errors: {},
+      message: DRAFT_EDIT_SUCCESS_MESSAGE,
+      submitting: false,
+      confirmed: true,
+      blocked: false,
+    };
+  } else {
+    state.customerDraftEdit.submitting = false;
+    state.customerDraftEdit.confirmed = false;
+    state.customerDraftEdit.blocked = true;
+    state.customerDraftEdit.message = DRAFT_EDIT_AMBIGUOUS_MESSAGE;
   }
   render();
 }
@@ -563,6 +732,12 @@ document.addEventListener('submit', async (event) => {
   if (cancellationForm) {
     event.preventDefault();
     await submitCustomerDraftCancellation();
+    return;
+  }
+  const editForm = event.target.closest('[data-draft-edit-form]');
+  if (editForm) {
+    event.preventDefault();
+    await submitCustomerDraftEdit(editForm);
     return;
   }
   const requestForm = event.target.closest('[data-draft-request-form]');

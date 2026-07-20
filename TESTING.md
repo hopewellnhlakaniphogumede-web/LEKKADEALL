@@ -38,6 +38,7 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
+supabase test db supabase/tests/database/customer_draft_update.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
@@ -103,6 +104,7 @@ supabase test db supabase/tests/database/exact_address_privacy.test.sql
 supabase test db supabase/tests/database/public_field_validation.test.sql
 supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
+supabase test db supabase/tests/database/customer_draft_update.test.sql
 supabase test db supabase/tests/database/payments_ledger.test.sql
 supabase test db supabase/tests/database/refunds_ledger.test.sql
 supabase test db supabase/tests/database/cash_payment_policy.test.sql
@@ -312,3 +314,49 @@ The frontend suite verifies the detail-only control, fresh-read `draft` requirem
 Local frontend result: **43/43 passed** using Node's built-in test runner. The SQL suite contains **62 assertions matching `plan(62)`**. This host did not expose Docker, the Supabase CLI, PostgreSQL client, or Deno, so the pgTAP and webhook suites could not be executed locally. GitHub Actions remains the authoritative migration, focused pgTAP, full pgTAP, and webhook regression gate. Ticket 9A-7's CI result is **pending** until the workflow completes successfully.
 
 Publication, editing/deletion/duplication/reopening, exact-address handling, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts, disputes/reviews/support/chat, identity/profile editing, and the admin dashboard remain blocked. No service-role key, real credential, direct frontend table write, RLS policy, or direct table grant was added, and existing role/status, address privacy, public-field validation, marketplace state-machine, and payment protections were not weakened.
+
+## Ticket 9A-8 customer draft edit/update verification
+
+Ticket 9A-8 adds migration `016_customer_draft_update.sql`, the focused `customer_draft_update.test.sql` pgTAP suite, `request-update.js`, the clean edit route, and `tests/request-update.test.mjs`. It changes no dependency or package file and continues to use Node's built-in test runner.
+
+From the repository root, install the existing pinned browser dependency and run all frontend tests:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+For a local preview:
+
+```powershell
+Copy-Item outputs/lekkadeall-frontend-shell/runtime-config.example.js outputs/lekkadeall-frontend-shell/runtime-config.local.js
+python -m http.server 4173 --directory outputs/lekkadeall-frontend-shell
+```
+
+Open `http://localhost:4173/app/customer/requests/detail/?requestId=<owned-draft-uuid>`, then use “Edit draft,” or open `http://localhost:4173/app/customer/requests/edit/?requestId=<owned-draft-uuid>` directly. A configured public Supabase URL/anon key and an active customer session owning an exact draft are required. Never place a service-role key or another secret in browser configuration.
+
+From `outputs/marketplace-production-foundation`, run the reset and focused database suite:
+
+```powershell
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/customer_draft_update.test.sql
+supabase stop --no-backup
+```
+
+The focused pgTAP suite plans exactly **81 assertions** covering:
+
+- the eight-parameter `public.customer_update_draft_request(...) returns uuid` contract, `SECURITY DEFINER`, `VOLATILE`, fixed `pg_catalog` search path, explicit schema references, actor/profile/request/category locks, and absence of dynamic SQL, broad selects, or state-transition bypass;
+- denied execution for `PUBLIC`, `anon`, and `service_role`, authenticated-only function execution, no direct authenticated request-table DML grants, and retained private-validator denial;
+- authentication, protected customer/active status, hostile JWT metadata, ownership, and generic missing/cross-customer rejection;
+- active-category, future-start, null/nonnegative budget, complete Ticket 9A-5 public-field validation, canonicalisation, safe South African false-positive fixtures, and complete no-op rejection;
+- open/awarded/cancelled/expired and inconsistent draft rejection, including any bid, accepted/provider-selected bid, booking, or deprecated public address residue;
+- replacement of only category, title, description, suburb, city, requested start, budget, and server `updated_at`, with workflow/ownership/address state unchanged;
+- exactly one fixed privacy-safe audit event containing only request ID and an ordered allowlist of changed field names; and
+- direct-DML denial plus atomic rollback of every field change when audit insertion fails.
+
+The frontend suite now has **53 tests**. Ticket 9A-8 coverage verifies UUID-before-read/RPC validation, the exact draft-only RLS query and explicit projection, active-customer guards, edit visibility only on fresh draft detail, no list/non-draft edit control, safe prefill/SAST/ZAR conversion, the exact privacy warning and field allowlist, exact eight-key RPC payload, single-flight behavior, no optimistic status change or automatic retry, fresh draft-only RLS confirmation, fresh server values, generic safe errors, and browser-source exclusions for direct DML, `select('*')`, address/publication/payment/admin capabilities, persistence, logs, telemetry, service-role keys, and real credentials.
+
+Local result on this host: **53/53 frontend tests passed**. Docker, Supabase CLI, Deno, and `psql` are unavailable on this host, so the 81-assertion pgTAP suite, migration reset, and Deno webhook regressions require GitHub Actions. CI remains pending until that workflow succeeds.
+
+Publication, exact-address collection/storage/read/reveal, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts/disputes, admin dashboard, profile editing, direct frontend application-table writes, and security-policy weakening remain intentionally blocked.

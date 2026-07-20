@@ -216,6 +216,7 @@ h1, h2, h3 { letter-spacing: -.035em; }
 .draft-cancellation-control, .draft-cancellation-confirmation { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 18px 0; padding: 22px; border: 1px solid #e6b9a5; border-radius: 18px; background: var(--orange-pale); }
 .draft-cancellation-control h2, .draft-cancellation-confirmation h2 { margin-bottom: 6px; font-size: 18px; }
 .draft-cancellation-control p, .draft-cancellation-confirmation p { margin: 0; color: #815343; font-size: 12px; line-height: 1.55; }
+.draft-action-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .draft-cancellation-confirmation { display: block; }
 .draft-cancellation-confirmation form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .button-danger { background: var(--danger); color: white; }
@@ -223,6 +224,7 @@ h1, h2, h3 { letter-spacing: -.035em; }
 .button-danger-outline { border: 1px solid var(--danger); background: transparent; color: var(--danger); }
 .draft-cancellation-message { margin: 18px 0; padding: 14px 16px; border-left: 4px solid var(--danger); background: var(--orange-pale); color: #743724; font-size: 12px; font-weight: 700; }
 .draft-cancellation-message.is-success { border-color: var(--teal); background: var(--mint); color: var(--teal-dark); }
+.form-message.is-success { color: #b9e0d7; font-weight: 800; }
 .request-boundary-note { margin-bottom: 0; }
 
 :focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
@@ -246,6 +248,7 @@ input:disabled, button:disabled { cursor: not-allowed; opacity: .72; }
   .role-cards, .dashboard-grid, .settings-grid, .category-grid, .request-list { grid-template-columns: 1fr; }
   .request-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .draft-cancellation-control { align-items: flex-start; flex-direction: column; }
+  .draft-action-buttons { justify-content: flex-start; }
   .form-field-grid { grid-template-columns: 1fr; }
 }
 

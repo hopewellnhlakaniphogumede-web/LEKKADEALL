@@ -3,6 +3,7 @@ import {
   CUSTOMER_REQUEST_STATUSES,
   activeCategoryLabel,
   customerRequestDetailHref,
+  customerRequestEditHref,
   customerRequestStatusLabel,
   formatSastDateTime,
   formatZarBudgetMinor,
@@ -27,6 +28,7 @@ export const ROUTES = Object.freeze([
   '/app/customer',
   '/app/customer/requests',
   '/app/customer/requests/detail',
+  '/app/customer/requests/edit',
   '/app/customer/requests/new',
   '/app/provider',
   '/app/settings',
@@ -337,12 +339,13 @@ function customerRequestDetailPage(view) {
   const request = result.data;
   const category = activeCategoryLabel(view.categories, request.category_id);
   const cancellation = view.customerDraftCancellation ?? {};
+  const editHref = customerRequestEditHref(request.id);
   let cancellationContent = '';
   if (cancellation.message) {
     cancellationContent = `<p class="draft-cancellation-message ${cancellation.confirmed ? 'is-success' : ''}" role="status">${escapeHtml(cancellation.message)}</p>`;
   }
-  if (request.status === 'draft' && !cancellation.blocked) {
-    cancellationContent += cancellation.confirming
+  if (request.status === 'draft') {
+    cancellationContent += cancellation.confirming && !cancellation.blocked
       ? `<section class="draft-cancellation-confirmation" role="alertdialog" aria-labelledby="cancel-draft-title" aria-describedby="cancel-draft-description">
           <h2 id="cancel-draft-title">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TITLE)}</h2>
           <p id="cancel-draft-description">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TEXT)}</p>
@@ -351,9 +354,9 @@ function customerRequestDetailPage(view) {
             <button class="button button-danger" type="submit" ${cancellation.submitting ? 'disabled' : ''}>${cancellation.submitting ? 'Cancelling draftâ€¦' : 'Cancel draft'}</button>
           </form>
         </section>`
-      : `<section class="draft-cancellation-control" aria-label="Draft cancellation">
-          <div><h2>Draft actions</h2><p>Cancellation is enforced as draft-only by the database.</p></div>
-          <button class="button button-danger-outline" type="button" data-cancel-draft-action="open">Cancel draft</button>
+      : `<section class="draft-cancellation-control" aria-label="Draft actions">
+          <div><h2>Draft actions</h2><p>Editing and cancellation are enforced as draft-only by the database.</p></div>
+          <div class="draft-action-buttons"><a class="button button-primary" href="${escapeHtml(editHref)}" data-nav>Edit draft</a>${cancellation.blocked ? '' : '<button class="button button-danger-outline" type="button" data-cancel-draft-action="open">Cancel draft</button>'}</div>
         </section>`;
   }
   return appPage('Request details', `
@@ -371,7 +374,7 @@ function customerRequestDetailPage(view) {
       </dl>
     </article>
     ${cancellationContent}
-    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned draft may be cancelled. Editing, publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
+    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned draft may be edited or cancelled. Publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
   `);
 }
 
@@ -381,48 +384,74 @@ function requestFieldError(name, errors = {}) {
     : '';
 }
 
-function requestDraftForm(view) {
-  const draft = view.requestDraft ?? {};
+function requestDraftForm(view, mode = 'create') {
+  const isEdit = mode === 'edit';
+  const draft = isEdit ? (view.customerDraftEdit ?? {}) : (view.requestDraft ?? {});
   const values = draft.values ?? {};
   const errors = draft.errors ?? {};
+  const disabled = draft.submitting || draft.blocked;
   const options = (view.categories ?? []).map((category) => `
     <option value="${escapeHtml(category.id)}" ${values.category === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('');
 
   return `
-    <form class="request-form" data-draft-request-form autocomplete="off" novalidate>
+    <form class="request-form" ${isEdit ? 'data-draft-edit-form' : 'data-draft-request-form'} autocomplete="off" novalidate>
       <section class="request-form-section">
         <div class="section-number">01</div><div><h2>Choose a service</h2><p>Only active service categories are available.</p></div>
-        <label class="full-field">Service category<select name="category" required><option value="">Choose a category</option>${options}</select>${requestFieldError('category', errors)}</label>
+        <label class="full-field">Service category<select name="category" required ${disabled ? 'disabled' : ''}><option value="">Choose a category</option>${options}</select>${requestFieldError('category', errors)}</label>
       </section>
       <section class="request-form-section">
         <div class="section-number">02</div><div><h2>Describe the public job</h2><p>Use general work details only.</p></div>
         <aside class="privacy-warning" role="note"><strong>Public information warning</strong><p>${escapeHtml(REQUEST_PRIVACY_WARNING)}</p></aside>
         <div class="form-field-grid">
-          <label class="full-field">Public job title<input name="title" type="text" minlength="3" maxlength="120" value="${escapeHtml(values.title ?? '')}" required>${requestFieldError('title', errors)}</label>
-          <label class="full-field">Public description<textarea name="description" minlength="10" maxlength="3000" rows="7" required>${escapeHtml(values.description ?? '')}</textarea>${requestFieldError('description', errors)}</label>
+          <label class="full-field">Public job title<input name="title" type="text" minlength="3" maxlength="120" value="${escapeHtml(values.title ?? '')}" required ${disabled ? 'disabled' : ''}>${requestFieldError('title', errors)}</label>
+          <label class="full-field">Public description<textarea name="description" minlength="10" maxlength="3000" rows="7" required ${disabled ? 'disabled' : ''}>${escapeHtml(values.description ?? '')}</textarea>${requestFieldError('description', errors)}</label>
         </div>
       </section>
       <section class="request-form-section">
         <div class="section-number">03</div><div><h2>Add the approximate area</h2><p>Suburb and city only.</p></div>
         <div class="form-field-grid">
-          <label>Suburb only<input name="suburb" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.suburb ?? '')}" required>${requestFieldError('suburb', errors)}</label>
-          <label>City only<input name="city" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.city ?? '')}" required>${requestFieldError('city', errors)}</label>
+          <label>Suburb only<input name="suburb" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.suburb ?? '')}" required ${disabled ? 'disabled' : ''}>${requestFieldError('suburb', errors)}</label>
+          <label>City only<input name="city" type="text" minlength="2" maxlength="120" value="${escapeHtml(values.city ?? '')}" required ${disabled ? 'disabled' : ''}>${requestFieldError('city', errors)}</label>
         </div>
       </section>
       <section class="request-form-section">
         <div class="section-number">04</div><div><h2>Schedule and budget</h2><p>The requested start is entered in South Africa time.</p></div>
         <div class="form-field-grid">
-          <label>Requested start — South Africa time (SAST, UTC+2)<input name="requested-start" type="datetime-local" value="${escapeHtml(values.requestedStart ?? '')}" required>${requestFieldError('requestedStart', errors)}</label>
-          <label>Optional budget in ZAR<input name="budget" type="text" inputmode="decimal" placeholder="1500.00" value="${escapeHtml(values.budget ?? '')}">${requestFieldError('budget', errors)}</label>
+          <label>Requested start — South Africa time (SAST, UTC+2)<input name="requested-start" type="datetime-local" value="${escapeHtml(values.requestedStart ?? '')}" required ${disabled ? 'disabled' : ''}>${requestFieldError('requestedStart', errors)}</label>
+          <label>Optional budget in ZAR<input name="budget" type="text" inputmode="decimal" placeholder="1500.00" value="${escapeHtml(values.budget ?? '')}" ${disabled ? 'disabled' : ''}>${requestFieldError('budget', errors)}</label>
         </div>
       </section>
       <section class="request-review">
         <p>${escapeHtml(REQUEST_PRIVACY_WARNING)}</p>
         <div class="blocked-notice"><strong>Draft only</strong><span>Publishing and the private exact-address step are not available until the encryption boundary is verified.</span></div>
-        <button class="button button-primary" type="submit" ${draft.submitting ? 'disabled' : ''}>${draft.submitting ? 'Creating draft…' : 'Create private draft'}</button>
-        <p class="form-message" data-draft-message role="status">${escapeHtml(draft.message ?? '')}</p>
+        <button class="button button-primary" type="submit" ${disabled ? 'disabled' : ''}>${draft.submitting ? (isEdit ? 'Saving draft…' : 'Creating draft…') : (isEdit ? 'Save draft changes' : 'Create private draft')}</button>
+        <p class="form-message ${draft.confirmed ? 'is-success' : ''}" ${isEdit ? 'data-draft-edit-message' : 'data-draft-message'} role="status">${escapeHtml(draft.message ?? '')}</p>
       </section>
     </form>`;
+}
+
+function customerRequestEditPage(view) {
+  if (view.access?.kind !== 'allowed' || view.access?.role !== 'customer') {
+    const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
+    return appPage('Edit request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Edit a private draft.</h1></div></section>${accessState(deniedAccess)}`);
+  }
+
+  const edit = view.customerDraftEdit;
+  const listAction = '<a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a>';
+  if (!edit || edit.loadStatus === 'loading') {
+    return appPage('Edit request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Edit a private draft.</h1></div>${listAction}</section>${pageState('loading', 'Loading draft', 'The request ID is validated before a fresh draft-only RLS read.')}`);
+  }
+  if (edit.loadStatus !== 'ready' || !edit.request || edit.request.status !== 'draft') {
+    return appPage('Edit request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Edit a private draft.</h1></div>${listAction}</section>${pageState('notFound', 'Draft not found or unavailable', 'This draft is not available for editing.', '/app/customer/requests')}`);
+  }
+  if (view.categoriesStatus === 'error' || !view.categories?.length) {
+    return appPage('Edit request draft', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Edit a private draft.</h1></div>${listAction}</section>${pageState('error', 'Categories are unavailable', 'The draft cannot be edited without the active category allowlist.')}`);
+  }
+
+  return appPage('Edit request draft', `
+    <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Edit your private draft.</h1><p>The complete reviewed field set will be validated again by the database. This action cannot change workflow status.</p></div><a class="button button-secondary" href="${escapeHtml(customerRequestDetailHref(edit.requestId))}" data-nav>Back to draft</a></section>
+    ${requestDraftForm(view, 'edit')}
+  `);
 }
 
 function customerRequestCreatePage(view) {
@@ -519,6 +548,7 @@ export function renderRoute(pathname, searchParams = new URLSearchParams(), view
   if (path === '/app/customer') return customerDashboard(view);
   if (path === '/app/customer/requests') return customerRequestListPage(view);
   if (path === '/app/customer/requests/detail') return customerRequestDetailPage(view);
+  if (path === '/app/customer/requests/edit') return customerRequestEditPage(view);
   if (path === '/app/customer/requests/new') return customerRequestCreatePage(view);
   if (path === '/app/provider') return providerDashboard(view);
   if (path === '/app/settings') return settingsPage(view);

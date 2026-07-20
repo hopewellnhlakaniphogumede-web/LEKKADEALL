@@ -26,6 +26,7 @@ test('required routes exist and no admin route is registered', () => {
     0,
     '/app/customer/requests',
     '/app/customer/requests/detail',
+    '/app/customer/requests/edit',
     '/app/customer/requests/new',
   );
   assert.deepEqual(ROUTES, required);

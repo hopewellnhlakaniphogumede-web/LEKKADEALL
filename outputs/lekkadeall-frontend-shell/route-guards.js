@@ -2,6 +2,7 @@ const CUSTOMER_ROUTES = new Set([
   '/app/customer',
   '/app/customer/requests',
   '/app/customer/requests/detail',
+  '/app/customer/requests/edit',
   '/app/customer/requests/new',
   '/app/settings',
 ]);

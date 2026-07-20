@@ -90,6 +90,24 @@ export async function readOwnCustomerRequestDetail(client, requestId) {
   return { ok: true, data };
 }
 
+export async function readOwnCustomerDraftForEdit(client, requestId) {
+  if (!isCustomerRequestId(requestId)) {
+    return { ok: false, data: null, reason: CUSTOMER_REQUEST_UNAVAILABLE_REASON };
+  }
+
+  const { data, error } = await client
+    .from('service_requests')
+    .select(SAFE_PROJECTIONS.customerRequests)
+    .eq('id', requestId)
+    .eq('status', 'draft')
+    .maybeSingle();
+
+  if (error || !data || data.status !== 'draft') {
+    return { ok: false, data: null, reason: CUSTOMER_REQUEST_UNAVAILABLE_REASON };
+  }
+  return { ok: true, data };
+}
+
 export async function readOwnCustomerBookings(client) {
   const { data, error } = await client
     .from('bookings')

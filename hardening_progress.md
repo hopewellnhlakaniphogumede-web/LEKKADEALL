@@ -3094,3 +3094,90 @@ The early termination had a second independent test defect. The next privacy-lea
 - No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, or admin credential was added.
 - No direct frontend application-table insert/update/upsert/delete or `select('*')` was added.
 - No RLS, grant, role/account-status, Ticket 5 address-privacy, Ticket 9A-5 public-field-validation, or Ticket 6 state-machine protection was weakened.
+
+### Ticket 9A-8 implementation — Customer draft edit/update — 2026-07-20
+
+**Status:** Implemented locally; GitHub Actions CI verification pending.
+
+#### Backend migration and function
+
+- Added `016_customer_draft_update.sql` with this reviewed contract:
+
+  ```text
+  public.customer_update_draft_request(
+    p_request_id uuid,
+    p_category_id uuid,
+    p_title text,
+    p_description text,
+    p_suburb text,
+    p_city text,
+    p_requested_start timestamptz,
+    p_budget_minor integer
+  ) returns uuid
+  ```
+
+- The function is `SECURITY DEFINER`, `VOLATILE`, has fixed `search_path = pg_catalog`, uses explicit schema-qualified references, contains no dynamic SQL or `select('*')`, and derives actor identity only from `auth.uid()`.
+- It locks the actor's protected profile before requiring `role = 'customer'` and `account_status = 'active'`, then locks only the owned request selected by both request ID and customer ID.
+- It permits only an internally consistent exact `draft` with null close/publication/award/cancellation timestamps, null deprecated public `precise_address_ciphertext`, no bid of any status, no accepted/provider-selected bid, and no booking.
+- It locks and requires an active category, requires a future requested start, permits only null or nonnegative budget, canonicalises all four public text fields, and calls the Ticket 9A-5 private validator on the complete resulting title/description/suburb/city set.
+- It rejects complete canonical no-ops with a fixed safe error. It updates only category, title, description, suburb, city, requested start, budget, and server `updated_at`; ownership, status, workflow timestamps, address state, bids, and bookings are unchanged.
+- The function deliberately never enables `lekkadeall.allow_marketplace_state_transition`, so Ticket 6 workflow protection stays active throughout.
+- A successful update appends exactly one fixed `customer.service_request_draft_updated` audit event. Its metadata contains only request ID and an ordered subset of the literal changed-field allowlist `category_id,title,description,suburb,city,requested_start,budget_minor`. It contains no submitted values. Audit failure rolls the field update back atomically.
+- The function returns only the updated request UUID. Execution is revoked from `PUBLIC`, `anon`, and `service_role` and granted only to `authenticated`. No direct table grant or RLS policy was added.
+
+#### Frontend behavior
+
+- Added `/app/customer/requests/edit/?requestId=<uuid>` and its clean-path entry file.
+- “Edit draft” appears only on a freshly RLS-read customer request detail whose status is exactly `draft`; it does not appear on the request list or open/cancelled detail.
+- The route uses the existing session plus protected own-profile guard and admits only active customers. It validates the UUID before reading or calling the RPC.
+- The edit read uses the existing explicit request projection and adds both `id = requestId` and `status = 'draft'` constraints with `maybeSingle()` semantics. Malformed, missing, cross-customer, non-draft, and RLS-hidden IDs share one generic unavailable state.
+- The form pre-fills only active category, public title, public description, suburb, city, requested start converted explicitly to SAST/UTC+2, and optional ZAR budget. It reuses the Ticket 9A-3 privacy warning, client validation, SAST conversion, and string/BigInt-safe minor-unit conversion as defence in depth.
+- The browser calls only `customer_update_draft_request` with the exact eight reviewed parameters. It uses single-flight behavior, no optimistic status/content confirmation, and no automatic retry of ambiguous outcomes.
+- After RPC success the browser performs a fresh draft-only RLS read and shows `Draft updated.` only if the same UUID still returns as `draft`; the form is then rendered from the fresh server values. Ambiguous results lock submission until a fresh route load.
+- No submitted request content is placed in browser storage, URLs other than the opaque request UUID, logs, analytics, telemetry, service-worker caches, or error reports.
+
+#### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/marketplace-production-foundation/supabase/migrations/016_customer_draft_update.sql`
+- `outputs/marketplace-production-foundation/supabase/tests/database/customer_draft_update.test.sql`
+- `outputs/lekkadeall-frontend-shell/request-update.js`
+- `outputs/lekkadeall-frontend-shell/customer-requests.js`
+- `outputs/lekkadeall-frontend-shell/safe-reads.js`
+- `outputs/lekkadeall-frontend-shell/route-guards.js`
+- `outputs/lekkadeall-frontend-shell/app.js`
+- `outputs/lekkadeall-frontend-shell/shell.js`
+- `outputs/lekkadeall-frontend-shell/styles.css`
+- `outputs/lekkadeall-frontend-shell/app/customer/requests/edit/index.html`
+- `outputs/lekkadeall-frontend-shell/tests/request-update.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/request-draft.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/request-cancellation.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/customer-request-read.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/frontend-shell.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `TESTING.md`
+- `rls_policy_matrix.md`
+- `hardening_progress.md`
+
+No dependency or package file changed.
+
+#### Tests added or updated
+
+- Added the focused **81-assertion** `customer_draft_update.test.sql` suite covering function shape/configuration, grants/revokes, actor/profile/request/category locking, hostile JWT metadata, role/account/ownership checks, category/start/budget validation, full Ticket 9A-5 validation, complete no-op rejection, safe South African false-positive fixtures, every existing non-draft state, inconsistent timestamps, bid/provider-selection/booking/address-residue rejection, minimal field replacement, audit privacy and changed-field allowlisting, direct-DML denial, RLS retention, and atomic audit-failure rollback.
+- Added `request-update.test.mjs` and updated existing frontend suites for the new guarded route, exact draft-only projection/filter, prefill conversion, edit visibility, exact field/RPC allowlists, single-flight/fresh-read confirmation, generic errors, three reviewed RPC modules, and blocked browser capabilities.
+- Updated `.github/workflows/database-tests.yml` to run the focused Ticket 9A-8 pgTAP suite after the Ticket 9A-7 suite and to run all frontend tests under the Ticket 9A-8 step label.
+- Local frontend result: **53/53 tests passed** using the bundled Node runtime.
+- Static pgTAP recount: **81 assertion calls match `plan(81)`**.
+- Docker, Supabase CLI, Deno, and `psql` are unavailable on this host, so migration reset, pgTAP execution, Deno webhook tests, and complete database regression verification remain delegated to GitHub Actions. CI result is pending.
+
+#### Intentionally blocked and security confirmations
+
+- Publication remains blocked; the frontend does not call `customer_publish_request(...)`.
+- Exact-address input, storage, read, reveal, maps, GPS, ciphertext production, KMS, encryption, and key management remain blocked.
+- Provider feed, provider onboarding, provider selection, and provider bidding remain blocked.
+- Booking actions, payments, checkout, refunds, payouts, disputes, reviews, support, consent, notifications, chat, identity integration, admin dashboard, and profile editing remain blocked.
+- No request deletion, duplication, reopening, archiving, or workflow-status mutation was added.
+- No frontend direct application-table insert/update/upsert/delete or `select('*')` was added.
+- No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, admin credential, migration-time secret, or real provider integration was added.
+- No RLS policy or direct table grant was added or weakened. Ticket 1 role/account-status protection, Ticket 2 RLS, Ticket 5 address privacy, Ticket 6 marketplace state machine, Ticket 9A-5 public-field validation, Ticket 9A-7 cancellation restrictions, and existing payment/refund/payout/webhook protections remain intact.
