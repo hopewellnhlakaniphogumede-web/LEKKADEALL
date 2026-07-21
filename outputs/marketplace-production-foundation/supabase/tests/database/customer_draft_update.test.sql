@@ -482,6 +482,10 @@ select is(
    where sr.id = '00000000-0000-0000-0000-000000009824'),
   '22023:No draft changes were provided', 'a complete canonical no-op is rejected');
 
+-- Audit rows are intentionally unreadable to authenticated browser users.
+-- Reset to the test owner before inspecting the append-only audit table.
+reset role;
+
 select is(
   (select count(*) from public.audit_events
    where action = 'customer.service_request_draft_updated'
@@ -504,6 +508,9 @@ select ok(
 );
 
 -- 48-61. Non-draft, inconsistent, bid, booking, and address residue rejection.
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000009801';
+
 select is(pg_temp.update_draft_error('00000000-0000-0000-0000-000000009813'),
   '42501:Draft is not available for update', 'open request is rejected');
 select is(pg_temp.update_draft_error('00000000-0000-0000-0000-000000009814'),
@@ -529,6 +536,8 @@ select is(pg_temp.update_draft_error('00000000-0000-0000-0000-000000009823'),
 select is(pg_temp.update_draft_error('00000000-0000-0000-0000-000000009827'),
   '42501:Draft is not available for update', 'draft with deprecated public address residue is rejected');
 
+reset role;
+
 select is(
   (select count(*) from public.audit_events
    where action = 'customer.service_request_draft_updated'),
@@ -547,6 +556,9 @@ select is(
 );
 
 -- 62-73. Successful full replacement is canonical, minimal, and audited.
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000009801';
+
 select is(
   public.customer_update_draft_request(
     '00000000-0000-0000-0000-000000009811',

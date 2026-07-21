@@ -3181,3 +3181,50 @@ No dependency or package file changed.
 - No frontend direct application-table insert/update/upsert/delete or `select('*')` was added.
 - No service-role key, real credential, provider secret, webhook secret, identity secret, payment secret, admin credential, migration-time secret, or real provider integration was added.
 - No RLS policy or direct table grant was added or weakened. Ticket 1 role/account-status protection, Ticket 2 RLS, Ticket 5 address privacy, Ticket 6 marketplace state machine, Ticket 9A-5 public-field validation, Ticket 9A-7 cancellation restrictions, and existing payment/refund/payout/webhook protections remain intact.
+
+### Ticket 9A-8 CI correction — pgTAP stopped after assertion 45 — 2026-07-21
+
+**Status:** Test-harness correction implemented locally; GitHub Actions rerun pending.
+
+#### Failure summary
+
+- **Failed step:** Run customer draft update pgTAP tests
+- **File:** `supabase/tests/database/customer_draft_update.test.sql`
+- **Reported result:** 81 planned, 45 run, 0 failed; bad plan.
+- All 45 emitted assertions passed. SQL execution stopped before assertion 46, so this was a test execution/role-context failure rather than a failed draft-update security assertion or a genuine 45-test plan.
+
+#### Root cause
+
+- Assertion 45 successfully verifies that a complete canonical no-op is rejected by `customer_update_draft_request(...)`.
+- Assertions 22–45 intentionally execute as the `authenticated` browser role to test actor, ownership, category, schedule, budget, Ticket 9A-5 validation, and no-op behavior.
+- Immediately after assertion 45, assertion 46 directly queries `public.audit_events` to prove the rejected no-op wrote no success audit event.
+- The test omitted `RESET ROLE` before that privileged audit-table inspection. Ticket 2 intentionally gives `authenticated` no direct `audit_events` read privilege, so PostgreSQL correctly terminated the SQL file with a permission error before pgTAP could emit assertion 46.
+- A complete role-flow audit found the same latent omission before assertion 60, where the test again inspects `audit_events` after authenticated non-draft/inconsistency rejection calls.
+- The Ticket 9A-8 migration, function signature, enum/status fixtures, seed rows, helper function, CI workflow command, Ticket 9A-5 validator, and application security rules were not the cause.
+
+#### Fix applied
+
+- Added `RESET ROLE` immediately after assertion 45 before assertions 46–47 inspect `audit_events` and unchanged database rows.
+- Restored `SET LOCAL ROLE authenticated` and the fixed customer JWT subject before assertions 48–59 resume browser-context rejection tests.
+- Added a second `RESET ROLE` after assertion 59 before assertions 60–61 inspect audit and bid rows.
+- Restored the authenticated role and fixed customer JWT subject before assertion 62 performs the legitimate customer draft update.
+- Kept `plan(81)` and all 81 intended assertions. No hostile-input, false-positive, permission, role/status, ownership, state, inconsistency, bid, booking, address-residue, audit, rollback, RLS, or regression assertion was removed or weakened.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/tests/database/customer_draft_update.test.sql`
+- `hardening_progress.md`
+
+No migration, production function, frontend file, workflow file, RLS policy, grant, database function, seed/helper file, webhook, dependency, or package file changed for this correction.
+
+#### Verification and security confirmations
+
+- Static recount remains **81 assertion calls matching `plan(81)`**.
+- All **53/53 frontend tests remain green** locally.
+- Docker, Supabase CLI, Deno, and `psql` remain unavailable on this host, so the focused pgTAP execution, migration reset, Deno webhook suite, and complete database regressions require the GitHub Actions rerun.
+- `customer_update_draft_request(...)` remains limited to authenticated active customers updating only their own exact, internally consistent draft.
+- Open, awarded, cancelled, expired, missing, cross-customer, inconsistent, bid-bearing, provider-selected, booked, and deprecated-address-residue requests remain rejected.
+- Ticket 9A-5 public-field validation, privacy-safe changed-field audit metadata, and audit-failure rollback remain unchanged.
+- The frontend still calls only the exact reviewed `customer_update_draft_request(...)` mutation for draft editing and performs no direct application-table write.
+- Publication, exact-address handling, KMS/encryption, GPS/maps, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+- No RLS, grant, role/account-status, address-privacy, public-field-validation, state-machine, or Ticket 9A-7 cancellation protection was weakened.
