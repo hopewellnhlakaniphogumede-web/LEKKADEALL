@@ -3097,7 +3097,10 @@ The early termination had a second independent test defect. The next privacy-lea
 
 ### Ticket 9A-8 implementation — Customer draft edit/update — 2026-07-20
 
-**Status:** Implemented locally; GitHub Actions CI verification pending.
+**Status:** CI-verified.
+
+- **Latest successful run:** Fix Ticket 9A-8 draft update pgTAP setup
+- **Run status:** Success
 
 #### Backend migration and function
 
@@ -3169,7 +3172,7 @@ No dependency or package file changed.
 - Updated `.github/workflows/database-tests.yml` to run the focused Ticket 9A-8 pgTAP suite after the Ticket 9A-7 suite and to run all frontend tests under the Ticket 9A-8 step label.
 - Local frontend result: **53/53 tests passed** using the bundled Node runtime.
 - Static pgTAP recount: **81 assertion calls match `plan(81)`**.
-- Docker, Supabase CLI, Deno, and `psql` are unavailable on this host, so migration reset, pgTAP execution, Deno webhook tests, and complete database regression verification remain delegated to GitHub Actions. CI result is pending.
+- Docker, Supabase CLI, Deno, and `psql` are unavailable on this host, so migration reset, pgTAP execution, Deno webhook tests, and complete database regression verification were delegated to GitHub Actions. The successful run `Fix Ticket 9A-8 draft update pgTAP setup` verified the focused 81-assertion suite and the full configured regression workflow.
 
 #### Intentionally blocked and security confirmations
 
@@ -3184,7 +3187,7 @@ No dependency or package file changed.
 
 ### Ticket 9A-8 CI correction — pgTAP stopped after assertion 45 — 2026-07-21
 
-**Status:** Test-harness correction implemented locally; GitHub Actions rerun pending.
+**Status:** CI-verified by the successful GitHub Actions run `Fix Ticket 9A-8 draft update pgTAP setup`.
 
 #### Failure summary
 
@@ -3221,7 +3224,8 @@ No migration, production function, frontend file, workflow file, RLS policy, gra
 
 - Static recount remains **81 assertion calls matching `plan(81)`**.
 - All **53/53 frontend tests remain green** locally.
-- Docker, Supabase CLI, Deno, and `psql` remain unavailable on this host, so the focused pgTAP execution, migration reset, Deno webhook suite, and complete database regressions require the GitHub Actions rerun.
+- Docker, Supabase CLI, Deno, and `psql` remain unavailable on this host, so the focused pgTAP execution, migration reset, Deno webhook suite, and complete database regressions were verified by GitHub Actions.
+- The latest run, `Fix Ticket 9A-8 draft update pgTAP setup`, completed with status **Success**. The corrected pgTAP file completed its intended 81 assertions with no failed assertions, and all configured frontend, Deno webhook, and database regression steps remained green.
 - `customer_update_draft_request(...)` remains limited to authenticated active customers updating only their own exact, internally consistent draft.
 - Open, awarded, cancelled, expired, missing, cross-customer, inconsistent, bid-bearing, provider-selected, booked, and deprecated-address-residue requests remain rejected.
 - Ticket 9A-5 public-field validation, privacy-safe changed-field audit metadata, and audit-failure rollback remain unchanged.
