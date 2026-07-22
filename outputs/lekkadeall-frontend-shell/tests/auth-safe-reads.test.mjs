@@ -33,6 +33,24 @@ test('public config rejects placeholders and accepts only documented browser val
   });
   assert.equal(result.ok, true);
   assert.deepEqual(Object.keys(result.config).sort(), ['appEnv', 'appUrl', 'supabaseAnonKey', 'supabaseUrl']);
+
+  const localTest = readPublicConfig({
+    appEnv: 'test', appUrl: 'http://127.0.0.1:4173',
+    supabaseUrl: 'http://127.0.0.1:54321', supabaseAnonKey: 'local-public-anon-value',
+  });
+  assert.equal(localTest.ok, true);
+  assert.equal(readPublicConfig({
+    appEnv: 'test', appUrl: 'https://remote.example.test',
+    supabaseUrl: 'http://127.0.0.1:54321', supabaseAnonKey: 'local-public-anon-value',
+  }).ok, false);
+  assert.equal(readPublicConfig({
+    appEnv: 'test', appUrl: 'http://127.0.0.1:4173',
+    supabaseUrl: 'https://project-ref.supabase.co', supabaseAnonKey: 'public-anon-value',
+  }).ok, false);
+  assert.equal(readPublicConfig({
+    appEnv: 'production', appUrl: 'https://marketplace.example.test',
+    supabaseUrl: 'http://127.0.0.1:54321', supabaseAnonKey: 'local-public-anon-value',
+  }).ok, false);
 });
 
 test('browser client receives only public URL, anon key and safe options', () => {

@@ -1,0 +1,122 @@
+import { randomBytes } from 'node:crypto';
+import { expect } from '@playwright/test';
+import { ACTIVE_CATEGORY_ID } from './local-fixtures.mjs';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+let lastRegistrationAt = 0;
+
+export function syntheticAccount(label) {
+  const suffix = randomBytes(8).toString('hex');
+  return Object.freeze({
+    email: `${label}-${suffix}@lekkadeall.invalid`,
+    password: `E2e-${randomBytes(18).toString('base64url')}!9`,
+  });
+}
+
+async function respectLocalSignupRateLimit() {
+  const remaining = 1_100 - (Date.now() - lastRegistrationAt);
+  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  lastRegistrationAt = Date.now();
+}
+
+export async function registerCustomer(page, account) {
+  await respectLocalSignupRateLimit();
+  await page.goto('/auth/register');
+  const form = page.locator('form[data-auth-form="register"]');
+  await form.locator('input[name="email"]').fill(account.email);
+  await form.locator('input[name="password"]').fill(account.password);
+  await form.getByRole('button', { name: 'Create account' }).click();
+  await expect(page).toHaveURL(/\/app\/customer\/?$/u);
+  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
+}
+
+export async function signOutCustomer(page) {
+  await page.getByRole('button', { name: 'Sign out' }).first().click();
+  await expect(page).toHaveURL(/\/$/u);
+}
+
+export async function signInCustomer(page, account) {
+  await page.goto('/auth/sign-in');
+  const form = page.locator('form[data-auth-form="sign-in"]');
+  await form.locator('input[name="email"]').fill(account.email);
+  await form.locator('input[name="password"]').fill(account.password);
+  await form.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/app\/customer\/?$/u);
+  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
+}
+
+export function futureSastInput(days = 3, minuteOffset = 0) {
+  const target = new Date(Date.now() + (days * 24 * 60 * 60 * 1000) + (minuteOffset * 60 * 1000));
+  return new Date(target.getTime() + (2 * 60 * 60 * 1000)).toISOString().slice(0, 16);
+}
+
+export async function fillDraftForm(page, values) {
+  const form = page.locator('form.request-form');
+  await form.locator('select[name="category"]').selectOption(values.categoryId ?? ACTIVE_CATEGORY_ID);
+  await form.locator('input[name="title"]').fill(values.title);
+  await form.locator('textarea[name="description"]').fill(values.description);
+  await form.locator('input[name="suburb"]').fill(values.suburb);
+  await form.locator('input[name="city"]').fill(values.city);
+  await form.locator('input[name="requested-start"]').fill(values.requestedStart);
+  await form.locator('input[name="budget"]').fill(values.budget);
+  return form;
+}
+
+export async function createDraftThroughUi(page, values) {
+  await page.goto('/app/customer/requests/new/');
+  await expect(page.getByRole('heading', { name: 'Create a private draft.' })).toBeVisible();
+  const form = await fillDraftForm(page, values);
+  await form.getByRole('button', { name: 'Create private draft' }).click();
+  await expect(page.getByRole('heading', { name: 'Your request draft is saved.' })).toBeVisible();
+  const href = await page.getByRole('link', { name: 'View draft' }).getAttribute('href');
+  const requestId = new URL(href, 'http://127.0.0.1').searchParams.get('requestId');
+  if (!UUID_PATTERN.test(requestId ?? '')) throw new Error('draft-created-without-valid-request-id');
+  return requestId;
+}
+
+export async function openDraftDetail(page, requestId) {
+  if (!UUID_PATTERN.test(requestId)) throw new Error('request-id-invalid');
+  await page.goto(`/app/customer/requests/detail/?requestId=${requestId}`);
+  await expect(page.locator('.request-detail-card')).toBeVisible();
+}
+
+export function mainDraftValues() {
+  return Object.freeze({
+    categoryId: ACTIVE_CATEGORY_ID,
+    title: 'Prepare lounge walls',
+    description: 'Prepare and paint the lounge walls using a neutral finish.',
+    suburb: 'Woodstock',
+    city: 'Cape Town',
+    requestedStart: futureSastInput(3),
+    budget: '2450.50',
+  });
+}
+
+export function editedDraftValues() {
+  return Object.freeze({
+    categoryId: ACTIVE_CATEGORY_ID,
+    title: 'Prepare lounge and study walls',
+    description: 'Prepare and paint the lounge and study walls using a neutral finish.',
+    suburb: 'Woodstock',
+    city: 'Cape Town',
+    requestedStart: futureSastInput(4, 30),
+    budget: '3100.00',
+  });
+}
+
+export function privacyMarkers(account, ...drafts) {
+  return [
+    account.email,
+    account.password,
+    ...drafts.flatMap((draft) => [
+      draft.title,
+      draft.description,
+      draft.suburb,
+      draft.city,
+      draft.requestedStart,
+      draft.budget,
+    ]),
+  ];
+}
+
+export { UUID_PATTERN };

@@ -111,6 +111,41 @@ The edit page first validates the UUID and performs a fresh RLS-backed `service_
 
 Ticket 9A-8 does not add publication, request deletion/duplication/reopening/archiving, exact-address collection/storage/read/reveal, maps, GPS, KMS/encryption, provider feed/onboarding/bidding, booking actions, payment/checkout/refund/payout, disputes, reviews, support, consent, notifications, chat, identity integration, profile editing, real provider integration, cash/off-platform options, or an admin route/dashboard.
 
+## Ticket 9A-9 local customer lifecycle E2E
+
+Ticket 9A-9 adds a pinned `@playwright/test` **1.61.1** development dependency and a Chromium-only E2E boundary. It does not replace the existing Node test runner. The browser journey runs only against a fresh disposable local Supabase stack and verifies registration/profile provisioning, sign out/sign in, dashboard/category reads, draft creation, own-request list/detail, draft editing, draft cancellation, cross-customer RLS non-disclosure, account-state guards, stale-state handling, transport ambiguity, browser storage, and blocked capabilities.
+
+Requirements:
+
+- Docker Desktop or Docker Engine using a local `unix://` or `npipe://` endpoint;
+- Supabase CLI;
+- Node.js and pnpm; and
+- the pinned Chromium runtime.
+
+From the repository root:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+pnpm --dir outputs/lekkadeall-frontend-shell exec playwright install chromium
+pnpm --dir outputs/lekkadeall-frontend-shell run test:e2e:local
+```
+
+The local runner refuses remote frontend, Supabase, Auth, Inbucket, Docker, and database targets. It also refuses to overwrite an existing `runtime-config.local.js` or take ownership of an already-running local Supabase stack. It starts and resets the committed local project, seeds synthetic fixtures through the exact local database container, generates an ignored runtime config containing only the local anon key, starts a restricted static server on `127.0.0.1:4173`, runs one Chromium worker with zero retries, and always removes generated files and stops the stack.
+
+No service-role key or database credential is used by the browser or fixture controller. The fixture controller executes local-only SQL through `docker exec` and never becomes a served application module. Browser network policy permits only explicit safe reads and these marketplace mutations:
+
+- `customer_create_draft_request(...)`;
+- `customer_update_draft_request(...)`; and
+- `customer_cancel_draft_request(...)`.
+
+Direct application-table DML, broad-column reads, publication, address functions, the legacy cancellation function, provider/bid/booking/payment/refund/payout/dispute/admin/profile-edit functions, non-loopback requests, and service-role authorization fail the E2E run.
+
+Authenticated screenshots, video, traces, HAR, DOM snapshots, saved storage state, Auth emails, database dumps, and browser/network bodies are disabled in CI. A privacy-safe reporter prints only static test names and pass/fail states.
+
+The existing Supabase browser client intentionally persists one SDK-owned Auth-session record while signed in. E2E allowlists only that exact SDK key and proves sign-out removes it; all application-specific `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, cookies, and service workers remain forbidden. A complete Inbucket password-recovery exchange is not enabled in Ticket 9A-9 because PKCE requires a temporary persisted code verifier, which is outside the approved Auth-session-only storage exception. The signed-out recovery route is still tested fail-closed. A full recovery E2E needs a separate reviewed storage/BFF decision.
+
+Publication, exact-address handling, KMS/encryption, GPS/maps, provider onboarding/bidding, booking actions, payments, admin functionality, identity-provider code, support/chat/reviews, and profile editing remain blocked.
+
 No service-role key or real credential was added. Existing RLS, role/account-status protection, Ticket 5 address privacy, Ticket 6 state-machine protection, Ticket 9A-5 public-field validation, payment/refund/payout/webhook protections, and all read projections remain intact. No `select('*')` was added.
 
 ## Tests

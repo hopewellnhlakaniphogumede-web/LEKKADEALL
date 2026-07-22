@@ -360,3 +360,57 @@ The frontend suite now has **53 tests**. Ticket 9A-8 coverage verifies UUID-befo
 Local result on this host: **53/53 frontend tests passed**. Docker, Supabase CLI, Deno, and `psql` are unavailable on this host, so the 81-assertion pgTAP suite, migration reset, and Deno webhook regressions require GitHub Actions. CI remains pending until that workflow succeeds.
 
 Publication, exact-address collection/storage/read/reveal, KMS/encryption, provider feed/onboarding/bidding, booking actions, payments/refunds/payouts/disputes, admin dashboard, profile editing, direct frontend application-table writes, and security-policy weakening remain intentionally blocked.
+
+## Ticket 9A-9 customer draft lifecycle E2E verification
+
+Ticket 9A-9 adds Playwright Test `1.61.1` as an exact development dependency while retaining the existing Node frontend test command. The initial E2E project is Chromium-only, serial (`workers: 1`), and retry-free. Screenshots, video, traces, HAR, DOM snapshots, saved storage state, HTML/JUnit reports, database dumps, and Auth-email artifacts are not produced in CI.
+
+Run the fast frontend/static boundary first:
+
+```powershell
+pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+The local result for Ticket 9A-9 is **59/59 Node tests passed**. Playwright configuration discovery finds **8 synthetic local Chromium scenarios**.
+
+For the real local-stack E2E boundary, install Chromium and run the single orchestrated command:
+
+```powershell
+pnpm --dir outputs/lekkadeall-frontend-shell exec playwright install chromium
+pnpm --dir outputs/lekkadeall-frontend-shell run test:e2e:local
+```
+
+Do not start Supabase separately. The runner refuses an existing stack so it cannot reset or stop a developer-owned local session. It performs this sequence:
+
+1. Validate that Docker is local and every application/API/Auth/Inbucket target is loopback.
+2. Refuse an existing `runtime-config.local.js` and an already-running Supabase stack.
+3. Start Supabase from the committed local config and run `supabase db reset`.
+4. Seed only one active and one inactive synthetic category through the exact local database container.
+5. Generate the ignored browser runtime config with `appEnv = test`, the loopback URLs, and local anon key only.
+6. Serve the static frontend through the restricted Node server on `127.0.0.1:4173`.
+7. Run the eight Chromium scenarios with one worker and no retries.
+8. Remove generated runtime/output files, stop the frontend server, and stop Supabase with no backup in `finally` cleanup.
+
+The browser E2E scenarios cover:
+
+- signed-out customer-route protection and absence of `/admin`;
+- UI registration and the Ticket 9B one-row `customer`/`active` profile postcondition;
+- sign out, sign in, and removal of the persisted SDK Auth session on sign-out;
+- active-category discovery and customer dashboard access;
+- draft creation, list, detail, edit, cancellation, fresh-read confirmation, and privacy-safe audit postconditions;
+- Customer A versus Customer B RLS non-disclosure;
+- restricted, suspended, closed, missing-profile, and wrong-role guards;
+- stale edit rejection after cancellation in another tab;
+- an update that commits while its response is aborted, proving no automatic retry and requiring a fresh read;
+- the exact browser mutation allowlist and rejection of direct table DML, broad selects, blocked RPCs, non-loopback requests, and service-role authorization;
+- absence of address, provider, booking, payment, admin, and profile-edit controls; and
+- URL, `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, service-worker, cookie, console, and browser-artifact privacy checks.
+
+The only allowed browser-storage entry while signed in is the existing Supabase SDK Auth-session key created by `persistSession: true`. The E2E check never reads that value into output and proves sign-out removes it. Marketplace/request content and application-specific storage remain forbidden.
+
+A complete password-recovery/Inbucket exchange is intentionally not implemented in this ticket. Supabase PKCE recovery must temporarily persist a code verifier between the recovery request and callback, while Ticket 9A-9 authorizes only the existing signed-in Auth-session storage exception. The E2E suite verifies that the signed-out reset route fails closed without a recovery session. A future recovery E2E requires a reviewed decision to permit temporary PKCE storage or move recovery behind a server/HttpOnly-cookie boundary.
+
+GitHub Actions adds a separate `customer-draft-lifecycle-e2e` job with `needs: database-tests`. Therefore E2E runs only after the existing Node, Deno webhook, clean migration reset, and every pgTAP suite pass. The E2E job starts another disposable local stack and uses no GitHub environment secret, production Supabase reference, real customer data, or production credential.
+
+Docker and Supabase CLI are unavailable on the current development host, so the real local-stack Playwright execution could not be run here. GitHub Actions remains the authoritative full E2E verification gate. No migration, RLS policy, grant, production database function, validator, state-machine guard, profile-provisioning function, cancellation function, or update function changed for Ticket 9A-9.

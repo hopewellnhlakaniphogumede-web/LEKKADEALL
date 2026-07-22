@@ -3232,3 +3232,82 @@ No migration, production function, frontend file, workflow file, RLS policy, gra
 - The frontend still calls only the exact reviewed `customer_update_draft_request(...)` mutation for draft editing and performs no direct application-table write.
 - Publication, exact-address handling, KMS/encryption, GPS/maps, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 - No RLS, grant, role/account-status, address-privacy, public-field-validation, state-machine, or Ticket 9A-7 cancellation protection was weakened.
+
+### Ticket 9A-9 implementation — Customer draft lifecycle E2E verification — 2026-07-21
+
+**Status:** Implemented locally; GitHub Actions CI verification pending.
+
+#### E2E architecture added
+
+- Added exact development dependency `@playwright/test` **1.61.1** and retained the existing Node frontend test command unchanged.
+- Added one Chromium-only Playwright project with `workers: 1`, `retries: 0`, `fullyParallel: false`, and authenticated screenshots, video, traces, HAR, DOM snapshots, saved storage state, HTML/JUnit reports, and retained output disabled.
+- Added a privacy-safe reporter that emits only static test names and pass/fail status, never Playwright error details, DOM content, request/response bodies, credentials, tokens, recovery links, or browser storage.
+- Added `test:e2e:local`, which refuses non-loopback frontend, Supabase API, Auth, Inbucket, Docker, and database targets; refuses an existing local stack and existing runtime config; starts and resets a disposable local Supabase project; generates an ignored anon-only runtime config; serves the static frontend; runs Playwright; and cleans up in `finally`.
+- The local fixture controller is outside the served browser boundary. It connects only through `docker exec` to the exact `supabase_db_lekkadeall-local` database container and uses no service-role key or database credential.
+- Updated the public config boundary to allow plain HTTP only for loopback Supabase URLs in non-production modes, require both frontend and Supabase to be loopback in `test`, reject embedded credentials, and continue to require HTTPS in production.
+- Updated local-only Supabase Auth redirect configuration for the exact `127.0.0.1`/`localhost` callback and reset routes on port 4173. No remote, wildcard, or production redirect was added.
+
+#### Browser verification added
+
+- Added **8 synthetic local Chromium scenarios** covering:
+  - signed-out protection for every customer request route and absence of `/admin`;
+  - normal registration plus Ticket 9B exactly-one `customer`/`active` profile and no provider profile;
+  - sign out, sign in, dashboard access, and active category discovery;
+  - safe draft creation through `customer_create_draft_request(...)` with null precise-address ciphertext;
+  - own request list and detail reads;
+  - full draft editing through `customer_update_draft_request(...)` and fresh RLS re-read;
+  - strict cancellation through `customer_cancel_draft_request(...)` and fresh cancelled-state confirmation;
+  - Customer A/Customer B RLS non-disclosure;
+  - restricted, suspended, closed, missing-profile, and wrong-role states;
+  - stale edit rejection after another tab cancels the draft;
+  - an executed update whose browser response is deliberately aborted, proving one call, no automatic retry, an ambiguous state, and recovery only through a fresh read;
+  - read-only settings and absence of address/provider/booking/payment/admin/profile-edit controls; and
+  - safe signed-out recovery-route behavior.
+- The browser request observer allows only explicit approved reads and the three lifecycle mutations. It rejects direct application-table DML, broad-column reads, every unapproved/blocked RPC, non-loopback requests, non-anon API keys, and service-role JWT authority.
+- Browser privacy checks cover URLs, sensitive query/hash parameters, `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, service workers, cookies, console output, page errors, and generated artifacts.
+- The only storage exception is the existing SDK-owned Supabase Auth-session record while signed in. Its value is never printed or saved, and sign-out must remove it. Marketplace/request content and every application-specific storage entry remain forbidden.
+- A full Inbucket password-recovery exchange is not enabled because the current PKCE recovery flow must persist a temporary code verifier while Ticket 9A-9 permits only the existing signed-in Auth-session storage exception. The reset route is tested fail-closed; complete recovery E2E requires a separate reviewed Auth-storage/BFF decision.
+
+#### Files added or changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/marketplace-production-foundation/supabase/config.toml`
+- `outputs/lekkadeall-frontend-shell/package.json`
+- `outputs/lekkadeall-frontend-shell/pnpm-lock.yaml`
+- `outputs/lekkadeall-frontend-shell/public-config.js`
+- `outputs/lekkadeall-frontend-shell/playwright.config.mjs`
+- `outputs/lekkadeall-frontend-shell/scripts/e2e/run-local.mjs`
+- `outputs/lekkadeall-frontend-shell/scripts/e2e/static-server.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/customer-draft-lifecycle.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/blocked-features.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/journey-helpers.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-environment.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/network-policy.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-audit.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/auth-safe-reads.test.mjs`
+- `outputs/lekkadeall-frontend-shell/README.md`
+- `TESTING.md`
+- `hardening_progress.md`
+
+No migration, RLS policy, grant, production database function, validator, profile-provisioning function, marketplace state guard, draft-cancellation function, draft-update function, webhook, payment function, or application marketplace feature changed.
+
+#### Tests and CI integration
+
+- Existing Node frontend tests remain in place. The suite now has **59/59 passing tests**, including six static Ticket 9A-9 dependency, loopback, secret-filtering, artifact-policy, mutation-allowlist, fixture, and CI-order checks.
+- Playwright configuration discovery successfully finds all **8** Chromium E2E scenarios.
+- Added isolated GitHub Actions job `customer-draft-lifecycle-e2e` with `needs: database-tests`, so it runs only after the existing frontend, Deno webhook, clean migration reset, and every pgTAP step pass.
+- The job installs only the pinned Chromium runtime, invokes the local-only orchestrator, uses no GitHub environment secret or remote project, uploads no browser/database/Auth artifact, and performs an additional always-run runtime-config/Supabase cleanup.
+- Docker, Supabase CLI, and the local PostgreSQL stack are unavailable on this host. The real migration reset and browser-against-database journey could not be run locally; GitHub Actions is the authoritative full E2E gate. CI status remains pending.
+
+#### Intentionally blocked and security confirmations
+
+- Publication remains blocked and `customer_publish_request(...)` is rejected by browser network policy.
+- Exact-address collection/storage/read/reveal, ciphertext production, KMS/encryption, GPS, geolocation, and maps remain blocked.
+- Provider onboarding/feed/bidding/selection, booking actions, payments/checkout/refunds/payouts/disputes, admin dashboard, identity-provider code, support, chat, reviews, and profile editing remain blocked.
+- No production credential, real customer data, remote Supabase reference, browser service-role key, browser database credential, token, password, Auth code, recovery link, or request body was added to source, served files, logs, or artifacts.
+- No frontend direct application-table insert/update/upsert/delete or broad-column query was added.
+- Ticket 1 role/account-status protection, Ticket 2 RLS/grants, Ticket 5 address privacy, Ticket 6 state machine, Ticket 9B profile provisioning, Ticket 9A-5 public-field validation, Ticket 9A-7 draft cancellation, Ticket 9A-8 draft update, and all payment/refund/payout/webhook protections remain unchanged and unweakened.

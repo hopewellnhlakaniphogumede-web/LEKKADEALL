@@ -39,18 +39,31 @@ export function readPublicConfig(source = globalThis[CONFIG_GLOBAL]) {
     const appUrl = new URL(config.appUrl);
     const supabaseUrl = new URL(config.supabaseUrl);
     const localApp = ['localhost', '127.0.0.1'].includes(appUrl.hostname);
+    const localSupabase = ['localhost', '127.0.0.1'].includes(supabaseUrl.hostname);
 
     if (appUrl.pathname !== '/' || appUrl.search || appUrl.hash) {
+      return { ok: false, reason: 'invalid-app-url' };
+    }
+    if (!['http:', 'https:'].includes(appUrl.protocol)) {
       return { ok: false, reason: 'invalid-app-url' };
     }
     if (config.appEnv === 'production' && appUrl.protocol !== 'https:') {
       return { ok: false, reason: 'insecure-app-url' };
     }
-    if (!localApp && !['http:', 'https:'].includes(appUrl.protocol)) {
-      return { ok: false, reason: 'invalid-app-url' };
+    if (config.appEnv === 'test' && !localApp) {
+      return { ok: false, reason: 'non-local-test-app-url' };
     }
-    if (supabaseUrl.protocol !== 'https:' || supabaseUrl.username || supabaseUrl.password) {
+    if (supabaseUrl.username || supabaseUrl.password) {
       return { ok: false, reason: 'invalid-supabase-url' };
+    }
+    const approvedLocalHttp = config.appEnv !== 'production'
+      && localSupabase
+      && supabaseUrl.protocol === 'http:';
+    if (supabaseUrl.protocol !== 'https:' && !approvedLocalHttp) {
+      return { ok: false, reason: 'invalid-supabase-url' };
+    }
+    if (config.appEnv === 'test' && !localSupabase) {
+      return { ok: false, reason: 'non-local-test-supabase-url' };
     }
   } catch {
     return { ok: false, reason: 'invalid-url' };

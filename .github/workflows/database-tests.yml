@@ -107,3 +107,47 @@ jobs:
       - name: Stop Supabase local stack
         if: always()
         run: supabase stop --no-backup || true
+
+  customer-draft-lifecycle-e2e:
+    name: Run Ticket 9A-9 customer draft lifecycle E2E
+    needs: database-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Install pinned frontend and Playwright dependencies
+        run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+
+      - name: Install pinned Chromium runtime only
+        working-directory: outputs/lekkadeall-frontend-shell
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify local Docker is available
+        run: docker version
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run local-only Ticket 9A-9 Playwright boundary
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+        run: pnpm run test:e2e:local
+
+      - name: Enforce E2E cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -f outputs/lekkadeall-frontend-shell/runtime-config.local.js
+          cd outputs/marketplace-production-foundation
+          supabase stop --no-backup >/dev/null 2>&1 || true
