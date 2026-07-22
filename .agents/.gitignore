@@ -1,0 +1,31 @@
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies and build output
+node_modules/
+**/node_modules/
+**/runtime-config.local.js
+dist/
+build/
+coverage/
+
+# Supabase local runtime/temp/cache files
+.supabase/
+**/.supabase/
+supabase/.branches/
+supabase/.temp/
+supabase/.cache/
+**/supabase/.branches/
+**/supabase/.temp/
+**/supabase/.cache/
+
+# Logs and local OS/editor files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db

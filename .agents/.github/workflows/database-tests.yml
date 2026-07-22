@@ -1,0 +1,153 @@
+name: Supabase database tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  database-tests:
+    name: Run webhook route, Supabase migrations, and pgTAP tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: outputs/marketplace-production-foundation
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm for the pinned public browser client
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Install pinned frontend dependency
+        working-directory: .
+        run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+
+      - name: Run Ticket 9A-8 draft edit and existing frontend tests
+        working-directory: .
+        run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run mock payment webhook route tests
+        run: deno test supabase/functions/payment-webhook/index.test.ts
+
+      - name: Verify Docker is available
+        run: docker version
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify committed local Supabase config
+        run: |
+          test -f supabase/config.toml
+          ! grep -Eiq '(database_password|db_password|service_role|jwt_secret|secret|payment|identity|api_key|access_token|supabase\\.co|project_ref|db_url|production|prod_)' supabase/config.toml
+
+      - name: Start Supabase local stack
+        run: supabase start
+
+      - name: Apply migrations with database reset
+        run: supabase db reset
+
+      - name: Run role escalation pgTAP tests
+        run: supabase test db supabase/tests/database/role_escalation.test.sql
+
+      - name: Run baseline RLS pgTAP tests
+        run: supabase test db supabase/tests/database/baseline_rls.test.sql
+
+      - name: Run secure profile provisioning pgTAP tests
+        run: supabase test db supabase/tests/database/profile_provisioning.test.sql
+
+      - name: Run exact address privacy pgTAP tests
+        run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
+
+      - name: Run server public-field validation pgTAP tests
+        run: supabase test db supabase/tests/database/public_field_validation.test.sql
+
+      - name: Run marketplace state machine pgTAP tests
+        run: supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+
+      - name: Run customer draft cancellation pgTAP tests
+        run: supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
+
+      - name: Run customer draft update pgTAP tests
+        run: supabase test db supabase/tests/database/customer_draft_update.test.sql
+
+      - name: Run payment ledger pgTAP tests
+        run: supabase test db supabase/tests/database/payments_ledger.test.sql
+
+      - name: Run refund ledger pgTAP tests
+        run: supabase test db supabase/tests/database/refunds_ledger.test.sql
+
+      - name: Run cash payment policy pgTAP tests
+        run: supabase test db supabase/tests/database/cash_payment_policy.test.sql
+
+      - name: Run payout release controls pgTAP tests
+        run: supabase test db supabase/tests/database/payout_release_controls.test.sql
+
+      - name: Run mock payment checkout pgTAP tests
+        run: supabase test db supabase/tests/database/mock_payment_checkout.test.sql
+
+      - name: Run payment webhook pgTAP tests
+        run: supabase test db supabase/tests/database/payment_webhooks.test.sql
+
+      - name: Stop Supabase local stack
+        if: always()
+        run: supabase stop --no-backup || true
+
+  customer-draft-lifecycle-e2e:
+    name: Run Ticket 9A-9 customer draft lifecycle E2E
+    needs: database-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Install pinned frontend and Playwright dependencies
+        run: pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
+
+      - name: Install pinned Chromium runtime only
+        working-directory: outputs/lekkadeall-frontend-shell
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify local Docker is available
+        run: docker version
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run local-only Ticket 9A-9 Playwright boundary
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+        run: pnpm run test:e2e:local
+
+      - name: Enforce E2E cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -f outputs/lekkadeall-frontend-shell/runtime-config.local.js
+          cd outputs/marketplace-production-foundation
+          supabase stop --no-backup >/dev/null 2>&1 || true
