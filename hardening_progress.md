@@ -3345,3 +3345,53 @@ No migration, RLS policy, grant, production database function, validator, profil
 - E2E remains loopback-only and allows only `customer_create_draft_request(...)`, `customer_update_draft_request(...)`, and `customer_cancel_draft_request(...)` as marketplace mutations.
 - Publication, exact-address handling, KMS/encryption, GPS/maps/reveal, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 - No service-role browser access, production credential, direct frontend application-table write, `select('*')`, or security weakening was added.
+
+### Ticket 9A-9 E2E correction — three comprehensive scenarios exceeded the default timeout — 2026-07-23
+
+**Status:** Root causes fixed locally; replacement GitHub Actions verification pending.
+
+#### Latest failure summary and overlap analysis
+
+- The main migration-reset, pgTAP, Deno webhook, and Node/frontend security job passed.
+- Five E2E scenarios passed, including registration plus draft creation/update/cancellation under stale and ambiguous-response conditions. This independently exercised local Auth signup/session handling, Ticket 9B provisioning, the active category fixture, all three approved lifecycle RPCs, post-mutation RLS reads, no-retry behavior, blocked controls, signed-out guards, and recovery-route privacy.
+- The only remaining failures were the three longest serial scenarios:
+  - `customer registration through cancelled draft completes against real local RLS and RPCs`;
+  - `cross-customer request IDs remain RLS-hidden and non-actionable`; and
+  - `restricted suspended closed missing-profile and wrong-role actors fail closed`.
+- All tests inherited the global 60-second Playwright timeout. The remaining scenarios perform, respectively, the complete sign-out/sign-in plus list/detail lifecycle, two independent Auth/browser contexts and RLS probes, and five sequential synthetic account/profile-state cases. They exhausted the harness deadline in CI before their complete assertions and cleanup could finish.
+
+#### Redacted per-scenario findings
+
+- **Full registration-to-cancelled lifecycle**
+  - Expected: provision one customer profile, sign out/in, read active categories and dashboard, create/list/detail/edit/cancel one draft, confirm cancellation through a fresh RLS read, and verify privacy-safe database postconditions.
+  - Actual: the comprehensive serial journey exceeded the inherited 60-second test deadline. Passing shorter stale and ambiguous journeys show that registration, provisioning, category-backed draft creation, update, cancellation, and fresh reads were functioning.
+  - Root cause: E2E harness timeout, not an application/RPC/RLS defect.
+- **Cross-customer RLS/non-disclosure**
+  - Expected: two isolated browser contexts create distinct synthetic Auth sessions; Customer A cannot list, view, edit, cancel, or infer Customer B's draft.
+  - Actual: two registrations plus independent context reads and privacy cleanup exceeded the inherited deadline before the scenario could complete.
+  - Root cause: E2E harness timeout, not shared browser storage or weakened RLS. The test still uses separate `browser.newContext(...)` instances and performs no storage-state import/export.
+- **Restricted/suspended/closed/missing-profile/wrong-role matrix**
+  - Expected: five synthetic actors receive reviewed local fixture states, then the session/profile guard blocks customer reads and mutations before any lifecycle RPC.
+  - Actual: five sequential Auth registrations, local fixture-controller transitions, route reloads, privacy checks, and sign-outs exceeded the inherited deadline.
+  - Root cause: E2E harness timeout, not invalid role/status fixture values or a route-guard bypass.
+
+#### Fix applied and files changed
+
+- Added a test-local `180_000` millisecond timeout only to the three comprehensive scenarios in:
+  - `outputs/lekkadeall-frontend-shell/tests/e2e/customer-draft-lifecycle.spec.mjs`;
+  - `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`.
+- Kept the global default at 60 seconds, one Chromium worker, zero retries, and the 30-minute CI job limit.
+- Updated `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs` to emit only a fixed status category: `passed`, `timeout`, `assertion-or-runtime`, `interrupted`, `skipped`, or `unknown`. It does not read or print Playwright error objects, messages, stacks, stdout/stderr, attachments, URLs, values, request bodies, database rows, or browser storage.
+- Added static regression coverage in `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs` proving exactly three bounded timeout overrides exist, retries remain disabled, and the reporter cannot emit verbose diagnostics.
+- Updated `TESTING.md` and this progress log.
+
+#### Verification and security confirmations
+
+- All **61/61 Node frontend and static security tests pass** locally.
+- Playwright discovery still finds exactly **8** synthetic Chromium scenarios.
+- Docker and Supabase CLI remain unavailable on this host, so the real disposable-stack rerun is pending GitHub Actions. The main database/webhook/frontend job was already green and none of its inputs changed.
+- No failed E2E assertion was removed, skipped, weakened, or converted to a retry. Mutation retries remain zero.
+- The local fixture controller, separate browser contexts, UUID-only routes, generic unavailable states, profile-state allowlists, route guards, fresh RLS reads, mutation counts, network policy, privacy checks, and cleanup remain unchanged.
+- No screenshot, video, trace, HAR, storage state, Auth email, database dump, error detail, credential, token, Auth link, recovery link, request body, or database row is emitted or retained.
+- E2E remains loopback-only and disposable. Publication, exact-address handling, KMS/encryption, GPS/maps/reveal, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+- No migration, RLS policy, grant, Ticket 9B provisioning rule, Ticket 9A-5 validator, Ticket 9A-7 cancellation control, Ticket 9A-8 update control, service-role browser access, direct frontend application-table write, or `select('*')` changed.

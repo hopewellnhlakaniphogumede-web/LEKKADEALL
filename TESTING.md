@@ -372,7 +372,9 @@ pnpm install --dir outputs/lekkadeall-frontend-shell --frozen-lockfile
 node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
 ```
 
-The local result for Ticket 9A-9 is **60/60 Node tests passed**. Playwright configuration discovery finds **8 synthetic local Chromium scenarios**. The additional regression check fixes the shared sign-out journey expectation to match the application's reviewed fail-closed redirect to `/auth/sign-in`; it does not change application behavior or the browser privacy policy.
+The local result for Ticket 9A-9 is **61/61 Node tests passed**. Playwright configuration discovery finds **8 synthetic local Chromium scenarios**. The regression checks cover the reviewed `/auth/sign-in` sign-out redirect and the three comprehensive scenarios' bounded 180-second CI allowance. The Playwright project remains one-worker and retry-free; shorter tests retain the default 60-second timeout.
+
+The three comprehensive scenarios—full registration-to-cancellation, two-context cross-customer RLS, and the five-state restricted-account matrix—perform substantially more real local Auth, RLS, fixture-controller, and RPC round trips than the five passing scenarios. They use test-local `180_000` millisecond timeouts to avoid the former shared 60-second harness cutoff. This changes no assertion, mutation count, network allowlist, application behavior, or CI job timeout. The privacy-safe reporter now emits only a fixed failure category (`timeout`, `assertion-or-runtime`, or `interrupted`) alongside the static test name; it still never emits errors, stacks, values, payloads, URLs, credentials, browser state, or attachments.
 
 For the real local-stack E2E boundary, install Chromium and run the single orchestrated command:
 

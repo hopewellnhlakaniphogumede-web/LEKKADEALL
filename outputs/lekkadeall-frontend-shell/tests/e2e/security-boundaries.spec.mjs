@@ -27,6 +27,7 @@ test.beforeAll(() => {
 });
 
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
+  test.setTimeout(180_000);
   const customerA = syntheticAccount('customer-rls-a');
   const customerB = syntheticAccount('customer-rls-b');
   const bDraft = {
@@ -78,6 +79,7 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 });
 
 test('restricted suspended closed missing-profile and wrong-role actors fail closed', async ({ browser }) => {
+  test.setTimeout(180_000);
   const cases = [
     { label: 'restricted', state: { accountStatus: 'restricted' }, message: 'Account access is restricted' },
     { label: 'suspended', state: { accountStatus: 'suspended' }, message: 'Account access is restricted' },

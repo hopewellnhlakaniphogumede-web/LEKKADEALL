@@ -5,7 +5,14 @@ export default class PrivacySafeReporter {
 
   onTestEnd(test, result) {
     const status = result.status === 'passed' ? 'PASS' : 'FAIL';
-    process.stdout.write(`${status} ${test.titlePath().slice(1).join(' > ')}\n`);
+    const category = {
+      passed: 'passed',
+      timedOut: 'timeout',
+      failed: 'assertion-or-runtime',
+      interrupted: 'interrupted',
+      skipped: 'skipped',
+    }[result.status] ?? 'unknown';
+    process.stdout.write(`${status} [${category}] ${test.titlePath().slice(1).join(' > ')}\n`);
   }
 
   onError() {
