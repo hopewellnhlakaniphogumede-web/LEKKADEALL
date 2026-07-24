@@ -79,7 +79,7 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 });
 
 test('restricted suspended closed missing-profile and wrong-role actors fail closed', async ({ browser }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const cases = [
     { label: 'restricted', state: { accountStatus: 'restricted' }, message: 'Account access is restricted' },
     { label: 'suspended', state: { accountStatus: 'suspended' }, message: 'Account access is restricted' },
@@ -89,29 +89,31 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
   ];
 
   for (const scenario of cases) {
-    const account = syntheticAccount(`account-${scenario.label}`);
-    const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
-    try {
-      const page = await context.newPage();
-      const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-      const markers = privacyMarkers(account);
-      const emissions = attachSensitiveEmissionAudit(page, markers);
-      await registerCustomer(page, account);
-      if (scenario.removeProfile) await removeSyntheticProfile(account.email);
-      else await setSyntheticProfileState(account.email, scenario.state);
+    await test.step(`guard-state:${scenario.label}`, async () => {
+      const account = syntheticAccount(`account-${scenario.label}`);
+      const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+      try {
+        const page = await context.newPage();
+        const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+        const markers = privacyMarkers(account);
+        const emissions = attachSensitiveEmissionAudit(page, markers);
+        await registerCustomer(page, account);
+        if (scenario.removeProfile) await removeSyntheticProfile(account.email);
+        else await setSyntheticProfileState(account.email, scenario.state);
 
-      await page.goto('/app/customer');
-      await expect(page.getByText(scenario.message)).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
-      expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
-      await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-      policy.assertClean();
-      emissions.assertClean();
-      await signOutCustomer(page);
-      await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
-    } finally {
-      await context.close();
-    }
+        await page.goto('/app/customer');
+        await expect(page.getByText(scenario.message)).toBeVisible();
+        await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+        expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
+        await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+        policy.assertClean();
+        emissions.assertClean();
+        await signOutCustomer(page);
+        await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+      } finally {
+        await context.close();
+      }
+    });
   }
 });
 

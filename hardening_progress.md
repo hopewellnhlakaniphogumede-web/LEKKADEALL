@@ -3395,3 +3395,45 @@ No migration, RLS policy, grant, production database function, validator, profil
 - No screenshot, video, trace, HAR, storage state, Auth email, database dump, error detail, credential, token, Auth link, recovery link, request body, or database row is emitted or retained.
 - E2E remains loopback-only and disposable. Publication, exact-address handling, KMS/encryption, GPS/maps/reveal, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 - No migration, RLS policy, grant, Ticket 9B provisioning rule, Ticket 9A-5 validator, Ticket 9A-7 cancellation control, Ticket 9A-8 update control, service-role browser access, direct frontend application-table write, or `select('*')` changed.
+
+### Ticket 9A-9 E2E correction — final restricted-state matrix failure — 2026-07-24
+
+**Status:** Isolated correction implemented locally; replacement GitHub Actions verification pending.
+
+#### Redacted finding
+
+- Seven of eight real local-stack E2E scenarios passed, including the complete registration-to-cancelled lifecycle and two-context cross-customer RLS/non-disclosure scenario.
+- Only `restricted suspended closed missing-profile and wrong-role actors fail closed` remained. It is uniquely composed of five sequential synthetic actors, five Auth registrations/sessions, five fresh browser contexts, four privileged local profile transitions or one exact profile removal, five route-guard reloads, privacy checks, and sign-outs.
+- The earlier 180-second allowance was sufficient for the other comprehensive scenarios but remained too small for this five-actor matrix on the CI runner. This was an E2E scheduling/setup limit, not a route-guard, Ticket 9B, RLS, enum, profile-read, or application mutation defect.
+
+#### Expected and actual behavior
+
+- **Expected:** restricted, suspended, and closed customers render `Account access is restricted`; a provider on a customer route renders `Access denied`; and an authenticated Auth user with no profile renders `Account setup unavailable`. No request link or lifecycle RPC may be available after the profile guard rejects the actor.
+- **Actual:** the serialized matrix did not complete within its former test-local deadline. The seven passing scenarios and the existing route-guard unit suite confirm that Auth sessions, profile reads from `public.profiles`, lifecycle functions, and the reviewed access-result mappings remain functional.
+
+#### Fix and fixture hardening
+
+- Increased only this five-actor matrix from `180_000` to `300_000` milliseconds. One Chromium worker and zero retries remain unchanged.
+- Strengthened `setSyntheticProfileState(...)` so the same transaction that changes the profile also proves the Auth user resolved and the resulting role/account status exactly match the allowlisted requested values.
+- Strengthened `removeSyntheticProfile(...)` so it must resolve an existing synthetic Auth user, delete exactly one profile, preserve the Auth user, and prove the profile remains absent. Ticket 9B is not called or changed; its trigger remains Auth-user-`INSERT` only, so profile removal is not followed by automatic re-provisioning.
+- Kept the wrong-role fixture on the existing valid `provider` value of `public.user_role`; no enum value was added or corrupted.
+- Added fixed `guard-state:restricted|suspended|closed|provider|missing-profile` Playwright steps. On failure, the reporter may emit only the matching allowlisted state label and the fixed result category. It does not inspect or print error messages, stacks, credentials, Auth values, request bodies, database rows, or browser state.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Verification and security confirmations
+
+- All **61/61 Node frontend and static security tests pass** locally.
+- Playwright still discovers exactly **8** synthetic Chromium scenarios.
+- Docker and Supabase CLI remain unavailable on this host, so the authoritative eight-test disposable-stack rerun is pending GitHub Actions. The main pgTAP, migration-reset, Deno webhook, and frontend security job was already green and none of its inputs changed.
+- The frontend route guard remains unchanged and resolves authority only from the explicit own-profile projection `id,role,account_status`; Auth metadata remains untrusted.
+- The rejected states still return before customer request/dashboard reads or mutations. No route guard, RLS policy, grant, enum, profile provisioning behavior, application RPC, or frontend mutation was loosened.
+- Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
+- Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.

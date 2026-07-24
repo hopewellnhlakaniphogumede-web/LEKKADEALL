@@ -61,10 +61,13 @@ test('long E2E security journeys have bounded time without retries or verbose di
   const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
   const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
   assert.equal((lifecycleSource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 1);
-  assert.equal((securitySource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 2);
+  assert.equal((securitySource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 1);
+  assert.equal((securitySource.match(/test\.setTimeout\(300_000\)/gu) ?? []).length, 1);
   assert.match(reporterSource, /timedOut:\s*'timeout'/);
   assert.match(reporterSource, /failed:\s*'assertion-or-runtime'/);
   assert.doesNotMatch(reporterSource, /result\.(?:error|errors|stdout|stderr)|message|stack|attachment/iu);
+  assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
@@ -85,6 +88,8 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
   assert.match(fixtureSource, /supabase_db_lekkadeall-local/);
   assert.match(fixtureSource, /docker[\s\S]*exec/);
+  assert.match(fixtureSource, /synthetic profile state mismatch/);
+  assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);
 });
 

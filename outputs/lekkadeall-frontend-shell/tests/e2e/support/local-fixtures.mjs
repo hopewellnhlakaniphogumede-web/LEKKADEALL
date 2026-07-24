@@ -141,6 +141,15 @@ export async function setSyntheticProfileState(emailValue, { role = 'customer', 
       if not found then
         raise exception 'synthetic profile unavailable';
       end if;
+      if not exists (
+        select 1
+        from public.profiles as p
+        where p.id = v_user_id
+          and p.role = ${sqlLiteral(role)}::public.user_role
+          and p.account_status = ${sqlLiteral(accountStatus)}
+      ) then
+        raise exception 'synthetic profile state mismatch';
+      end if;
       perform pg_catalog.set_config('lekkadeall.allow_privileged_profile_update', 'off', true);
     exception
       when others then
@@ -154,10 +163,32 @@ export async function setSyntheticProfileState(emailValue, { role = 'customer', 
 export async function removeSyntheticProfile(emailValue) {
   const email = requireSyntheticEmail(emailValue);
   await runSql(`
-    delete from public.profiles as p
-    using auth.users as u
-    where p.id = u.id
-      and pg_catalog.lower(u.email) = ${sqlLiteral(email)};
+    do $e2e$
+    declare
+      v_user_id uuid;
+      v_deleted integer;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      order by u.created_at desc
+      limit 1;
+      if v_user_id is null then
+        raise exception 'synthetic user unavailable';
+      end if;
+
+      delete from public.profiles as p
+      where p.id = v_user_id;
+      get diagnostics v_deleted = row_count;
+      if v_deleted <> 1 then
+        raise exception 'synthetic profile removal mismatch';
+      end if;
+      if not exists (select 1 from auth.users as u where u.id = v_user_id)
+         or exists (select 1 from public.profiles as p where p.id = v_user_id) then
+        raise exception 'synthetic missing-profile invariant failed';
+      end if;
+    end;
+    $e2e$;
   `);
 }
 
