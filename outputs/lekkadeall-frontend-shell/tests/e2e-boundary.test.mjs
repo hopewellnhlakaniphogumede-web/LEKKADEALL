@@ -8,6 +8,7 @@ import {
   assertLoopbackUrl,
   parseSupabaseStatusEnv,
 } from './e2e/support/local-environment.mjs';
+import { LOCAL_SIGNUP_COMPLETION_INTERVAL_MS } from './e2e/support/journey-helpers.mjs';
 import { ALLOWED_MARKETPLACE_RPCS } from './e2e/support/network-policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,6 +71,18 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
+test('local Auth signup pacing is measured after completed registration', async () => {
+  const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
+  assert.equal(LOCAL_SIGNUP_COMPLETION_INTERVAL_MS, 1_500);
+  assert.match(helperSource, /lastRegistrationCompletedAt = Date\.now\(\);/);
+  assert.equal(
+    helperSource.indexOf('lastRegistrationCompletedAt = Date.now();')
+      > helperSource.indexOf("name: 'Your safe account view.'"),
+    true,
+  );
+  assert.doesNotMatch(helperSource, /lastRegistrationAt/);
+});
+
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
   assert.deepEqual(ALLOWED_MARKETPLACE_RPCS, [
     'customer_create_draft_request',
@@ -90,6 +103,8 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /docker[\s\S]*exec/);
   assert.match(fixtureSource, /synthetic profile state mismatch/);
   assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
+  assert.match(fixtureSource, /synthetic request ownership invariant failed/);
+  assert.match(fixtureSource, /synthetic Auth users are not distinct/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);
 });
 

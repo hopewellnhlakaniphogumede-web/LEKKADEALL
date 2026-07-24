@@ -114,6 +114,64 @@ export async function assertProvisionedCustomerProfile(emailValue) {
   return userId;
 }
 
+export async function assertSyntheticRequestOwner(emailValue, requestIdValue) {
+  const email = requireSyntheticEmail(emailValue);
+  const requestId = requireUuid(requestIdValue);
+  await runSql(`
+    do $e2e$
+    declare
+      v_user_id uuid;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      order by u.created_at desc
+      limit 1;
+      if v_user_id is null
+         or not exists (
+           select 1
+           from public.service_requests as sr
+           where sr.id = '${requestId}'::uuid
+             and sr.customer_id = v_user_id
+             and sr.status = 'draft'::public.request_status
+         ) then
+        raise exception 'synthetic request ownership invariant failed';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
+export async function assertDistinctSyntheticUsers(firstEmailValue, secondEmailValue) {
+  const firstEmail = requireSyntheticEmail(firstEmailValue);
+  const secondEmail = requireSyntheticEmail(secondEmailValue);
+  if (firstEmail === secondEmail) throw new Error('synthetic users must be distinct');
+  await runSql(`
+    do $e2e$
+    declare
+      v_first_user_id uuid;
+      v_second_user_id uuid;
+    begin
+      select u.id into v_first_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(firstEmail)}
+      order by u.created_at desc
+      limit 1;
+      select u.id into v_second_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(secondEmail)}
+      order by u.created_at desc
+      limit 1;
+      if v_first_user_id is null
+         or v_second_user_id is null
+         or v_first_user_id = v_second_user_id then
+        raise exception 'synthetic Auth users are not distinct';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
 export async function setSyntheticProfileState(emailValue, { role = 'customer', accountStatus = 'active' } = {}) {
   const email = requireSyntheticEmail(emailValue);
   if (!ROLES.has(role) || !ACCOUNT_STATUSES.has(accountStatus)) {

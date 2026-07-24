@@ -3437,3 +3437,55 @@ No migration, RLS policy, grant, production database function, validator, profil
 - The rejected states still return before customer request/dashboard reads or mutations. No route guard, RLS policy, grant, enum, profile provisioning behavior, application RPC, or frontend mutation was loosened.
 - Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction — multi-registration Auth pacing and final isolation assertions — 2026-07-24
+
+**Status:** Final two root causes fixed locally; replacement GitHub Actions verification pending.
+
+#### Latest redacted failure pattern
+
+- Six scenarios passed, including every scenario that registers zero or one synthetic Auth user.
+- Only the two scenarios that register multiple users still failed:
+  - `cross-customer request IDs remain RLS-hidden and non-actionable` registers Customer A and Customer B;
+  - `restricted suspended closed missing-profile and wrong-role actors fail closed` registers five actors.
+- This pattern supersedes the earlier timeout-only diagnosis. The comprehensive lifecycle, stale edit, and ambiguous-response tests prove that Ticket 9B provisioning and all three draft RPC boundaries function for valid single-user sessions.
+
+#### Root cause
+
+- Local Supabase Auth is configured with email `max_frequency = "1s"`.
+- `respectLocalSignupRateLimit()` recorded `lastRegistrationAt` immediately before navigating to registration and submitting the previous signup.
+- Its next 1.1-second delay was therefore measured from request start, not successful signup/session/profile completion. Network, Ticket 9B trigger, route-profile read, and dashboard work consumed part of that interval.
+- The next signup in the same test could consequently arrive inside Auth's one-second post-completion window. This was a local E2E scheduling mistake, not shared session storage, RLS leakage, invalid profile state, Ticket 9B re-provisioning, or a route-guard defect.
+
+#### Cross-customer RLS — redacted summary
+
+- **Expected:** Customer A and Customer B use separate browser contexts and sessions; B creates an owned draft; A receives the same generic unavailable states for B's UUID and a missing UUID; no title, description, category, status, owner, or existence signal appears; A cannot edit or cancel.
+- **Actual:** the second signup could be locally rate-limited before the two-user RLS journey was fully established.
+- **Fix:** registration pacing is now measured from confirmed completion. The test also proves the contexts and pages are distinct, proves the two synthetic emails resolve to distinct Auth user IDs without returning either ID, verifies B owns the draft through a no-output local invariant, compares B's UUID with a fixed missing UUID on detail and edit routes, asserts no request card/content/category/status is rendered, and retains zero A-side edit/cancel RPC counts.
+- **Security:** no RLS policy, projection, route behavior, storage behavior, browser credential, or mutation boundary changed.
+
+#### Restricted-state matrix — redacted summary
+
+- **Expected:** five independently authenticated actors receive exact restricted, suspended, closed, provider, or missing-profile fixtures; customer routes stop after the own-profile guard; restricted statuses use the restricted UI state, and provider/missing-profile use the generic error/fail-closed state.
+- **Actual:** later registrations in the five-user matrix could fall within the incorrectly measured local Auth interval.
+- **Fix:** the completion-based pacing applies between every actor. Existing atomic fixture invariants remain, and the test now snapshots `service_requests`, `bookings`, and `payments` read counts before reloading the protected route and proves none increase after the guard rejects the actor.
+- **Security:** role and account status continue to come only from `public.profiles`; Auth metadata remains untrusted; provider remains an existing enum value; Ticket 9B remains Auth-user-`INSERT` only; request reads and mutations remain blocked.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/journey-helpers.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/network-policy.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Verification and security confirmations
+
+- All **62/62 Node frontend and static security tests pass** locally.
+- Playwright still discovers exactly **8** synthetic Chromium scenarios.
+- Docker and Supabase CLI remain unavailable on this host, so the authoritative disposable-stack rerun remains pending GitHub Actions. The main migration-reset, pgTAP, Deno webhook, and frontend security job was already green and no backend input changed.
+- E2E remains loopback-only, disposable, one-worker, and retry-free. No screenshot, video, trace, HAR, saved storage state, Auth email, database dump, sensitive error detail, or secret is emitted.
+- No application source, Auth configuration, migration, RLS policy, grant, Ticket 9B function/trigger, Ticket 9A-5 validator, Ticket 9A-7 cancellation function, Ticket 9A-8 update function, service-role browser access, direct frontend application-table write, or `select('*')` changed.
+- Publication, exact-address handling, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.

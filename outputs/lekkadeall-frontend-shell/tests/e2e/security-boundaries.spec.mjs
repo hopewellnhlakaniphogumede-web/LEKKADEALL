@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import {
   assertCustomerLifecyclePostconditions,
+  assertDistinctSyntheticUsers,
+  assertSyntheticRequestOwner,
   removeSyntheticProfile,
   setSyntheticProfileState,
 } from './support/local-fixtures.mjs';
@@ -47,14 +49,30 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 
     await registerCustomer(pageA, customerA);
     await registerCustomer(pageB, customerB);
+    await assertDistinctSyntheticUsers(customerA.email, customerB.email);
     const requestIdB = await createDraftThroughUi(pageB, bDraft);
+    await assertSyntheticRequestOwner(customerB.email, requestIdB);
+    expect(contextA).not.toBe(contextB);
+    expect(pageA.context()).toBe(contextA);
+    expect(pageB.context()).toBe(contextB);
 
     await pageA.goto('/app/customer/requests');
     await expect(pageA.getByRole('heading', { name: bDraft.title })).toHaveCount(0);
     await pageA.goto(`/app/customer/requests/detail/?requestId=${requestIdB}`);
     await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
+    await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
+    await expect(pageA.getByText(bDraft.title)).toHaveCount(0);
+    await expect(pageA.getByText(bDraft.description)).toHaveCount(0);
+    await expect(pageA.getByText('Synthetic home maintenance')).toHaveCount(0);
+    await expect(pageA.getByText('Draft', { exact: true })).toHaveCount(0);
     await expect(pageA.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+    await pageA.goto('/app/customer/requests/detail/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
+    await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
     await pageA.goto(`/app/customer/requests/edit/?requestId=${requestIdB}`);
+    await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
+    await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
+    await pageA.goto('/app/customer/requests/edit/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
     await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
 
@@ -81,11 +99,11 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 test('restricted suspended closed missing-profile and wrong-role actors fail closed', async ({ browser }) => {
   test.setTimeout(300_000);
   const cases = [
-    { label: 'restricted', state: { accountStatus: 'restricted' }, message: 'Account access is restricted' },
-    { label: 'suspended', state: { accountStatus: 'suspended' }, message: 'Account access is restricted' },
-    { label: 'closed', state: { accountStatus: 'closed' }, message: 'Account access is restricted' },
-    { label: 'provider', state: { role: 'provider' }, message: 'Access denied' },
-    { label: 'missing-profile', removeProfile: true, message: 'Account setup unavailable' },
+    { label: 'restricted', state: { accountStatus: 'restricted' }, message: 'Account access is restricted', uiState: 'restricted' },
+    { label: 'suspended', state: { accountStatus: 'suspended' }, message: 'Account access is restricted', uiState: 'restricted' },
+    { label: 'closed', state: { accountStatus: 'closed' }, message: 'Account access is restricted', uiState: 'restricted' },
+    { label: 'provider', state: { role: 'provider' }, message: 'Access denied', uiState: 'error' },
+    { label: 'missing-profile', removeProfile: true, message: 'Account setup unavailable', uiState: 'error' },
   ];
 
   for (const scenario of cases) {
@@ -101,10 +119,18 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
         if (scenario.removeProfile) await removeSyntheticProfile(account.email);
         else await setSyntheticProfileState(account.email, scenario.state);
 
+        const guardedReadBaseline = Object.fromEntries(
+          ['service_requests', 'bookings', 'payments']
+            .map((table) => [table, policy.getTableReadCount(table)]),
+        );
         await page.goto('/app/customer');
         await expect(page.getByText(scenario.message)).toBeVisible();
+        await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
         await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
         expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
+        for (const [table, count] of Object.entries(guardedReadBaseline)) {
+          expect(policy.getTableReadCount(table)).toBe(count);
+        }
         await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
         policy.assertClean();
         emissions.assertClean();

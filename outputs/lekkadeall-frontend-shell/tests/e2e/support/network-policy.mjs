@@ -75,6 +75,7 @@ export function attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey }) {
 
   const violations = new Set();
   const rpcCounts = new Map();
+  const tableReadCounts = new Map();
   let signupCount = 0;
 
   function violate(code) {
@@ -129,6 +130,7 @@ export function attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey }) {
       const table = decodeURIComponent(restPath.split('/')[0]);
       if (!ALLOWED_READ_TABLES.has(table)) violate('blocked-table-read');
       if (!['GET', 'HEAD'].includes(request.method())) violate('direct-application-table-dml');
+      else tableReadCounts.set(table, (tableReadCounts.get(table) ?? 0) + 1);
       const projection = url.searchParams.get('select');
       if (!projection || projection.includes('*')) violate('broad-column-select');
     } catch {
@@ -153,6 +155,9 @@ export function attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey }) {
     },
     getSignupCount() {
       return signupCount;
+    },
+    getTableReadCount(table) {
+      return tableReadCounts.get(table) ?? 0;
     },
     assertClean() {
       if (violations.size) throw new Error('browser-network-policy-violation');

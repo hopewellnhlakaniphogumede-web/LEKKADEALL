@@ -3,7 +3,8 @@ import { expect } from '@playwright/test';
 import { ACTIVE_CATEGORY_ID } from './local-fixtures.mjs';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-let lastRegistrationAt = 0;
+const LOCAL_SIGNUP_COMPLETION_INTERVAL_MS = 1_500;
+let lastRegistrationCompletedAt = 0;
 
 export function syntheticAccount(label) {
   const suffix = randomBytes(8).toString('hex');
@@ -14,9 +15,8 @@ export function syntheticAccount(label) {
 }
 
 async function respectLocalSignupRateLimit() {
-  const remaining = 1_100 - (Date.now() - lastRegistrationAt);
+  const remaining = LOCAL_SIGNUP_COMPLETION_INTERVAL_MS - (Date.now() - lastRegistrationCompletedAt);
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  lastRegistrationAt = Date.now();
 }
 
 export async function registerCustomer(page, account) {
@@ -28,6 +28,7 @@ export async function registerCustomer(page, account) {
   await form.getByRole('button', { name: 'Create account' }).click();
   await expect(page).toHaveURL(/\/app\/customer\/?$/u);
   await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
+  lastRegistrationCompletedAt = Date.now();
 }
 
 export async function signOutCustomer(page) {
@@ -120,4 +121,4 @@ export function privacyMarkers(account, ...drafts) {
   ];
 }
 
-export { UUID_PATTERN };
+export { LOCAL_SIGNUP_COMPLETION_INTERVAL_MS, UUID_PATTERN };
