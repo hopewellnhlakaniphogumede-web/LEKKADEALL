@@ -1,10 +1,10 @@
-const SAFE_GUARD_PHASE = /^guard-state:(restricted|suspended|closed|provider|missing-profile)$/u;
+const SAFE_FAILURE_PHASE = /^(?:guard-state:(restricted|suspended|closed|provider|missing-profile)|guard-phase:(restricted|suspended|closed|provider|missing-profile):(registration|fixture|route|postcondition|sign-out)|lifecycle-phase:(registration|reauthentication|category-dashboard|create|list-detail|update|cancel|postcondition|sign-out))$/u;
 
-function failedGuardPhase(steps = []) {
+function failedSafePhase(steps = []) {
   for (const step of steps) {
-    const nested = failedGuardPhase(step.steps);
+    const nested = failedSafePhase(step.steps);
     if (nested) return nested;
-    if (step.error && SAFE_GUARD_PHASE.test(step.title)) return step.title;
+    if (step.error && SAFE_FAILURE_PHASE.test(step.title)) return step.title;
   }
   return null;
 }
@@ -23,8 +23,8 @@ export default class PrivacySafeReporter {
       interrupted: 'interrupted',
       skipped: 'skipped',
     }[result.status] ?? 'unknown';
-    const guardPhase = status === 'FAIL' ? failedGuardPhase(result.steps) : null;
-    const phase = guardPhase ? ` [${guardPhase}]` : '';
+    const safePhase = status === 'FAIL' ? failedSafePhase(result.steps) : null;
+    const phase = safePhase ? ` [${safePhase}]` : '';
     process.stdout.write(`${status} [${category}]${phase} ${test.titlePath().slice(1).join(' > ')}\n`);
   }
 

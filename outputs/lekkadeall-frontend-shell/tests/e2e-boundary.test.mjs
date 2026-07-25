@@ -68,6 +68,8 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /failed:\s*'assertion-or-runtime'/);
   assert.doesNotMatch(reporterSource, /result\.(?:error|errors|stdout|stderr)|message|stack|attachment/iu);
   assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.match(reporterSource, /guard-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -102,7 +104,9 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /supabase_db_lekkadeall-local/);
   assert.match(fixtureSource, /docker[\s\S]*exec/);
   assert.match(fixtureSource, /synthetic profile state mismatch/);
+  assert.match(fixtureSource, /synthetic profile post-route mismatch/);
   assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
+  assert.match(fixtureSource, /synthetic missing-profile post-route mismatch/);
   assert.match(fixtureSource, /synthetic request ownership invariant failed/);
   assert.match(fixtureSource, /synthetic Auth users are not distinct/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);

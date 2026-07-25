@@ -218,6 +218,39 @@ export async function setSyntheticProfileState(emailValue, { role = 'customer', 
   `);
 }
 
+export async function assertSyntheticProfileState(
+  emailValue,
+  { role = 'customer', accountStatus = 'active' } = {},
+) {
+  const email = requireSyntheticEmail(emailValue);
+  if (!ROLES.has(role) || !ACCOUNT_STATUSES.has(accountStatus)) {
+    throw new Error('fixture-profile-state-invalid');
+  }
+  await runSql(`
+    do $e2e$
+    declare
+      v_user_id uuid;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      order by u.created_at desc
+      limit 1;
+      if v_user_id is null
+         or not exists (
+           select 1
+           from public.profiles as p
+           where p.id = v_user_id
+             and p.role = ${sqlLiteral(role)}::public.user_role
+             and p.account_status = ${sqlLiteral(accountStatus)}
+         ) then
+        raise exception 'synthetic profile post-route mismatch';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
 export async function removeSyntheticProfile(emailValue) {
   const email = requireSyntheticEmail(emailValue);
   await runSql(`
@@ -244,6 +277,28 @@ export async function removeSyntheticProfile(emailValue) {
       if not exists (select 1 from auth.users as u where u.id = v_user_id)
          or exists (select 1 from public.profiles as p where p.id = v_user_id) then
         raise exception 'synthetic missing-profile invariant failed';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
+export async function assertSyntheticProfileAbsent(emailValue) {
+  const email = requireSyntheticEmail(emailValue);
+  await runSql(`
+    do $e2e$
+    declare
+      v_user_id uuid;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      order by u.created_at desc
+      limit 1;
+      if v_user_id is null
+         or not exists (select 1 from auth.users as u where u.id = v_user_id)
+         or exists (select 1 from public.profiles as p where p.id = v_user_id) then
+        raise exception 'synthetic missing-profile post-route mismatch';
       end if;
     end;
     $e2e$;

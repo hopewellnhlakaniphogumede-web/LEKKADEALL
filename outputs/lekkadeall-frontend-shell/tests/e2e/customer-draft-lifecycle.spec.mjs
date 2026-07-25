@@ -55,28 +55,38 @@ test('customer registration through cancelled draft completes against real local
   const markers = privacyMarkers(account, created, edited);
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
+  let requestId;
 
+  await test.step('lifecycle-phase:registration', async () => {
   await registerCustomer(page, account);
   expect(policy.getSignupCount()).toBe(1);
   await assertProvisionedCustomerProfile(account.email);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+  });
 
+  await test.step('lifecycle-phase:reauthentication', async () => {
   await signOutCustomer(page);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
   await signInCustomer(page, account);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+  });
 
+  await test.step('lifecycle-phase:category-dashboard', async () => {
   await page.goto('/services');
   await expect(page.getByText(ACTIVE_CATEGORY_NAME)).toBeVisible();
   await expect(page.getByText('Synthetic inactive category')).toHaveCount(0);
   await page.goto('/app/customer');
   await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
   await expect(page.getByText('Mock/sandbox — no real money moved')).toBeVisible();
+  });
 
-  const requestId = await createDraftThroughUi(page, created);
+  await test.step('lifecycle-phase:create', async () => {
+  requestId = await createDraftThroughUi(page, created);
   expect(policy.getRpcCount('customer_create_draft_request')).toBe(1);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+  });
 
+  await test.step('lifecycle-phase:list-detail', async () => {
   await page.getByRole('link', { name: 'View all requests' }).click();
   await expect(page).toHaveURL(/\/app\/customer\/requests\/?$/u);
   await expect(page.getByRole('heading', { name: created.title })).toBeVisible();
@@ -88,7 +98,9 @@ test('customer registration through cancelled draft completes against real local
   await expect(page.getByRole('link', { name: 'Edit draft' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cancel draft' })).toBeVisible();
   await expect(page.getByRole('button', { name: /publish/iu })).toHaveCount(0);
+  });
 
+  await test.step('lifecycle-phase:update', async () => {
   await page.getByRole('link', { name: 'Edit draft' }).click();
   await expect(page.getByRole('heading', { name: 'Edit your private draft.' })).toBeVisible();
   const editForm = await fillDraftForm(page, edited);
@@ -97,7 +109,9 @@ test('customer registration through cancelled draft completes against real local
   expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
   await expect(page.locator('input[name="title"]')).toHaveValue(edited.title);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+  });
 
+  await test.step('lifecycle-phase:cancel', async () => {
   await page.getByRole('link', { name: 'Back to draft' }).click();
   await expect(page.getByRole('heading', { name: edited.title })).toBeVisible();
   await expect(page.getByText(edited.description)).toBeVisible();
@@ -110,7 +124,9 @@ test('customer registration through cancelled draft completes against real local
   expect(policy.getRpcCount('customer_cancel_draft_request')).toBe(1);
   await expect(page.getByRole('link', { name: 'Edit draft' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+  });
 
+  await test.step('lifecycle-phase:postcondition', async () => {
   await page.getByRole('link', { name: 'View all requests' }).click();
   await expect(page.getByRole('heading', { name: edited.title })).toBeVisible();
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible();
@@ -119,6 +135,9 @@ test('customer registration through cancelled draft completes against real local
 
   policy.assertClean();
   emissions.assertClean();
+  });
+  await test.step('lifecycle-phase:sign-out', async () => {
   await signOutCustomer(page);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+  });
 });

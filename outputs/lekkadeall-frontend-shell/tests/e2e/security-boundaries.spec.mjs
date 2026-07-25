@@ -2,7 +2,10 @@ import { expect, test } from '@playwright/test';
 import {
   assertCustomerLifecyclePostconditions,
   assertDistinctSyntheticUsers,
+  assertProvisionedCustomerProfile,
+  assertSyntheticProfileAbsent,
   assertSyntheticRequestOwner,
+  assertSyntheticProfileState,
   removeSyntheticProfile,
   setSyntheticProfileState,
 } from './support/local-fixtures.mjs';
@@ -115,27 +118,50 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
         const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
         const markers = privacyMarkers(account);
         const emissions = attachSensitiveEmissionAudit(page, markers);
-        await registerCustomer(page, account);
-        if (scenario.removeProfile) await removeSyntheticProfile(account.email);
-        else await setSyntheticProfileState(account.email, scenario.state);
+        await test.step(`guard-phase:${scenario.label}:registration`, async () => {
+          await registerCustomer(page, account);
+          await assertProvisionedCustomerProfile(account.email);
+          await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+        });
+
+        await test.step(`guard-phase:${scenario.label}:fixture`, async () => {
+          if (scenario.removeProfile) {
+            await removeSyntheticProfile(account.email);
+          } else {
+            await setSyntheticProfileState(account.email, scenario.state);
+          }
+        });
 
         const guardedReadBaseline = Object.fromEntries(
           ['service_requests', 'bookings', 'payments']
             .map((table) => [table, policy.getTableReadCount(table)]),
         );
-        await page.goto('/app/customer');
-        await expect(page.getByText(scenario.message)).toBeVisible();
-        await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
-        await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
-        expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
-        for (const [table, count] of Object.entries(guardedReadBaseline)) {
-          expect(policy.getTableReadCount(table)).toBe(count);
-        }
-        await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-        policy.assertClean();
-        emissions.assertClean();
-        await signOutCustomer(page);
-        await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+        await test.step(`guard-phase:${scenario.label}:route`, async () => {
+          await page.goto('/app/customer');
+          await expect(page.getByText(scenario.message)).toBeVisible();
+          await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
+          await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+        });
+
+        await test.step(`guard-phase:${scenario.label}:postcondition`, async () => {
+          if (scenario.removeProfile) {
+            await assertSyntheticProfileAbsent(account.email);
+          } else {
+            await assertSyntheticProfileState(account.email, scenario.state);
+          }
+          expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
+          for (const [table, count] of Object.entries(guardedReadBaseline)) {
+            expect(policy.getTableReadCount(table)).toBe(count);
+          }
+          await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+          policy.assertClean();
+          emissions.assertClean();
+        });
+
+        await test.step(`guard-phase:${scenario.label}:sign-out`, async () => {
+          await signOutCustomer(page);
+          await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+        });
       } finally {
         await context.close();
       }
