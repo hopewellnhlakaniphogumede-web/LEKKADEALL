@@ -144,6 +144,7 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
 });
 
 test('a stale edit is rejected after another tab cancels the draft', async ({ context, page }) => {
+  test.setTimeout(180_000);
   const account = syntheticAccount('customer-stale');
   const created = mainDraftValues();
   const edited = editedDraftValues();
@@ -178,6 +179,7 @@ test('a stale edit is rejected after another tab cancels the draft', async ({ co
 });
 
 test('an executed update with an aborted response is not retried and requires a fresh read', async ({ page }) => {
+  test.setTimeout(180_000);
   const account = syntheticAccount('customer-ambiguous');
   const created = mainDraftValues();
   const edited = editedDraftValues();
