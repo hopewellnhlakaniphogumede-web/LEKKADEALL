@@ -1,34 +1,70 @@
 import { randomBytes } from 'node:crypto';
-import { expect } from '@playwright/test';
-import { ACTIVE_CATEGORY_ID } from './local-fixtures.mjs';
+import { expect, test } from '@playwright/test';
+import {
+  ACTIVE_CATEGORY_ID,
+  waitForProvisionedCustomerProfile,
+} from './local-fixtures.mjs';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const LOCAL_SIGNUP_COMPLETION_INTERVAL_MS = 1_500;
-let lastRegistrationCompletedAt = 0;
+const E2E_RUN_ID_PATTERN = /^[0-9a-f]{16}$/u;
+const AUTH_STORAGE_KEY_PATTERN = /^sb-[a-z0-9-]+-auth-token$/iu;
 
 export function syntheticAccount(label) {
-  const suffix = randomBytes(8).toString('hex');
+  const runId = String(process.env.E2E_RUN_ID ?? '');
+  const actor = String(label ?? '').toLowerCase();
+  if (!E2E_RUN_ID_PATTERN.test(runId) || !/^[a-z0-9][a-z0-9-]{0,40}$/u.test(actor)) {
+    throw new Error('synthetic-account-identity-invalid');
+  }
+  const actorSuffix = randomBytes(8).toString('hex');
   return Object.freeze({
-    email: `${label}-${suffix}@lekkadeall.invalid`,
+    email: `${runId}.${actor}.${actorSuffix}@lekkadeall.invalid`,
     password: `E2e-${randomBytes(18).toString('base64url')}!9`,
   });
 }
 
-async function respectLocalSignupRateLimit() {
-  const remaining = LOCAL_SIGNUP_COMPLETION_INTERVAL_MS - (Date.now() - lastRegistrationCompletedAt);
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+async function authStorageEntryCount(page) {
+  return page.evaluate((patternSource) => {
+    const pattern = new RegExp(patternSource, 'iu');
+    let count = 0;
+    for (let index = 0; index < localStorage.length; index += 1) {
+      if (pattern.test(localStorage.key(index) ?? '')) count += 1;
+    }
+    return count;
+  }, AUTH_STORAGE_KEY_PATTERN.source);
 }
 
 export async function registerCustomer(page, account) {
-  await respectLocalSignupRateLimit();
   await page.goto('/auth/register');
   const form = page.locator('form[data-auth-form="register"]');
   await form.locator('input[name="email"]').fill(account.email);
   await form.locator('input[name="password"]').fill(account.password);
-  await form.getByRole('button', { name: 'Create account' }).click();
-  await expect(page).toHaveURL(/\/app\/customer\/?$/u);
-  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
-  lastRegistrationCompletedAt = Date.now();
+
+  await test.step('registration-phase:signup-request', async () => {
+    const signupResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === '/auth/v1/signup'
+        && response.request().method() === 'POST';
+    });
+    await form.getByRole('button', { name: 'Create account' }).click();
+    const response = await signupResponse;
+    if (!response.ok()) throw new Error('local-auth-signup-request-failed');
+  });
+
+  await test.step('registration-phase:auth-session', async () => {
+    await expect.poll(
+      () => authStorageEntryCount(page),
+      { timeout: 30_000, message: 'local Auth session readiness failed' },
+    ).toBe(1);
+  });
+
+  await test.step('registration-phase:profile-ready', async () => {
+    await waitForProvisionedCustomerProfile(account.email);
+  });
+
+  await test.step('registration-phase:dashboard', async () => {
+    await expect(page).toHaveURL(/\/app\/customer\/?$/u);
+    await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
+  });
 }
 
 export async function signOutCustomer(page) {
@@ -121,4 +157,4 @@ export function privacyMarkers(account, ...drafts) {
   ];
 }
 
-export { LOCAL_SIGNUP_COMPLETION_INTERVAL_MS, UUID_PATTERN };
+export { AUTH_STORAGE_KEY_PATTERN, E2E_RUN_ID_PATTERN, UUID_PATTERN };

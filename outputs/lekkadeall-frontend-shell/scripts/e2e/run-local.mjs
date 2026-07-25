@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { access, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -19,6 +20,7 @@ const runtimeConfigPath = join(frontendRoot, 'runtime-config.local.js');
 const staticServerPath = join(scriptDirectory, 'static-server.mjs');
 const appUrl = 'http://127.0.0.1:4173';
 const outputDirectory = join(tmpdir(), `lekkadeall-e2e-output-${process.pid}`);
+const runId = randomBytes(8).toString('hex');
 let frontendServer;
 let supabaseStarted = false;
 let runtimeConfigCreated = false;
@@ -154,6 +156,7 @@ async function main() {
     E2E_INBUCKET_URL: local.inbucketUrl,
     E2E_ANON_KEY: local.anonKey,
     E2E_OUTPUT_DIR: outputDirectory,
+    E2E_RUN_ID: runId,
   }));
 }
 

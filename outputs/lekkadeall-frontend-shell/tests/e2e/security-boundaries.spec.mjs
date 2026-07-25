@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test';
 import {
   assertCustomerLifecyclePostconditions,
   assertDistinctSyntheticUsers,
-  assertProvisionedCustomerProfile,
   assertSyntheticProfileAbsent,
   assertSyntheticRequestOwner,
   assertSyntheticProfileState,
@@ -120,7 +119,6 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
         const emissions = attachSensitiveEmissionAudit(page, markers);
         await test.step(`guard-phase:${scenario.label}:registration`, async () => {
           await registerCustomer(page, account);
-          await assertProvisionedCustomerProfile(account.email);
           await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
         });
 

@@ -87,31 +87,52 @@ export async function findSyntheticUserId(emailValue) {
 export async function assertProvisionedCustomerProfile(emailValue) {
   const email = requireSyntheticEmail(emailValue);
   const output = await runSql(`
-    select pg_catalog.concat_ws('|',
-      u.id::text,
-      pg_catalog.count(p.id)::text,
-      pg_catalog.min(p.role::text),
-      pg_catalog.min(p.account_status),
-      pg_catalog.min(p.display_name),
-      (select pg_catalog.count(*)::text from public.provider_profiles as pp where pp.user_id = u.id)
-    )
-    from auth.users as u
-    left join public.profiles as p on p.id = u.id
-    where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
-    group by u.id
-    order by pg_catalog.max(u.created_at) desc
-    limit 1;
+    select case
+      when (
+        select pg_catalog.count(*)
+        from auth.users as u
+        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      ) = 1
+      and (
+        select pg_catalog.count(*)
+        from auth.users as u
+        join public.profiles as p on p.id = u.id
+        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+          and p.role = 'customer'::public.user_role
+          and p.account_status = 'active'
+          and p.display_name = 'New customer'
+      ) = 1
+      and not exists (
+        select 1
+        from auth.users as u
+        join public.provider_profiles as pp on pp.user_id = u.id
+        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      )
+      then 'ready'
+      else 'pending'
+    end;
   `);
-  const [userId, profileCount, role, accountStatus, displayName, providerCount] = output.split('|');
-  requireUuid(userId);
-  if (profileCount !== '1'
-      || role !== 'customer'
-      || accountStatus !== 'active'
-      || displayName !== 'New customer'
-      || providerCount !== '0') {
+  if (output !== 'ready') {
     throw new Error('ticket-9b-profile-postcondition-failed');
   }
-  return userId;
+}
+
+export async function waitForProvisionedCustomerProfile(
+  emailValue,
+  { timeoutMs = 30_000, intervalMs = 250 } = {},
+) {
+  const email = requireSyntheticEmail(emailValue);
+  const deadline = Date.now() + timeoutMs;
+  do {
+    try {
+      await assertProvisionedCustomerProfile(email);
+      return;
+    } catch (error) {
+      if (error?.message !== 'ticket-9b-profile-postcondition-failed') throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  } while (Date.now() < deadline);
+  throw new Error('ticket-9b-profile-readiness-timeout');
 }
 
 export async function assertSyntheticRequestOwner(emailValue, requestIdValue) {

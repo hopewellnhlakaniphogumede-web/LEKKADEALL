@@ -1,4 +1,4 @@
-const SAFE_FAILURE_PHASE = /^(?:guard-state:(restricted|suspended|closed|provider|missing-profile)|guard-phase:(restricted|suspended|closed|provider|missing-profile):(registration|fixture|route|postcondition|sign-out)|lifecycle-phase:(registration|reauthentication|category-dashboard|create|list-detail|update|cancel|postcondition|sign-out))$/u;
+const SAFE_FAILURE_PHASE = /^(?:registration-phase:(signup-request|auth-session|profile-ready|dashboard)|guard-state:(restricted|suspended|closed|provider|missing-profile)|guard-phase:(restricted|suspended|closed|provider|missing-profile):(registration|fixture|route|postcondition|sign-out)|lifecycle-phase:(registration|reauthentication|category-dashboard|create|list-detail|update|cancel|postcondition|sign-out))$/u;
 
 function failedSafePhase(steps = []) {
   for (const step of steps) {

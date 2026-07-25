@@ -3438,6 +3438,52 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 
+### Ticket 9A-9 E2E correction - deterministic shared registration boundary - 2026-07-25
+
+**Status:** Shared registration/setup correction implemented locally; replacement disposable-stack verification pending.
+
+#### Redacted finding and shared root cause
+
+- Both remaining scenarios failed inside their broad registration step: the complete customer lifecycle and the first restricted actor in the account-state matrix.
+- These were the two scenarios that combined the UI helper with the exact Ticket 9B database postcondition. The helper waited only for the eventual customer URL and heading, while the Ticket 9B invariant was a separate one-shot check. Signup response completion, persisted session readiness, profile readiness, and dashboard readiness were not independently synchronized or attributable.
+- Synthetic actors already had random suffixes, but they did not include an explicit workflow-run namespace. The runner already reset and stopped the disposable stack, so no stale Auth/profile collision was demonstrated; run-scoped identity now makes that invariant explicit.
+- Local Supabase has `[auth.email] enable_confirmations = false`. Registration therefore must return a session directly and requires no confirmation link, Inbucket read, Auth email artifact, or PKCE storage.
+
+#### Expected versus actual behavior
+
+- **Expected:** one unique UI signup completes against loopback Auth, persists exactly one SDK Auth session, synchronously provisions exactly one Ticket 9B `customer`/`active` profile, and reaches the customer dashboard. Only after that boundary may protected local fixture transitions run.
+- **Actual:** the former helper collapsed those conditions into a URL/heading wait followed by a one-shot external profile assertion, so a setup/readiness failure was reported only as registration and could stop before lifecycle work or the first restricted fixture.
+
+#### Fix applied
+
+- The local runner now generates an unlogged 16-hex-character run ID. Each actor email uses that run ID, a fixed actor label, and an independent random suffix.
+- Registration now has fixed allowlisted phases: `signup-request`, `auth-session`, `profile-ready`, and `dashboard`.
+- The signup phase waits for the actual loopback Auth signup response and checks only success status.
+- The session phase condition-polls only the count of the approved SDK Auth storage entry; it never reads or returns the entry value.
+- The profile phase condition-polls a fixed SQL readiness result proving exactly one matching Auth user, exactly one Ticket 9B customer/active profile with the reviewed default display name, and no provider profile. No ID, email, profile row, or database error detail is printed.
+- Restricted, suspended, closed, and provider actors still register normally before the fixture controller changes protected state. Missing-profile still registers normally before deliberate local-only removal. Every actor retains a separate browser context.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/scripts/e2e/run-local.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/journey-helpers.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/customer-draft-lifecycle.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Security and verification
+
+- All **62/62 Node frontend and static security tests pass** locally.
+- Playwright discovery still finds exactly **8** synthetic Chromium scenarios.
+- Docker and Supabase CLI remain unavailable on this host, so authoritative real-stack confirmation is pending. The reported migration-reset, pgTAP, Deno webhook, and frontend security job is green, and none of its backend inputs changed.
+- E2E remains disposable, loopback-only, one-worker, retry-free, and artifact-free. No token, password, Auth code/link, email value, request body, database credential/error/row, screenshot, video, trace, HAR, saved storage state, Auth email, or database dump is emitted or retained.
+- No application source, Auth configuration, Ticket 9B provisioning rule, RLS policy, grant, lifecycle function, route guard, frontend write boundary, or service-role exposure changed.
+- Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
 ### Ticket 9A-9 E2E correction — multi-registration Auth pacing and final isolation assertions — 2026-07-24
 
 **Status:** Final two root causes fixed locally; replacement GitHub Actions verification pending.

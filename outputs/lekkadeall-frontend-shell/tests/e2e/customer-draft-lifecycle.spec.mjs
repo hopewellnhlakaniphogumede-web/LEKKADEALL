@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test';
 import {
   ACTIVE_CATEGORY_NAME,
   assertCustomerLifecyclePostconditions,
-  assertProvisionedCustomerProfile,
 } from './support/local-fixtures.mjs';
 import {
   createDraftThroughUi,
@@ -58,10 +57,9 @@ test('customer registration through cancelled draft completes against real local
   let requestId;
 
   await test.step('lifecycle-phase:registration', async () => {
-  await registerCustomer(page, account);
-  expect(policy.getSignupCount()).toBe(1);
-  await assertProvisionedCustomerProfile(account.email);
-  await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+    await registerCustomer(page, account);
+    expect(policy.getSignupCount()).toBe(1);
+    await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
   });
 
   await test.step('lifecycle-phase:reauthentication', async () => {

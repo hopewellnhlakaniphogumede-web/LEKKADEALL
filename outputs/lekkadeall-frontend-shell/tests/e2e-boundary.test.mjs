@@ -8,7 +8,6 @@ import {
   assertLoopbackUrl,
   parseSupabaseStatusEnv,
 } from './e2e/support/local-environment.mjs';
-import { LOCAL_SIGNUP_COMPLETION_INTERVAL_MS } from './e2e/support/journey-helpers.mjs';
 import { ALLOWED_MARKETPLACE_RPCS } from './e2e/support/network-policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,19 +69,32 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /guard-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /registration-phase:\(signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
-test('local Auth signup pacing is measured after completed registration', async () => {
+test('local Auth registration uses run-scoped identity and explicit readiness conditions', async () => {
   const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
-  assert.equal(LOCAL_SIGNUP_COMPLETION_INTERVAL_MS, 1_500);
-  assert.match(helperSource, /lastRegistrationCompletedAt = Date\.now\(\);/);
-  assert.equal(
-    helperSource.indexOf('lastRegistrationCompletedAt = Date.now();')
-      > helperSource.indexOf("name: 'Your safe account view.'"),
-    true,
+  const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const authConfig = await readFile(
+    join(repositoryRoot, 'outputs/marketplace-production-foundation/supabase/config.toml'),
+    'utf8',
   );
-  assert.doesNotMatch(helperSource, /lastRegistrationAt/);
+  assert.match(runnerSource, /const runId = randomBytes\(8\)\.toString\('hex'\)/);
+  assert.match(runnerSource, /E2E_RUN_ID:\s*runId/);
+  assert.match(runnerSource, /\['db', 'reset'\]/);
+  assert.match(runnerSource, /\['stop', '--no-backup'\]/);
+  assert.match(runnerSource, /e2e-refuses-preexisting-supabase-stack/);
+  assert.match(helperSource, /process\.env\.E2E_RUN_ID/);
+  assert.match(helperSource, /registration-phase:signup-request/);
+  assert.match(helperSource, /registration-phase:auth-session/);
+  assert.match(helperSource, /registration-phase:profile-ready/);
+  assert.match(helperSource, /registration-phase:dashboard/);
+  assert.match(helperSource, /waitForResponse/);
+  assert.match(helperSource, /expect\.poll/);
+  assert.match(helperSource, /waitForProvisionedCustomerProfile/);
+  assert.doesNotMatch(helperSource, /lastRegistration(?:At|CompletedAt)|respectLocalSignupRateLimit/);
+  assert.match(authConfig, /\[auth\.email\][\s\S]*enable_confirmations\s*=\s*false/u);
 });
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
@@ -107,6 +119,7 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /synthetic profile post-route mismatch/);
   assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
   assert.match(fixtureSource, /synthetic missing-profile post-route mismatch/);
+  assert.match(fixtureSource, /ticket-9b-profile-readiness-timeout/);
   assert.match(fixtureSource, /synthetic request ownership invariant failed/);
   assert.match(fixtureSource, /synthetic Auth users are not distinct/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);
