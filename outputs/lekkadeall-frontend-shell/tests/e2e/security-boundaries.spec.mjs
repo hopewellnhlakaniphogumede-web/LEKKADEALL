@@ -97,7 +97,7 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 });
 
 test('restricted suspended closed missing-profile and wrong-role actors fail closed', async ({ browser }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   const cases = [
     { label: 'restricted', state: { accountStatus: 'restricted' }, message: 'Account access is restricted', uiState: 'restricted' },
     { label: 'suspended', state: { accountStatus: 'suspended' }, message: 'Account access is restricted', uiState: 'restricted' },

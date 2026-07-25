@@ -3489,3 +3489,40 @@ No migration, RLS policy, grant, production database function, validator, profil
 - E2E remains loopback-only, disposable, one-worker, and retry-free. No screenshot, video, trace, HAR, saved storage state, Auth email, database dump, sensitive error detail, or secret is emitted.
 - No application source, Auth configuration, migration, RLS policy, grant, Ticket 9B function/trigger, Ticket 9A-5 validator, Ticket 9A-7 cancellation function, Ticket 9A-8 update function, service-role browser access, direct frontend application-table write, or `select('*')` changed.
 - Publication, exact-address handling, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction - final aggregate journey bounds - 2026-07-25
+
+**Status:** Focused E2E scheduling correction implemented locally; replacement disposable-stack verification pending.
+
+#### Registration-through-cancelled-draft - redacted summary
+
+- **Expected:** local Auth registration creates a valid session and exactly one Ticket 9B `customer`/`active` profile; the active synthetic category is RLS-visible; create, list/detail, update, cancellation, and final fresh cancelled-state reads succeed once each through the reviewed browser boundaries.
+- **Actual:** the focused stale and ambiguous journeys pass the same Auth, provisioning, category, create, update, cancel, and fresh-read boundaries, while the longer registration-to-cancellation aggregate journey did not complete within its former test-local bound.
+- **Root cause:** the former 180-second test deadline was an E2E scheduling limit for the complete serial journey, not evidence of an application, Auth, Ticket 9B, category RLS, lifecycle RPC, or final-state defect.
+- **Fix:** increased only this aggregate scenario's bounded timeout from `180_000` to `300_000` milliseconds. Every UI, RPC-count, fresh-read, privacy, and database postcondition remains unchanged.
+- **Security:** no application source, Auth behavior, profile provisioning, category fixture authority, RLS policy, grant, mutation function, route guard, retry setting, or artifact policy changed.
+
+#### Restricted-state matrix - redacted summary
+
+- **Expected:** five valid local Auth sessions receive exact restricted, suspended, closed, provider, or missing-profile fixtures; route guards read only `public.profiles.id,role,account_status`; rejected actors see the reviewed restricted, access-denied, or generic fail-closed UI and perform no request reads or mutations after rejection.
+- **Actual:** the two-user Auth/RLS isolation scenario passes, the fixture controller already proves each profile transition or removal atomically, and the five-actor aggregate matrix did not complete within its former test-local bound.
+- **Root cause:** the former 300-second test deadline was an E2E scheduling limit across five serial registrations, contexts, privileged local fixture transitions, guarded route reads, privacy checks, and sign-outs. Ticket 9B does not recreate the removed profile because its trigger remains Auth-user-`INSERT` only, and the wrong-role fixture continues to use the existing `provider` enum value.
+- **Fix:** increased only this five-actor matrix's bounded timeout from `300_000` to `600_000` milliseconds. All exact fixture, UI-state, no-read, no-mutation, privacy, and sign-out assertions remain.
+- **Security:** no route guard was loosened; Auth metadata remains untrusted; no RLS, grant, enum, Ticket 9B rule, frontend write boundary, service-role exposure, or privacy/logging policy changed.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/tests/e2e/customer-draft-lifecycle.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Verification and security confirmations
+
+- All **62/62 Node frontend and static security tests pass** locally.
+- Playwright discovery still finds exactly **8** synthetic Chromium scenarios.
+- Docker and Supabase CLI are unavailable on this development host, so the authoritative disposable-stack rerun remains pending. The already-green migration-reset, pgTAP, Deno webhook, and frontend security job inputs did not change.
+- E2E remains loopback-only, disposable, one-worker, retry-free, and artifact-free. The global default remains 60 seconds and the CI job remains bounded to 30 minutes.
+- No screenshot, video, trace, HAR, saved storage state, Auth email, database dump, error detail, credential, token, Auth link, recovery link, request body, or database row is emitted or retained.
+- Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.

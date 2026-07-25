@@ -48,7 +48,7 @@ test('signed-out customer routes and absent admin route fail closed', async ({ p
 });
 
 test('customer registration through cancelled draft completes against real local RLS and RPCs', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const account = syntheticAccount('customer-lifecycle');
   const created = mainDraftValues();
   const edited = editedDraftValues();

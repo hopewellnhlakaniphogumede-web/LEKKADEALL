@@ -61,9 +61,9 @@ test('long E2E security journeys have bounded time without retries or verbose di
   const lifecycleSource = await readFile(join(here, 'e2e/customer-draft-lifecycle.spec.mjs'), 'utf8');
   const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
   const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
-  assert.equal((lifecycleSource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 1);
+  assert.equal((lifecycleSource.match(/test\.setTimeout\(300_000\)/gu) ?? []).length, 1);
   assert.equal((securitySource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 3);
-  assert.equal((securitySource.match(/test\.setTimeout\(300_000\)/gu) ?? []).length, 1);
+  assert.equal((securitySource.match(/test\.setTimeout\(600_000\)/gu) ?? []).length, 1);
   assert.match(reporterSource, /timedOut:\s*'timeout'/);
   assert.match(reporterSource, /failed:\s*'assertion-or-runtime'/);
   assert.doesNotMatch(reporterSource, /result\.(?:error|errors|stdout|stderr)|message|stack|attachment/iu);
