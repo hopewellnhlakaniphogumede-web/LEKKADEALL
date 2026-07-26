@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { privacyMarkers, registerCustomer, signOutCustomer, syntheticAccount } from './support/journey-helpers.mjs';
+import { prepareSyntheticCustomerAccount } from './support/local-fixtures.mjs';
+import {
+  privacyMarkers,
+  signInCustomer,
+  signOutCustomer,
+  syntheticAccount,
+} from './support/journey-helpers.mjs';
 import { attachNetworkPolicy } from './support/network-policy.mjs';
 import { assertBrowserPrivacy, attachSensitiveEmissionAudit } from './support/privacy-audit.mjs';
 
@@ -16,7 +22,8 @@ test('blocked marketplace and privileged controls remain absent from the custome
   const markers = privacyMarkers(account);
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
-  await registerCustomer(page, account);
+  await prepareSyntheticCustomerAccount(account.email, account.password);
+  await signInCustomer(page, account);
 
   await page.goto('/app/customer/requests/new/');
   await expect(page.locator('form[data-draft-request-form]')).toBeVisible();

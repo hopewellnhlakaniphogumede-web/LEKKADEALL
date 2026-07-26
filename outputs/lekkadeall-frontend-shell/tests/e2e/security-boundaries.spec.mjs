@@ -5,6 +5,7 @@ import {
   assertSyntheticProfileAbsent,
   assertSyntheticRequestOwner,
   assertSyntheticProfileState,
+  prepareSyntheticCustomerAccount,
   removeSyntheticProfile,
   setSyntheticProfileState,
 } from './support/local-fixtures.mjs';
@@ -16,6 +17,7 @@ import {
   openDraftDetail,
   privacyMarkers,
   registerCustomer,
+  signInCustomer,
   signOutCustomer,
   syntheticAccount,
 } from './support/journey-helpers.mjs';
@@ -49,7 +51,8 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
     const emissionsA = attachSensitiveEmissionAudit(pageA, privacyMarkers(customerA, bDraft));
     const emissionsB = attachSensitiveEmissionAudit(pageB, privacyMarkers(customerB, bDraft));
 
-    await registerCustomer(pageA, customerA);
+    await prepareSyntheticCustomerAccount(customerA.email, customerA.password);
+    await signInCustomer(pageA, customerA);
     await registerCustomer(pageB, customerB);
     await assertDistinctSyntheticUsers(customerA.email, customerB.email);
     const requestIdB = await createDraftThroughUi(pageB, bDraft);
@@ -118,7 +121,8 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
         const markers = privacyMarkers(account);
         const emissions = attachSensitiveEmissionAudit(page, markers);
         await test.step(`guard-phase:${scenario.label}:registration`, async () => {
-          await registerCustomer(page, account);
+          await prepareSyntheticCustomerAccount(account.email, account.password);
+          await signInCustomer(page, account);
           await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
         });
 
@@ -175,7 +179,8 @@ test('a stale edit is rejected after another tab cancels the draft', async ({ co
   const markers = privacyMarkers(account, created, edited);
   const policyEdit = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissionsEdit = attachSensitiveEmissionAudit(page, markers);
-  await registerCustomer(page, account);
+  await prepareSyntheticCustomerAccount(account.email, account.password);
+  await signInCustomer(page, account);
   const requestId = await createDraftThroughUi(page, created);
   await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
   await expect(page.locator('form[data-draft-edit-form]')).toBeVisible();
@@ -210,7 +215,8 @@ test('an executed update with an aborted response is not retried and requires a 
   const markers = privacyMarkers(account, created, edited);
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
-  await registerCustomer(page, account);
+  await prepareSyntheticCustomerAccount(account.email, account.password);
+  await signInCustomer(page, account);
   const requestId = await createDraftThroughUi(page, created);
   await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
   const editForm = await fillDraftForm(page, edited);

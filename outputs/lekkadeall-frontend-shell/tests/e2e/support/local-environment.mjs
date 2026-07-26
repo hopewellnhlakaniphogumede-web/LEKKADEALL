@@ -48,6 +48,33 @@ export function parseSupabaseStatusEnv(output) {
   return Object.freeze({ apiUrl, inbucketUrl, anonKey });
 }
 
+function jwtRole(value) {
+  try {
+    const payload = String(value ?? '').split('.')[1];
+    return payload
+      ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).role ?? null
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseLocalFixtureAdminEnv(output) {
+  const approved = new Map();
+  for (const line of String(output ?? '').split(/\r?\n/u)) {
+    const match = /^([A-Z0-9_]+)=(?:"([^"]*)"|'([^']*)'|(.*))$/u.exec(line.trim());
+    if (!match || !['API_URL', 'SERVICE_ROLE_KEY'].includes(match[1])) continue;
+    approved.set(match[1], match[2] ?? match[3] ?? match[4] ?? '');
+  }
+  const apiUrl = approved.get('API_URL');
+  const adminKey = approved.get('SERVICE_ROLE_KEY');
+  assertLoopbackUrl(apiUrl, 'fixture-auth');
+  if (!adminKey || adminKey.length < 40 || jwtRole(adminKey) !== 'service_role') {
+    throw new Error('local-fixture-admin-key-unavailable');
+  }
+  return Object.freeze({ apiUrl, adminKey });
+}
+
 function commandName(name) {
   return process.platform === 'win32' && ['npm', 'npx', 'pnpm'].includes(name)
     ? `${name}.cmd`

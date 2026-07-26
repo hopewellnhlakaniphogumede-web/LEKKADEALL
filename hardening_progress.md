@@ -3438,6 +3438,53 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 
+### Ticket 9A-9 E2E correction - remove signup pressure from setup-only scenarios - 2026-07-26
+
+**Status:** Focused local-only fixture correction implemented; replacement disposable-stack verification pending.
+
+#### Shared redacted finding
+
+- The main registration-to-cancelled lifecycle now passes.
+- Only the account-state matrix and ambiguous aborted-response scenario failed, both at `registration-phase:signup-request`, before session, profile, dashboard, guarded-state, or mutation assertions.
+- These later tests were using public UI signup only to prepare actors. Registration is not the behavior they prove, and repeated synthetic signups introduced a shared local Auth request/email-rate boundary after earlier registration journeys.
+- The preceding reporter did not retain the HTTP status category. The helper now classifies future UI signup failures by status only: `signup-http-429`, `signup-http-conflict`, `signup-http-other`, `signup-session-missing`, `profile-readiness-timeout`, or `signup-network-failure`.
+
+#### Account-state matrix
+
+- **Expected:** every actor has a real authenticated browser session and exact Ticket 9B customer/active profile before the local controller applies restricted, suspended, closed, provider, or missing-profile state; the frontend then fails closed before customer request reads or mutations.
+- **Actual category:** `registration-phase:signup-request`; the first restricted actor stopped before any protected fixture transition or guard assertion.
+- **Root cause:** unnecessary repeated public signup in a setup-only matrix exposed the disposable local Auth signup-rate boundary. The guarded behavior itself was not reached.
+- **Fix:** create each synthetic Auth customer through the loopback Auth admin endpoint in the Node fixture controller, wait for the unchanged Ticket 9B postcondition, sign in through the browser anon client, and only then apply the protected state or deliberate profile removal. Each actor retains its own browser context.
+
+#### Ambiguous aborted-response scenario
+
+- **Expected:** an isolated active customer with a real browser session creates a draft through the trusted RPC, executes one intercepted update whose server response is aborted, does not retry, performs a fresh read, and cancels through the trusted RPC.
+- **Actual category:** `registration-phase:signup-request`; the test stopped before draft creation or response-abort behavior.
+- **Root cause:** this scenario unnecessarily consumed another UI signup even though signup is not its subject.
+- **Fix:** prepare one confirmed synthetic customer through the local fixture controller, wait for Ticket 9B, sign in through the anon browser client, and retain the existing real create/update/read/cancel browser and RPC sequence unchanged.
+
+#### Files changed
+
+- `outputs/lekkadeall-frontend-shell/scripts/e2e/run-local.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-environment.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/journey-helpers.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Why this preserves the real security boundary
+
+- Exactly two UI signup proofs remain: the complete main lifecycle and cross-customer B. Blocked-controls, cross-customer A, stale-state, account-state, and ambiguous-response actors use fixture creation only for setup, then authenticate through the real browser anon client.
+- The browser still receives only the local public URL and anon key. The fixture admin credential exists only in the disposable Node test process, is accepted only with a loopback Auth URL and a `service_role` JWT claim, and is never written to runtime configuration, page code, artifacts, or logs.
+- The fixture creates an Auth user, not a browser-created application profile. The unchanged Ticket 9B Auth-user trigger remains solely responsible for the exact customer/active profile.
+- Every tested actor signs in through Supabase Auth and exercises the real frontend safe read, route guard, RLS, and trusted RPC paths. No RLS or guard is bypassed by the browser.
+- E2E remains local-only, disposable, one-worker, no-retry, and artifact-free. No response body, synthetic email, password, token, Auth code/link, complete URL, header, database credential/error/row, screenshot, video, trace, HAR, saved storage state, Auth email, or database dump is emitted.
+- All **64/64 Node frontend and static security tests pass** locally, and Playwright still discovers exactly **8** Chromium scenarios. The reported migration-reset, pgTAP, Deno webhook, and frontend security job remains green; no backend input changed.
+- Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
 ### Ticket 9A-9 E2E correction - deterministic shared registration boundary - 2026-07-25
 
 **Status:** Shared registration/setup correction implemented locally; replacement disposable-stack verification pending.

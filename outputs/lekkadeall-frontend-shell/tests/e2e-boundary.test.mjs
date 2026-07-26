@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   assertLocalDockerConfiguration,
   assertLoopbackUrl,
+  parseLocalFixtureAdminEnv,
   parseSupabaseStatusEnv,
 } from './e2e/support/local-environment.mjs';
 import { ALLOWED_MARKETPLACE_RPCS } from './e2e/support/network-policy.mjs';
@@ -44,6 +45,30 @@ test('Supabase status parser retains only local public values', () => {
   assert.equal(Object.values(result).some((value) => String(value).includes('b'.repeat(40))), false);
 });
 
+test('local fixture admin parser accepts only a loopback service-role boundary', () => {
+  const serviceKey = [
+    Buffer.from('{}').toString('base64url'),
+    Buffer.from('{"role":"service_role"}').toString('base64url'),
+    's'.repeat(48),
+  ].join('.');
+  const result = parseLocalFixtureAdminEnv([
+    'API_URL="http://127.0.0.1:54321"',
+    `SERVICE_ROLE_KEY="${serviceKey}"`,
+    `ANON_KEY="${'a'.repeat(80)}"`,
+    'DB_URL="postgresql://postgres:password@127.0.0.1:54322/postgres"',
+  ].join('\n'));
+  assert.deepEqual(Object.keys(result).sort(), ['adminKey', 'apiUrl']);
+  assert.equal(result.adminKey, serviceKey);
+  assert.throws(() => parseLocalFixtureAdminEnv([
+    'API_URL="https://project.supabase.co"',
+    `SERVICE_ROLE_KEY="${serviceKey}"`,
+  ].join('\n')));
+  assert.throws(() => parseLocalFixtureAdminEnv([
+    'API_URL="http://127.0.0.1:54321"',
+    `SERVICE_ROLE_KEY="${'a'.repeat(80)}"`,
+  ].join('\n')));
+});
+
 test('Playwright is Chromium-only, serial, retry-free, and artifact-free', async () => {
   const source = await readFile(join(frontendRoot, 'playwright.config.mjs'), 'utf8');
   assert.match(source, /workers:\s*1/);
@@ -70,6 +95,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /guard-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(signup-request\|auth-session\|profile-ready\|dashboard\)/);
+  assert.match(reporterSource, /registration-failure:\(signup-http-429\|signup-http-conflict\|signup-http-other\|signup-session-missing\|profile-readiness-timeout\|signup-network-failure\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -120,9 +146,33 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
   assert.match(fixtureSource, /synthetic missing-profile post-route mismatch/);
   assert.match(fixtureSource, /ticket-9b-profile-readiness-timeout/);
+  assert.match(fixtureSource, /\/auth\/v1\/admin\/users/);
+  assert.match(fixtureSource, /E2E_LOCAL_FIXTURE_ADMIN_KEY/);
+  assert.match(fixtureSource, /waitForProvisionedCustomerProfile\(email\)/);
   assert.match(fixtureSource, /synthetic request ownership invariant failed/);
   assert.match(fixtureSource, /synthetic Auth users are not distinct/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);
+});
+
+test('only lifecycle and cross-customer B use UI signup; setup-only actors use fixture sign-in', async () => {
+  const blockedSource = await readFile(join(here, 'e2e/blocked-features.spec.mjs'), 'utf8');
+  const lifecycleSource = await readFile(join(here, 'e2e/customer-draft-lifecycle.spec.mjs'), 'utf8');
+  const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
+  assert.equal((
+    `${blockedSource}\n${lifecycleSource}\n${securitySource}`.match(/registerCustomer\(/gu) ?? []
+  ).length, 2);
+  assert.match(
+    securitySource,
+    /prepareSyntheticCustomerAccount\(customerA\.email, customerA\.password\)[\s\S]*signInCustomer\(pageA, customerA\)[\s\S]*registerCustomer\(pageB, customerB\)/u,
+  );
+  assert.match(
+    securitySource,
+    /guard-phase:\$\{scenario\.label\}:registration[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)/u,
+  );
+  assert.match(
+    securitySource,
+    /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,
+  );
 });
 
 test('CI E2E job is isolated behind the complete database security job', async () => {

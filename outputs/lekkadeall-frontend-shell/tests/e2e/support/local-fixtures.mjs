@@ -1,4 +1,8 @@
-import { assertLocalDockerConfiguration, runCaptured } from './local-environment.mjs';
+import {
+  assertLocalDockerConfiguration,
+  assertLoopbackUrl,
+  runCaptured,
+} from './local-environment.mjs';
 
 export const ACTIVE_CATEGORY_ID = '90000000-0000-4000-8000-000000000001';
 export const INACTIVE_CATEGORY_ID = '90000000-0000-4000-8000-000000000002';
@@ -6,6 +10,7 @@ export const ACTIVE_CATEGORY_NAME = 'Synthetic home maintenance';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SYNTHETIC_EMAIL_PATTERN = /^[a-z0-9][a-z0-9+._-]{0,100}@lekkadeall\.invalid$/iu;
+const SYNTHETIC_PASSWORD_PATTERN = /^E2e-[A-Za-z0-9_-]{24}!9$/u;
 const DB_CONTAINER_NAME = 'supabase_db_lekkadeall-local';
 const ROLES = new Set(['customer', 'provider']);
 const ACCOUNT_STATUSES = new Set(['active', 'restricted', 'suspended', 'closed']);
@@ -30,6 +35,14 @@ function requireSyntheticEmail(value) {
   const email = String(value ?? '').toLowerCase();
   if (!SYNTHETIC_EMAIL_PATTERN.test(email)) throw new Error('fixture-email-must-be-synthetic');
   return email;
+}
+
+function requireSyntheticPassword(value) {
+  const password = String(value ?? '');
+  if (!SYNTHETIC_PASSWORD_PATTERN.test(password)) {
+    throw new Error('fixture-password-must-be-synthetic');
+  }
+  return password;
 }
 
 function sqlLiteral(value) {
@@ -133,6 +146,35 @@ export async function waitForProvisionedCustomerProfile(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   } while (Date.now() < deadline);
   throw new Error('ticket-9b-profile-readiness-timeout');
+}
+
+export async function prepareSyntheticCustomerAccount(emailValue, passwordValue) {
+  const email = requireSyntheticEmail(emailValue);
+  const password = requireSyntheticPassword(passwordValue);
+  const apiUrl = assertLoopbackUrl(process.env.E2E_SUPABASE_URL, 'fixture-auth');
+  const adminKey = String(process.env.E2E_LOCAL_FIXTURE_ADMIN_KEY ?? '');
+  if (adminKey.length < 40) throw new Error('local-fixture-admin-key-unavailable');
+  const response = await fetch(new URL('/auth/v1/admin/users', apiUrl), {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      apikey: adminKey,
+      authorization: `Bearer ${adminKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: {},
+      user_metadata: {},
+    }),
+  });
+  const status = response.status;
+  await response.body?.cancel();
+  if ([409, 422].includes(status)) throw new Error('synthetic Auth user collision');
+  if (status < 200 || status >= 300) throw new Error('synthetic Auth fixture creation failed');
+  await waitForProvisionedCustomerProfile(email);
 }
 
 export async function assertSyntheticRequestOwner(emailValue, requestIdValue) {

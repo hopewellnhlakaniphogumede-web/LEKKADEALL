@@ -33,6 +33,12 @@ async function authStorageEntryCount(page) {
   }, AUTH_STORAGE_KEY_PATTERN.source);
 }
 
+async function failRegistration(category) {
+  await test.step(`registration-failure:${category}`, async () => {
+    throw new Error('privacy-safe-registration-failure');
+  });
+}
+
 export async function registerCustomer(page, account) {
   await page.goto('/auth/register');
   const form = page.locator('form[data-auth-form="register"]');
@@ -40,25 +46,45 @@ export async function registerCustomer(page, account) {
   await form.locator('input[name="password"]').fill(account.password);
 
   await test.step('registration-phase:signup-request', async () => {
-    const signupResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === '/auth/v1/signup'
-        && response.request().method() === 'POST';
-    });
-    await form.getByRole('button', { name: 'Create account' }).click();
-    const response = await signupResponse;
-    if (!response.ok()) throw new Error('local-auth-signup-request-failed');
+    let response;
+    try {
+      const signupResponse = page.waitForResponse((candidate) => {
+        const url = new URL(candidate.url());
+        return url.pathname === '/auth/v1/signup'
+          && candidate.request().method() === 'POST';
+      });
+      await form.getByRole('button', { name: 'Create account' }).click();
+      response = await signupResponse;
+    } catch {
+      await failRegistration('signup-network-failure');
+      return;
+    }
+    if (response.status() === 429) {
+      await failRegistration('signup-http-429');
+    } else if ([409, 422].includes(response.status())) {
+      await failRegistration('signup-http-conflict');
+    } else if (!response.ok()) {
+      await failRegistration('signup-http-other');
+    }
   });
 
   await test.step('registration-phase:auth-session', async () => {
-    await expect.poll(
-      () => authStorageEntryCount(page),
-      { timeout: 30_000, message: 'local Auth session readiness failed' },
-    ).toBe(1);
+    try {
+      await expect.poll(
+        () => authStorageEntryCount(page),
+        { timeout: 30_000, message: 'local Auth session readiness failed' },
+      ).toBe(1);
+    } catch {
+      await failRegistration('signup-session-missing');
+    }
   });
 
   await test.step('registration-phase:profile-ready', async () => {
-    await waitForProvisionedCustomerProfile(account.email);
+    try {
+      await waitForProvisionedCustomerProfile(account.email);
+    } catch {
+      await failRegistration('profile-readiness-timeout');
+    }
   });
 
   await test.step('registration-phase:dashboard', async () => {

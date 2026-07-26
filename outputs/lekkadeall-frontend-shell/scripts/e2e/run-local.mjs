@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   assertLocalDockerConfiguration,
   assertLoopbackUrl,
+  parseLocalFixtureAdminEnv,
   parseSupabaseStatusEnv,
   runCaptured,
   waitForLoopbackHttp,
@@ -133,6 +134,7 @@ async function main() {
     env: safeChildEnvironment(),
   });
   const local = parseSupabaseStatusEnv(statusResult.stdout);
+  const localFixtureAdmin = parseLocalFixtureAdminEnv(statusResult.stdout);
   statusResult.stdout = '';
   statusResult.stderr = '';
 
@@ -155,6 +157,7 @@ async function main() {
     E2E_SUPABASE_URL: local.apiUrl,
     E2E_INBUCKET_URL: local.inbucketUrl,
     E2E_ANON_KEY: local.anonKey,
+    E2E_LOCAL_FIXTURE_ADMIN_KEY: localFixtureAdmin.adminKey,
     E2E_OUTPUT_DIR: outputDirectory,
     E2E_RUN_ID: runId,
   }));
