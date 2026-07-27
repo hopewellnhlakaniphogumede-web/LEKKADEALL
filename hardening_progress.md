@@ -3438,6 +3438,36 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 
+### Ticket 9A-9 CI correction - restore the nested Supabase project path - 2026-07-27
+
+**Status:** Workflow-root correction implemented; replacement GitHub Actions verification pending.
+
+#### Root cause and observed behavior
+
+- The committed local Supabase project remains at `outputs/marketplace-production-foundation/supabase/config.toml`. No root-level `supabase/config.toml` exists or is required.
+- The failed Actions revision executed `test -f supabase/config.toml` from the repository checkout root instead of the nested Supabase project directory. The command therefore returned exit code 1 before `supabase start`, the migration reset, pgTAP, or Ticket 9A-9 E2E could run.
+- This was a workflow path/root failure. It was not a missing migration, invalid local security setting, remote-project fallback, Supabase startup failure, pgTAP failure, or E2E failure.
+
+#### Fix
+
+- Kept the config verification step and made its path independent of inherited working-directory state: it now runs from the repository root and checks the complete repository-relative path `outputs/marketplace-production-foundation/supabase/config.toml`.
+- The credential/remote-target rejection scan checks that same exact committed file. It removes only blank and TOML comment lines before applying the unchanged deny-pattern, so explanatory comments cannot create false positives while every active setting remains checked.
+- Retained the `database-tests` job default `working-directory: outputs/marketplace-production-foundation`. Consequently `supabase start`, `supabase db reset`, every `supabase test db supabase/tests/database/*.test.sql` command, and `supabase stop --no-backup` still execute against the one intended nested local project.
+- Retained `needs: database-tests` on the Ticket 9A-9 E2E job, so browser E2E cannot start until the complete webhook/frontend/migration/pgTAP job succeeds.
+- Added a static workflow regression check proving the nested config exists, the root-level duplicate does not exist, the complete verification path is used, the database job retains its nested default, startup/reset remain ordered, and E2E retains the database-job dependency.
+
+#### Files changed
+
+- `.github/workflows/database-tests.yml`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `hardening_progress.md`
+
+#### Security
+
+- No Supabase config value, migration, RLS policy, grant, trusted function, validator, Ticket 9B trigger, or Ticket 9A lifecycle function changed.
+- No credential, service-role browser authority, remote Supabase target, root-level project, or duplicate config was added.
+- Publication, exact-address handling, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
 ### Ticket 9A-9 E2E correction - provider Auth quota and wrong-role fixture isolation - 2026-07-27
 
 **Status:** Focused provider setup correction implemented; replacement disposable-stack verification pending.

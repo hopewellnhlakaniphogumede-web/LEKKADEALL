@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -194,6 +194,31 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
 
 test('CI E2E job is isolated behind the complete database security job', async () => {
   const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
+  assert.match(
+    workflow,
+    /database-tests:[\s\S]*defaults:[\s\S]*run:[\s\S]*working-directory:\s*outputs\/marketplace-production-foundation/u,
+  );
+  assert.match(
+    workflow,
+    /Verify committed local Supabase config[\s\S]*working-directory:\s*\.[\s\S]*test -f outputs\/marketplace-production-foundation\/supabase\/config\.toml/u,
+  );
+  assert.equal(
+    workflow.includes("grep -Ev '^[[:space:]]*(#|$)' outputs/marketplace-production-foundation/supabase/config.toml"),
+    true,
+  );
+  assert.match(
+    workflow,
+    /grep -Eiq '\(database_password\|db_password\|service_role\|jwt_secret\|secret\|payment\|identity\|api_key\|access_token\|supabase\\\\\.co\|project_ref\|db_url\|production\|prod_\)'/u,
+  );
+  assert.match(
+    workflow,
+    /Start Supabase local stack[\s\S]*run:\s*supabase start[\s\S]*Apply migrations with database reset[\s\S]*run:\s*supabase db reset[\s\S]*Run role escalation pgTAP tests/u,
+  );
+  await access(join(
+    repositoryRoot,
+    'outputs/marketplace-production-foundation/supabase/config.toml',
+  ));
+  await assert.rejects(access(join(repositoryRoot, 'supabase/config.toml')));
   assert.match(workflow, /customer-draft-lifecycle-e2e:/);
   assert.match(workflow, /needs:\s*database-tests/);
   assert.match(workflow, /pnpm run test:e2e:local/);
