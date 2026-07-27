@@ -61,6 +61,11 @@ enable_anonymous_sign_ins = false
 minimum_password_length = 8
 password_requirements = ""
 
+# Disposable loopback E2E runs exercise multiple isolated Auth sessions serially.
+# This local-only quota is not production configuration.
+[auth.rate_limit]
+sign_in_sign_ups = 120
+
 [auth.email]
 enable_signup = true
 double_confirm_changes = true

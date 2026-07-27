@@ -148,32 +148,43 @@ export async function waitForProvisionedCustomerProfile(
   throw new Error('ticket-9b-profile-readiness-timeout');
 }
 
-export async function prepareSyntheticCustomerAccount(emailValue, passwordValue) {
+export async function createSyntheticLocalAuthUser(emailValue, passwordValue) {
   const email = requireSyntheticEmail(emailValue);
   const password = requireSyntheticPassword(passwordValue);
   const apiUrl = assertLoopbackUrl(process.env.E2E_SUPABASE_URL, 'fixture-auth');
   const adminKey = String(process.env.E2E_LOCAL_FIXTURE_ADMIN_KEY ?? '');
   if (adminKey.length < 40) throw new Error('local-fixture-admin-key-unavailable');
-  const response = await fetch(new URL('/auth/v1/admin/users', apiUrl), {
-    method: 'POST',
-    redirect: 'manual',
-    headers: {
-      apikey: adminKey,
-      authorization: `Bearer ${adminKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      email,
-      password,
-      email_confirm: true,
-      app_metadata: {},
-      user_metadata: {},
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(new URL('/auth/v1/admin/users', apiUrl), {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        apikey: adminKey,
+        authorization: `Bearer ${adminKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        email_confirm: true,
+        app_metadata: {},
+        user_metadata: {},
+      }),
+    });
+  } catch {
+    throw new Error('synthetic-auth-fixture-network-failure');
+  }
   const status = response.status;
   await response.body?.cancel();
-  if ([409, 422].includes(status)) throw new Error('synthetic Auth user collision');
-  if (status < 200 || status >= 300) throw new Error('synthetic Auth fixture creation failed');
+  if (status === 429) throw new Error('synthetic-auth-fixture-http-429');
+  if ([409, 422].includes(status)) throw new Error('synthetic-auth-fixture-http-conflict');
+  if (status < 200 || status >= 300) throw new Error('synthetic-auth-fixture-http-failure');
+}
+
+export async function prepareSyntheticCustomerAccount(emailValue, passwordValue) {
+  const email = requireSyntheticEmail(emailValue);
+  await createSyntheticLocalAuthUser(email, passwordValue);
   await waitForProvisionedCustomerProfile(email);
 }
 
@@ -308,6 +319,57 @@ export async function assertSyntheticProfileState(
              and p.account_status = ${sqlLiteral(accountStatus)}
          ) then
         raise exception 'synthetic profile post-route mismatch';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
+export async function assertSyntheticProviderFixtureIsIsolated(emailValue) {
+  const email = requireSyntheticEmail(emailValue);
+  await runSql(`
+    do $e2e$
+    declare
+      v_user_id uuid;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)};
+      if v_user_id is null
+         or (
+           select pg_catalog.count(*)
+           from auth.users as u
+           where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+         ) <> 1
+         or (
+           select pg_catalog.count(*)
+           from public.profiles as p
+           where p.id = v_user_id
+             and p.role = 'provider'::public.user_role
+             and p.account_status = 'active'
+         ) <> 1
+         or exists (select 1 from public.provider_profiles as pp where pp.user_id = v_user_id)
+         or exists (select 1 from public.provider_services as ps where ps.provider_id = v_user_id)
+         or exists (select 1 from public.service_requests as sr where sr.customer_id = v_user_id)
+         or exists (select 1 from private.service_request_addresses as sra where sra.customer_id = v_user_id)
+         or exists (select 1 from public.bids as b where b.provider_id = v_user_id)
+         or exists (
+           select 1
+           from public.bookings as b
+           where v_user_id in (b.customer_id, b.provider_id)
+         )
+         or exists (
+           select 1
+           from public.payments as p
+           join public.bookings as b on b.id = p.booking_id
+           where v_user_id in (b.customer_id, b.provider_id)
+         )
+         or exists (
+           select 1
+           from public.identity_verifications as iv
+           where iv.user_id = v_user_id
+         ) then
+        raise exception 'synthetic provider fixture isolation failed';
       end if;
     end;
     $e2e$;

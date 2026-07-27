@@ -96,6 +96,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(reporterSource, /registration-failure:\(signup-http-429\|signup-http-conflict\|signup-http-other\|signup-session-missing\|profile-readiness-timeout\|signup-network-failure\)/);
+  assert.match(reporterSource, /provider-failure:\(provider-signup-http-failure\|provider-session-missing\|provider-profile-readiness-timeout\|provider-role-fixture-failure\|provider-guard-state-mismatch\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -119,8 +120,13 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(helperSource, /waitForResponse/);
   assert.match(helperSource, /expect\.poll/);
   assert.match(helperSource, /waitForProvisionedCustomerProfile/);
+  assert.match(helperSource, /grant_type'\)\s*===\s*'password'/);
+  assert.match(helperSource, /response\.status\(\)\s*===\s*429/);
+  assert.match(helperSource, /authStorageEntryCount/);
   assert.doesNotMatch(helperSource, /lastRegistration(?:At|CompletedAt)|respectLocalSignupRateLimit/);
   assert.match(authConfig, /\[auth\.email\][\s\S]*enable_confirmations\s*=\s*false/u);
+  assert.match(authConfig, /\[auth\.rate_limit\][\s\S]*sign_in_sign_ups\s*=\s*120/u);
+  assert.match(authConfig, /local-only quota is not production configuration/u);
 });
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
@@ -147,10 +153,13 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /synthetic missing-profile post-route mismatch/);
   assert.match(fixtureSource, /ticket-9b-profile-readiness-timeout/);
   assert.match(fixtureSource, /\/auth\/v1\/admin\/users/);
+  assert.match(fixtureSource, /createSyntheticLocalAuthUser/);
   assert.match(fixtureSource, /E2E_LOCAL_FIXTURE_ADMIN_KEY/);
   assert.match(fixtureSource, /waitForProvisionedCustomerProfile\(email\)/);
   assert.match(fixtureSource, /synthetic request ownership invariant failed/);
   assert.match(fixtureSource, /synthetic Auth users are not distinct/);
+  assert.match(fixtureSource, /synthetic provider fixture isolation failed/);
+  assert.match(fixtureSource, /p\.role = 'provider'::public\.user_role/);
   assert.doesNotMatch(fixtureSource, /SERVICE_ROLE_KEY|supabase\.co|postgresql:\/\//iu);
 });
 
@@ -168,6 +177,14 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   assert.match(
     securitySource,
     /guard-phase:\$\{scenario\.label\}:registration[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)/u,
+  );
+  assert.match(
+    securitySource,
+    /provider-setup:local-auth-user[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*provider-setup:ticket-9b-profile[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*provider-setup:browser-session[\s\S]*signInCustomer\(page, account\)/u,
+  );
+  assert.match(
+    securitySource,
+    /provider-role-fixture-failure[\s\S]*setSyntheticProfileState\(account\.email, scenario\.state\)[\s\S]*assertSyntheticProviderFixtureIsIsolated\(account\.email\)/u,
   );
   assert.match(
     securitySource,

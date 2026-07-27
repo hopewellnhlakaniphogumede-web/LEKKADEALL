@@ -3,11 +3,14 @@ import {
   assertCustomerLifecyclePostconditions,
   assertDistinctSyntheticUsers,
   assertSyntheticProfileAbsent,
+  assertSyntheticProviderFixtureIsIsolated,
   assertSyntheticRequestOwner,
   assertSyntheticProfileState,
+  createSyntheticLocalAuthUser,
   prepareSyntheticCustomerAccount,
   removeSyntheticProfile,
   setSyntheticProfileState,
+  waitForProvisionedCustomerProfile,
 } from './support/local-fixtures.mjs';
 import {
   createDraftThroughUi,
@@ -31,6 +34,26 @@ const anonKey = process.env.E2E_ANON_KEY;
 test.beforeAll(() => {
   if (process.env.E2E_LOCAL_STACK_READY !== '1') throw new Error('local-e2e-stack-not-ready');
 });
+
+const PROVIDER_FAILURE_CATEGORIES = new Set([
+  'provider-signup-http-failure',
+  'provider-session-missing',
+  'provider-profile-readiness-timeout',
+  'provider-role-fixture-failure',
+  'provider-guard-state-mismatch',
+]);
+
+async function withProviderFailureCategory(category, operation) {
+  if (!PROVIDER_FAILURE_CATEGORIES.has(category)) throw new Error('provider-failure-category-invalid');
+  try {
+    return await operation();
+  } catch {
+    await test.step(`provider-failure:${category}`, async () => {
+      throw new Error('privacy-safe-provider-boundary-failure');
+    });
+    return undefined;
+  }
+}
 
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
   test.setTimeout(180_000);
@@ -121,14 +144,39 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
         const markers = privacyMarkers(account);
         const emissions = attachSensitiveEmissionAudit(page, markers);
         await test.step(`guard-phase:${scenario.label}:registration`, async () => {
-          await prepareSyntheticCustomerAccount(account.email, account.password);
-          await signInCustomer(page, account);
-          await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+          if (scenario.label === 'provider') {
+            await test.step('provider-setup:local-auth-user', async () => {
+              await withProviderFailureCategory('provider-signup-http-failure', () => (
+                createSyntheticLocalAuthUser(account.email, account.password)
+              ));
+            });
+            await test.step('provider-setup:ticket-9b-profile', async () => {
+              await withProviderFailureCategory('provider-profile-readiness-timeout', () => (
+                waitForProvisionedCustomerProfile(account.email, { timeoutMs: 60_000 })
+              ));
+            });
+            await test.step('provider-setup:browser-session', async () => {
+              await withProviderFailureCategory('provider-session-missing', async () => {
+                await signInCustomer(page, account);
+                await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+              });
+            });
+          } else {
+            await prepareSyntheticCustomerAccount(account.email, account.password);
+            await signInCustomer(page, account);
+            await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+          }
         });
 
         await test.step(`guard-phase:${scenario.label}:fixture`, async () => {
           if (scenario.removeProfile) {
             await removeSyntheticProfile(account.email);
+          } else if (scenario.label === 'provider') {
+            await withProviderFailureCategory('provider-role-fixture-failure', async () => {
+              await setSyntheticProfileState(account.email, scenario.state);
+              await assertSyntheticProfileState(account.email, scenario.state);
+              await assertSyntheticProviderFixtureIsIsolated(account.email);
+            });
           } else {
             await setSyntheticProfileState(account.email, scenario.state);
           }
@@ -139,25 +187,48 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
             .map((table) => [table, policy.getTableReadCount(table)]),
         );
         await test.step(`guard-phase:${scenario.label}:route`, async () => {
-          await page.goto('/app/customer');
-          await expect(page.getByText(scenario.message)).toBeVisible();
-          await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
-          await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+          const assertGuardState = async () => {
+            await page.goto('/app/customer');
+            await expect(page.getByText(scenario.message)).toBeVisible();
+            await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
+            await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+          };
+          if (scenario.label === 'provider') {
+            await withProviderFailureCategory('provider-guard-state-mismatch', assertGuardState);
+          } else {
+            await assertGuardState();
+          }
         });
 
         await test.step(`guard-phase:${scenario.label}:postcondition`, async () => {
-          if (scenario.removeProfile) {
-            await assertSyntheticProfileAbsent(account.email);
+          const assertPostcondition = async () => {
+            if (scenario.removeProfile) {
+              await assertSyntheticProfileAbsent(account.email);
+            } else {
+              await assertSyntheticProfileState(account.email, scenario.state);
+            }
+            if (scenario.label === 'provider') {
+              await assertSyntheticProviderFixtureIsIsolated(account.email);
+            }
+            for (const functionName of [
+              'customer_create_draft_request',
+              'customer_update_draft_request',
+              'customer_cancel_draft_request',
+            ]) {
+              expect(policy.getRpcCount(functionName)).toBe(0);
+            }
+            for (const [table, count] of Object.entries(guardedReadBaseline)) {
+              expect(policy.getTableReadCount(table)).toBe(count);
+            }
+            await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+            policy.assertClean();
+            emissions.assertClean();
+          };
+          if (scenario.label === 'provider') {
+            await withProviderFailureCategory('provider-guard-state-mismatch', assertPostcondition);
           } else {
-            await assertSyntheticProfileState(account.email, scenario.state);
+            await assertPostcondition();
           }
-          expect(policy.getRpcCount('customer_create_draft_request')).toBe(0);
-          for (const [table, count] of Object.entries(guardedReadBaseline)) {
-            expect(policy.getTableReadCount(table)).toBe(count);
-          }
-          await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-          policy.assertClean();
-          emissions.assertClean();
         });
 
         await test.step(`guard-phase:${scenario.label}:sign-out`, async () => {

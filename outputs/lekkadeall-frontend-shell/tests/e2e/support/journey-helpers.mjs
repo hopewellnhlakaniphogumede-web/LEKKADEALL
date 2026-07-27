@@ -104,9 +104,31 @@ export async function signInCustomer(page, account) {
   const form = page.locator('form[data-auth-form="sign-in"]');
   await form.locator('input[name="email"]').fill(account.email);
   await form.locator('input[name="password"]').fill(account.password);
-  await form.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/app\/customer\/?$/u);
-  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible();
+  let response;
+  try {
+    const signInResponse = page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return url.pathname === '/auth/v1/token'
+        && url.searchParams.get('grant_type') === 'password'
+        && candidate.request().method() === 'POST';
+    }, { timeout: 30_000 });
+    await form.getByRole('button', { name: 'Sign in' }).click();
+    response = await signInResponse;
+  } catch {
+    throw new Error('fixture-sign-in-network-failure');
+  }
+  if (response.status() === 429) throw new Error('fixture-sign-in-http-429');
+  if (!response.ok()) throw new Error('fixture-sign-in-http-failure');
+  try {
+    await expect.poll(
+      () => authStorageEntryCount(page),
+      { timeout: 30_000, message: 'local Auth session readiness failed' },
+    ).toBe(1);
+  } catch {
+    throw new Error('fixture-sign-in-session-missing');
+  }
+  await expect(page).toHaveURL(/\/app\/customer\/?$/u, { timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible({ timeout: 30_000 });
 }
 
 export function futureSastInput(days = 3, minuteOffset = 0) {

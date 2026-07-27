@@ -3438,6 +3438,43 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Privacy redaction, loopback-only bootstrap, disposable local stack, one worker, zero retries, disabled screenshots/video/traces/HAR/storage state/Auth-email/database artifacts, and the three-RPC mutation allowlist remain intact.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
 
+### Ticket 9A-9 E2E correction - provider Auth quota and wrong-role fixture isolation - 2026-07-27
+
+**Status:** Focused provider setup correction implemented; replacement disposable-stack verification pending.
+
+#### Redacted finding
+
+- **Expected:** the provider actor is created outside browser authority as one confirmed synthetic local Auth user; Ticket 9B creates exactly one `customer`/`active` profile; the browser establishes a real password session with the anon key; the local fixture controller changes only that protected profile role to the existing `provider` enum value; and the unchanged profile guard renders `Access denied` before any customer request read or mutation.
+- **Actual category:** the seven passing scenarios left only `[guard-phase:provider:registration]`. The broad step combined local Auth-user creation, Ticket 9B readiness, browser password sign-in, and session privacy, so the failed boundary was not attributable without exposing Auth details.
+- **Root cause:** the disposable Supabase configuration retained Auth's default combined sign-in/sign-up quota while the one-worker project creates several isolated real sessions. The provider is a late actor in the aggregate matrix and inherited the already-consumed local Auth bucket. This is local test configuration pressure, not a provider enum, route guard, RLS, Ticket 9B, or application authority defect.
+
+#### Fix applied
+
+- Added a credential-free local-only `[auth.rate_limit] sign_in_sign_ups = 120` setting. It applies only when the disposable loopback Supabase CLI stack starts; no hosted or production Auth configuration changed.
+- Kept provider Auth-user creation in the Node fixture controller through the loopback admin endpoint. The browser still receives only the loopback public URL and anon key and signs in normally with the synthetic password.
+- Split provider setup into explicit local Auth-user, Ticket 9B readiness, browser-session, protected-role-fixture, and guard/postcondition phases. Browser sign-in now waits for the password-token response, checks only its status, condition-polls only the count of the SDK Auth-session storage entry, and never reads or prints the response body or stored value.
+- Added fixed reporter categories: `provider-signup-http-failure`, `provider-session-missing`, `provider-profile-readiness-timeout`, `provider-role-fixture-failure`, and `provider-guard-state-mismatch`.
+- Added a no-output provider isolation invariant proving exactly one `provider`/`active` profile and absence of provider profile/service, request, exact-address, bid, booking, payment, and identity-verification state before and after the guard test.
+
+#### Files changed
+
+- `outputs/marketplace-production-foundation/supabase/config.toml`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/local-fixtures.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/journey-helpers.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/support/privacy-safe-reporter.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e/security-boundaries.spec.mjs`
+- `outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs`
+- `TESTING.md`
+- `hardening_progress.md`
+
+#### Verification and security
+
+- All **64/64 Node frontend and static security tests pass** locally, syntax checks pass, and Playwright configuration still discovers exactly **8** synthetic Chromium scenarios.
+- Docker, Supabase CLI, and Deno are unavailable on this host, so the full disposable-stack Playwright, Deno, migration, and pgTAP rerun cannot be executed here. The user-reported main migration/frontend/Deno/pgTAP security job remains green.
+- The guard still reads `id,role,account_status` from `public.profiles`; Auth metadata remains untrusted. No route guard, RLS policy, grant, Ticket 9B trigger, Ticket 9A lifecycle RPC, or browser write boundary changed.
+- E2E remains loopback-only, disposable, one-worker, retry-free, and artifact-free. No Auth value, credential, response body, URL, header, database row/error, screenshot, video, trace, HAR, saved storage state, Auth email, or database dump is emitted.
+- Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
 ### Ticket 9A-9 E2E correction - remove signup pressure from setup-only scenarios - 2026-07-26
 
 **Status:** Focused local-only fixture correction implemented; replacement disposable-stack verification pending.
