@@ -92,11 +92,12 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /failed:\s*'assertion-or-runtime'/);
   assert.doesNotMatch(reporterSource, /result\.(?:error|errors|stdout|stderr)|message|stack|attachment/iu);
   assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
-  assert.match(reporterSource, /guard-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.match(reporterSource, /negative-actor-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.match(reporterSource, /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
+  assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(reporterSource, /registration-failure:\(signup-http-429\|signup-http-conflict\|signup-http-other\|signup-session-missing\|profile-readiness-timeout\|signup-network-failure\)/);
-  assert.match(reporterSource, /provider-failure:\(provider-signup-http-failure\|provider-session-missing\|provider-profile-readiness-timeout\|provider-role-fixture-failure\|provider-guard-state-mismatch\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -152,6 +153,15 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /synthetic missing-profile invariant failed/);
   assert.match(fixtureSource, /synthetic missing-profile post-route mismatch/);
   assert.match(fixtureSource, /ticket-9b-profile-readiness-timeout/);
+  assert.match(fixtureSource, /FIXTURE_STATES = new Set\(\['absent', 'auth-only', 'ready', 'invalid'\]\)/);
+  assert.match(fixtureSource, /readSyntheticAccountFixtureState/);
+  assert.match(fixtureSource, /synthetic-auth-fixture-ambiguous-absent/);
+  assert.match(fixtureSource, /synthetic-auth-fixture-ambiguous-invalid/);
+  assert.match(
+    fixtureSource,
+    /catch \{[\s\S]*await reconcileAmbiguousSyntheticAuthCreation\(email\);[\s\S]*return;/u,
+  );
+  assert.equal((fixtureSource.match(/fetch\(new URL\('\/auth\/v1\/admin\/users'/gu) ?? []).length, 1);
   assert.match(fixtureSource, /\/auth\/v1\/admin\/users/);
   assert.match(fixtureSource, /createSyntheticLocalAuthUser/);
   assert.match(fixtureSource, /E2E_LOCAL_FIXTURE_ADMIN_KEY/);
@@ -176,16 +186,24 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.match(
     securitySource,
-    /guard-phase:\$\{scenario\.label\}:registration[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)/u,
+    /negative-actor-phase:\$\{scenario\.label\}:auth-creation[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:ticket-9b-profile-readiness[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:browser-session[\s\S]*browser\.newContext[\s\S]*attachNetworkPolicy[\s\S]*signInCustomer\(page, account\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:fixture-state-application[\s\S]*negative-actor-phase:\$\{scenario\.label\}:route-guard-verification/u,
   );
-  assert.match(
-    securitySource,
-    /provider-setup:local-auth-user[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*provider-setup:ticket-9b-profile[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*provider-setup:browser-session[\s\S]*signInCustomer\(page, account\)/u,
-  );
-  assert.match(
-    securitySource,
-    /provider-role-fixture-failure[\s\S]*setSyntheticProfileState\(account\.email, scenario\.state\)[\s\S]*assertSyntheticProviderFixtureIsIsolated\(account\.email\)/u,
-  );
+  for (const actor of ['restricted', 'suspended', 'closed', 'provider', 'missing-profile']) {
+    assert.match(securitySource, new RegExp(`label: '${actor}'`));
+  }
+  for (const phase of [
+    'auth-creation',
+    'ticket-9b-profile-readiness',
+    'browser-session',
+    'fixture-state-application',
+    'route-guard-verification',
+  ]) {
+    assert.match(securitySource, new RegExp(`negative-actor-phase:\\$\\{scenario\\.label\\}:${phase}`));
+    assert.match(securitySource, new RegExp(`scenario\\.label,\\s*'${phase}'`));
+  }
+  assert.match(securitySource, /const requestReadBaseline[\s\S]*getTableReadCount[\s\S]*expect\(policy\.getTableReadCount\(table\)\)\.toBe\(count\)/u);
+  assert.match(securitySource, /const requestMutationBaseline[\s\S]*getRpcCount[\s\S]*expect\(policy\.getRpcCount\(functionName\)\)\.toBe\(count\)/u);
+  assert.match(securitySource, /finally \{[\s\S]*await context\?\.close\(\)/u);
   assert.match(
     securitySource,
     /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,

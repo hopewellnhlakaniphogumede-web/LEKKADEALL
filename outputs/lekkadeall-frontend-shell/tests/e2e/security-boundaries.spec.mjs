@@ -35,21 +35,31 @@ test.beforeAll(() => {
   if (process.env.E2E_LOCAL_STACK_READY !== '1') throw new Error('local-e2e-stack-not-ready');
 });
 
-const PROVIDER_FAILURE_CATEGORIES = new Set([
-  'provider-signup-http-failure',
-  'provider-session-missing',
-  'provider-profile-readiness-timeout',
-  'provider-role-fixture-failure',
-  'provider-guard-state-mismatch',
+const NEGATIVE_ACTORS = new Set([
+  'restricted',
+  'suspended',
+  'closed',
+  'provider',
+  'missing-profile',
+]);
+const NEGATIVE_ACTOR_FAILURE_CATEGORIES = new Set([
+  'auth-creation',
+  'ticket-9b-profile-readiness',
+  'browser-session',
+  'fixture-state-application',
+  'route-guard-verification',
+  'sign-out',
 ]);
 
-async function withProviderFailureCategory(category, operation) {
-  if (!PROVIDER_FAILURE_CATEGORIES.has(category)) throw new Error('provider-failure-category-invalid');
+async function withNegativeActorFailureCategory(actor, category, operation) {
+  if (!NEGATIVE_ACTORS.has(actor) || !NEGATIVE_ACTOR_FAILURE_CATEGORIES.has(category)) {
+    throw new Error('negative-actor-failure-category-invalid');
+  }
   try {
     return await operation();
   } catch {
-    await test.step(`provider-failure:${category}`, async () => {
-      throw new Error('privacy-safe-provider-boundary-failure');
+    await test.step(`negative-actor-failure:${actor}:${category}`, async () => {
+      throw new Error('privacy-safe-negative-actor-boundary-failure');
     });
     return undefined;
   }
@@ -137,106 +147,108 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
   for (const scenario of cases) {
     await test.step(`guard-state:${scenario.label}`, async () => {
       const account = syntheticAccount(`account-${scenario.label}`);
-      const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+      let context;
+      let page;
+      let policy;
+      let markers;
+      let emissions;
       try {
-        const page = await context.newPage();
-        const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-        const markers = privacyMarkers(account);
-        const emissions = attachSensitiveEmissionAudit(page, markers);
-        await test.step(`guard-phase:${scenario.label}:registration`, async () => {
-          if (scenario.label === 'provider') {
-            await test.step('provider-setup:local-auth-user', async () => {
-              await withProviderFailureCategory('provider-signup-http-failure', () => (
-                createSyntheticLocalAuthUser(account.email, account.password)
-              ));
-            });
-            await test.step('provider-setup:ticket-9b-profile', async () => {
-              await withProviderFailureCategory('provider-profile-readiness-timeout', () => (
-                waitForProvisionedCustomerProfile(account.email, { timeoutMs: 60_000 })
-              ));
-            });
-            await test.step('provider-setup:browser-session', async () => {
-              await withProviderFailureCategory('provider-session-missing', async () => {
-                await signInCustomer(page, account);
-                await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-              });
-            });
-          } else {
-            await prepareSyntheticCustomerAccount(account.email, account.password);
+        await test.step(`negative-actor-phase:${scenario.label}:auth-creation`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'auth-creation', () => (
+            createSyntheticLocalAuthUser(account.email, account.password)
+          ));
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:ticket-9b-profile-readiness`, async () => {
+          await withNegativeActorFailureCategory(
+            scenario.label,
+            'ticket-9b-profile-readiness',
+            () => waitForProvisionedCustomerProfile(account.email, { timeoutMs: 60_000 }),
+          );
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:browser-session`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'browser-session', async () => {
+            context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+            page = await context.newPage();
+            policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+            markers = privacyMarkers(account);
+            emissions = attachSensitiveEmissionAudit(page, markers);
             await signInCustomer(page, account);
             await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-          }
+          });
         });
 
-        await test.step(`guard-phase:${scenario.label}:fixture`, async () => {
-          if (scenario.removeProfile) {
-            await removeSyntheticProfile(account.email);
-          } else if (scenario.label === 'provider') {
-            await withProviderFailureCategory('provider-role-fixture-failure', async () => {
+        await test.step(`negative-actor-phase:${scenario.label}:fixture-state-application`, async () => {
+          await withNegativeActorFailureCategory(
+            scenario.label,
+            'fixture-state-application',
+            async () => {
+              if (scenario.removeProfile) {
+                await removeSyntheticProfile(account.email);
+                await assertSyntheticProfileAbsent(account.email);
+                return;
+              }
               await setSyntheticProfileState(account.email, scenario.state);
               await assertSyntheticProfileState(account.email, scenario.state);
-              await assertSyntheticProviderFixtureIsIsolated(account.email);
-            });
-          } else {
-            await setSyntheticProfileState(account.email, scenario.state);
-          }
+              if (scenario.label === 'provider') {
+                await assertSyntheticProviderFixtureIsIsolated(account.email);
+              }
+            },
+          );
         });
 
-        const guardedReadBaseline = Object.fromEntries(
+        const requestReadBaseline = Object.fromEntries(
           ['service_requests', 'bookings', 'payments']
             .map((table) => [table, policy.getTableReadCount(table)]),
         );
-        await test.step(`guard-phase:${scenario.label}:route`, async () => {
-          const assertGuardState = async () => {
-            await page.goto('/app/customer');
-            await expect(page.getByText(scenario.message)).toBeVisible();
-            await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
-            await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
-          };
-          if (scenario.label === 'provider') {
-            await withProviderFailureCategory('provider-guard-state-mismatch', assertGuardState);
-          } else {
-            await assertGuardState();
-          }
+        const requestMutationBaseline = Object.fromEntries(
+          [
+            'customer_create_draft_request',
+            'customer_update_draft_request',
+            'customer_cancel_draft_request',
+          ].map((functionName) => [functionName, policy.getRpcCount(functionName)]),
+        );
+
+        await test.step(`negative-actor-phase:${scenario.label}:route-guard-verification`, async () => {
+          await withNegativeActorFailureCategory(
+            scenario.label,
+            'route-guard-verification',
+            async () => {
+              await page.goto('/app/customer');
+              await expect(page.getByText(scenario.message)).toBeVisible();
+              await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
+              await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+
+              if (scenario.removeProfile) {
+                await assertSyntheticProfileAbsent(account.email);
+              } else {
+                await assertSyntheticProfileState(account.email, scenario.state);
+              }
+              if (scenario.label === 'provider') {
+                await assertSyntheticProviderFixtureIsIsolated(account.email);
+              }
+              for (const [functionName, count] of Object.entries(requestMutationBaseline)) {
+                expect(policy.getRpcCount(functionName)).toBe(count);
+              }
+              for (const [table, count] of Object.entries(requestReadBaseline)) {
+                expect(policy.getTableReadCount(table)).toBe(count);
+              }
+              await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+              policy.assertClean();
+              emissions.assertClean();
+            },
+          );
         });
 
-        await test.step(`guard-phase:${scenario.label}:postcondition`, async () => {
-          const assertPostcondition = async () => {
-            if (scenario.removeProfile) {
-              await assertSyntheticProfileAbsent(account.email);
-            } else {
-              await assertSyntheticProfileState(account.email, scenario.state);
-            }
-            if (scenario.label === 'provider') {
-              await assertSyntheticProviderFixtureIsIsolated(account.email);
-            }
-            for (const functionName of [
-              'customer_create_draft_request',
-              'customer_update_draft_request',
-              'customer_cancel_draft_request',
-            ]) {
-              expect(policy.getRpcCount(functionName)).toBe(0);
-            }
-            for (const [table, count] of Object.entries(guardedReadBaseline)) {
-              expect(policy.getTableReadCount(table)).toBe(count);
-            }
-            await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
-            policy.assertClean();
-            emissions.assertClean();
-          };
-          if (scenario.label === 'provider') {
-            await withProviderFailureCategory('provider-guard-state-mismatch', assertPostcondition);
-          } else {
-            await assertPostcondition();
-          }
-        });
-
-        await test.step(`guard-phase:${scenario.label}:sign-out`, async () => {
-          await signOutCustomer(page);
-          await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+        await test.step(`negative-actor-phase:${scenario.label}:sign-out`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'sign-out', async () => {
+            await signOutCustomer(page);
+            await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+          });
         });
       } finally {
-        await context.close();
+        await context?.close();
       }
     });
   }

@@ -14,6 +14,7 @@ const SYNTHETIC_PASSWORD_PATTERN = /^E2e-[A-Za-z0-9_-]{24}!9$/u;
 const DB_CONTAINER_NAME = 'supabase_db_lekkadeall-local';
 const ROLES = new Set(['customer', 'provider']);
 const ACCOUNT_STATUSES = new Set(['active', 'restricted', 'suspended', 'closed']);
+const FIXTURE_STATES = new Set(['absent', 'auth-only', 'ready', 'invalid']);
 
 function safeDockerEnvironment() {
   const safe = {};
@@ -97,37 +98,48 @@ export async function findSyntheticUserId(emailValue) {
   return requireUuid(output);
 }
 
-export async function assertProvisionedCustomerProfile(emailValue) {
+export async function readSyntheticAccountFixtureState(emailValue) {
   const email = requireSyntheticEmail(emailValue);
   const output = await runSql(`
+    with fixture_counts as (
+      select
+        (select pg_catalog.count(*)
+         from auth.users as u
+         where pg_catalog.lower(u.email) = ${sqlLiteral(email)}) as auth_count,
+        (select pg_catalog.count(*)
+         from auth.users as u
+         join public.profiles as p on p.id = u.id
+         where pg_catalog.lower(u.email) = ${sqlLiteral(email)}) as profile_count,
+        (select pg_catalog.count(*)
+         from auth.users as u
+         join public.profiles as p on p.id = u.id
+         where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+           and p.role = 'customer'::public.user_role
+           and p.account_status = 'active'
+           and p.display_name = 'New customer') as ready_profile_count,
+        (select pg_catalog.count(*)
+         from auth.users as u
+         join public.provider_profiles as pp on pp.user_id = u.id
+         where pg_catalog.lower(u.email) = ${sqlLiteral(email)}) as provider_profile_count
+    )
     select case
-      when (
-        select pg_catalog.count(*)
-        from auth.users as u
-        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
-      ) = 1
-      and (
-        select pg_catalog.count(*)
-        from auth.users as u
-        join public.profiles as p on p.id = u.id
-        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
-          and p.role = 'customer'::public.user_role
-          and p.account_status = 'active'
-          and p.display_name = 'New customer'
-      ) = 1
-      and not exists (
-        select 1
-        from auth.users as u
-        join public.provider_profiles as pp on pp.user_id = u.id
-        where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
-      )
-      then 'ready'
-      else 'pending'
-    end;
+      when auth_count = 0 and profile_count = 0 and provider_profile_count = 0 then 'absent'
+      when auth_count = 1 and profile_count = 0 and provider_profile_count = 0 then 'auth-only'
+      when auth_count = 1
+       and profile_count = 1
+       and ready_profile_count = 1
+       and provider_profile_count = 0 then 'ready'
+      else 'invalid'
+    end
+    from fixture_counts;
   `);
-  if (output !== 'ready') {
-    throw new Error('ticket-9b-profile-postcondition-failed');
-  }
+  if (!FIXTURE_STATES.has(output)) throw new Error('fixture-state-classification-invalid');
+  return output;
+}
+
+export async function assertProvisionedCustomerProfile(emailValue) {
+  const state = await readSyntheticAccountFixtureState(emailValue);
+  if (state !== 'ready') throw new Error(`ticket-9b-profile-state-${state}`);
 }
 
 export async function waitForProvisionedCustomerProfile(
@@ -141,11 +153,26 @@ export async function waitForProvisionedCustomerProfile(
       await assertProvisionedCustomerProfile(email);
       return;
     } catch (error) {
-      if (error?.message !== 'ticket-9b-profile-postcondition-failed') throw error;
+      if (!['ticket-9b-profile-state-absent', 'ticket-9b-profile-state-auth-only']
+        .includes(error?.message)) throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   } while (Date.now() < deadline);
   throw new Error('ticket-9b-profile-readiness-timeout');
+}
+
+async function reconcileAmbiguousSyntheticAuthCreation(
+  email,
+  { timeoutMs = 5_000, intervalMs = 100 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const state = await readSyntheticAccountFixtureState(email);
+    if (state === 'auth-only' || state === 'ready') return;
+    if (state === 'invalid') throw new Error('synthetic-auth-fixture-ambiguous-invalid');
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  } while (Date.now() < deadline);
+  throw new Error('synthetic-auth-fixture-ambiguous-absent');
 }
 
 export async function createSyntheticLocalAuthUser(emailValue, passwordValue) {
@@ -173,7 +200,8 @@ export async function createSyntheticLocalAuthUser(emailValue, passwordValue) {
       }),
     });
   } catch {
-    throw new Error('synthetic-auth-fixture-network-failure');
+    await reconcileAmbiguousSyntheticAuthCreation(email);
+    return;
   }
   const status = response.status;
   await response.body?.cancel();

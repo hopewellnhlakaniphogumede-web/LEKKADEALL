@@ -3688,3 +3688,38 @@ No migration, RLS policy, grant, production database function, validator, profil
 - E2E remains loopback-only, disposable, one-worker, retry-free, and artifact-free. The global default remains 60 seconds and the CI job remains bounded to 30 minutes.
 - No screenshot, video, trace, HAR, saved storage state, Auth email, database dump, error detail, credential, token, Auth link, recovery link, request body, or database row is emitted or retained.
 - Publication, exact address, provider bidding/onboarding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction - restricted actor setup phase isolation - 2026-07-28
+
+**Status:** Restricted/negative-actor setup correction implemented and locally static-verified; disposable-stack execution remains unavailable on this host.
+
+#### Root cause
+
+- Only the provider actor had separately attributable Auth creation, Ticket 9B readiness, browser-session, fixture, and guard phases. Restricted, suspended, closed, and missing-profile setup still collapsed Auth creation plus readiness into `prepareSyntheticCustomerAccount()`, so a redacted failure could not identify the failed boundary consistently across the five actors.
+- Auth-admin creation treated every rejected request as a definite failure. A connection failure after the local Auth service committed the user was therefore ambiguous, and a caller could not safely tell whether the synthetic actor was absent, Auth-only, ready, or invalid.
+- The former Ticket 9B scalar check exposed only `ready` versus `pending`. That made absent and Auth-only eventual states indistinguishable from invalid fixture state.
+
+#### Fix applied
+
+- Every restricted, suspended, closed, wrong-role, and missing-profile actor now runs serially through five explicit Playwright phases: `auth-creation`, `ticket-9b-profile-readiness`, `browser-session`, `fixture-state-application`, and `route-guard-verification`. Sign-out remains a separate cleanup phase.
+- Every phase is wrapped by fixed, allowlisted `negative-actor-failure:<actor>:<category>` reporting. The reporter still withholds runtime errors, stacks, values, response data, URLs, headers, credentials, browser state, rows, and attachments.
+- Added a no-row fixture-state classifier whose only possible internal result is `absent`, `auth-only`, `ready`, or `invalid`. Ticket 9B polling waits only for the eventual `absent` and `auth-only` states and rejects `invalid` immediately.
+- Negative actors use an explicit `60_000` millisecond Ticket 9B readiness condition.
+- Auth creation still issues exactly one loopback admin `POST`. If that request rejects after Auth may have committed, setup does not retry creation; it reconciles for up to five seconds through the scalar state classifier, accepts only `auth-only` or `ready`, and fails closed for `absent` or `invalid`.
+- Each actor creates its own browser context only after profile readiness, installs the anon-key network policy before sign-in, applies its protected fixture state only after a normal session exists, and closes that context before the next actor begins.
+- The route-guard phase snapshots `service_requests`, `bookings`, and `payments` read counts plus create/update/cancel RPC counts before navigation. The fail-closed UI and unchanged counters together prove that guard rejection causes no request-domain read or mutation.
+
+#### Security boundaries preserved
+
+- Ticket 9B provisioning, route-guard logic, RLS, grants, public-field validation, draft update, draft cancellation, and state-machine protections did not change.
+- The fixture-admin credential remains Node-only, loopback-only, service-role-claim-validated, absent from browser runtime configuration, and unprinted. Browser requests remain restricted to the exact local anon key and cannot use service-role authorization.
+- Playwright remains Chromium-only, one-worker, retry-free, and serial. Each negative actor has an independent browser context.
+- CI still disables screenshots, video, traces, HAR, saved storage state, HTML/JUnit reports, Auth-email artifacts, database dumps, and artifact upload.
+- Publication, exact-address handling, provider onboarding/bidding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+#### Verification
+
+- Existing frontend/static suite: **64/64 passed**.
+- Playwright focused discovery: **8 synthetic Chromium scenarios discovered** with the privacy-safe reporter.
+- The complete `pnpm run test:e2e:local` command was invoked and failed at the redacted prerequisite boundary because Docker and Supabase CLI are unavailable on this host; no Playwright scenario ran and no runtime configuration or artifact was left behind.
+- Workflow path checks pass: the E2E job still runs from `outputs/lekkadeall-frontend-shell`, depends on `database-tests`, and the Supabase project remains at `outputs/marketplace-production-foundation/supabase/config.toml`.
