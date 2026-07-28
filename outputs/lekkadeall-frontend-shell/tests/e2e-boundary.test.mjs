@@ -96,24 +96,38 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
-  assert.match(reporterSource, /registration-phase:\(signup-request\|auth-session\|profile-ready\|dashboard\)/);
-  assert.match(reporterSource, /registration-failure:\(signup-http-429\|signup-http-conflict\|signup-http-other\|signup-session-missing\|profile-readiness-timeout\|signup-network-failure\)/);
+  assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
+  assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
+  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|fresh-rls-read\|postcondition\|sign-out\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
 test('local Auth registration uses run-scoped identity and explicit readiness conditions', async () => {
   const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
   const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const appSource = await readFile(join(frontendRoot, 'app.js'), 'utf8');
   const authConfig = await readFile(
     join(repositoryRoot, 'outputs/marketplace-production-foundation/supabase/config.toml'),
     'utf8',
   );
-  assert.match(runnerSource, /const runId = randomBytes\(8\)\.toString\('hex'\)/);
+  assert.match(runnerSource, /GITHUB_RUN_ID/);
+  assert.match(runnerSource, /GITHUB_RUN_ATTEMPT/);
+  assert.match(runnerSource, /randomBytes\(4\)\.toString\('hex'\)/);
+  assert.match(runnerSource, /E2E_TEST_SCOPE/);
   assert.match(runnerSource, /E2E_RUN_ID:\s*runId/);
   assert.match(runnerSource, /\['db', 'reset'\]/);
   assert.match(runnerSource, /\['stop', '--no-backup'\]/);
   assert.match(runnerSource, /e2e-refuses-preexisting-supabase-stack/);
   assert.match(helperSource, /process\.env\.E2E_RUN_ID/);
+  assert.match(helperSource, /test\.info\(\)\.title/);
+  assert.match(helperSource, /createHash\('sha256'\)/);
+  assert.match(helperSource, /randomBytes\(6\)\.toString\('hex'\)/);
+  assert.match(helperSource, /assertSyntheticAccountAbsent/);
+  assert.match(helperSource, /reconcileAmbiguousUiSignup/);
+  assert.match(helperSource, /signupRequestCount !== 1/);
+  assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.match(appSource, /if \(authSubmissionInFlight\) return;/);
+  assert.match(appSource, /authSubmissionInFlight = true;[\s\S]*await submitAuthFormOnce\(form\);[\s\S]*authSubmissionInFlight = false;/u);
   assert.match(helperSource, /registration-phase:signup-request/);
   assert.match(helperSource, /registration-phase:auth-session/);
   assert.match(helperSource, /registration-phase:profile-ready/);
@@ -155,6 +169,9 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(fixtureSource, /ticket-9b-profile-readiness-timeout/);
   assert.match(fixtureSource, /FIXTURE_STATES = new Set\(\['absent', 'auth-only', 'ready', 'invalid'\]\)/);
   assert.match(fixtureSource, /readSyntheticAccountFixtureState/);
+  assert.match(fixtureSource, /synthetic-ui-signup-identity-not-absent/);
+  assert.match(fixtureSource, /synthetic-ui-signup-reconciliation-absent/);
+  assert.match(fixtureSource, /synthetic-ui-signup-reconciliation-invalid/);
   assert.match(fixtureSource, /synthetic-auth-fixture-ambiguous-absent/);
   assert.match(fixtureSource, /synthetic-auth-fixture-ambiguous-invalid/);
   assert.match(
@@ -208,6 +225,11 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     securitySource,
     /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,
   );
+  assert.match(securitySource, /browser\.newContext\(\{ baseURL: appUrl, serviceWorkers: 'allow' \}\)/);
+  assert.match(securitySource, /route\.fetch\(\{ maxRetries: 0 \}\)/);
+  assert.match(securitySource, /interceptedUpdateCount !== 1[\s\S]*route\.abort\('failed'\)/u);
+  assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
+  assert.match(securitySource, /getTableReadCount\('service_requests'\)[\s\S]*page\.reload\(\)[\s\S]*toBeGreaterThan\(readBaseline\)/u);
 });
 
 test('CI E2E job is isolated behind the complete database security job', async () => {
@@ -240,6 +262,12 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.match(workflow, /customer-draft-lifecycle-e2e:/);
   assert.match(workflow, /needs:\s*database-tests/);
   assert.match(workflow, /pnpm run test:e2e:local/);
+  for (const scope of ['lifecycle', 'aborted', 'affected', 'full']) {
+    assert.match(workflow, new RegExp(`E2E_TEST_SCOPE:\\s*${scope}`));
+  }
+  assert.equal((workflow.match(/uses: supabase\/setup-cli@v2/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/version: 2\.110\.0/gu) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /version:\s*latest/u);
   assert.match(workflow, /playwright install --with-deps chromium/);
   assert.doesNotMatch(workflow, /upload-artifact/);
 });

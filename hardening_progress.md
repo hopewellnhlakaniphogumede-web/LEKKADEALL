@@ -3809,3 +3809,51 @@ These were E2E harness, workflow-path, local quota, readiness, and fixture-setup
 - The E2E remains loopback-only, disposable, one-worker, retry-free, and anon-key-only in the browser. No mutation retry was added.
 - Screenshots, video, traces, HAR, saved storage state, Auth-email artifacts, database dumps, and artifact upload remain disabled.
 - Publication, exact-address handling, provider onboarding/bidding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction - lifecycle signup and aborted update isolation - 2026-07-28
+
+**Status:** Two focused harness corrections implemented locally; replacement disposable-stack verification pending.
+
+#### Failure 1 - lifecycle UI signup
+
+- **Expected:** the main lifecycle actor performs one real UI signup, receives a normal local Auth session, reaches the unchanged Ticket 9B `customer`/`active` profile postcondition, and continues through create, edit, cancel, and final RLS/database invariants.
+- **Actual privacy-safe category:** `registration-failure:signup-http-conflict`.
+- **Isolation finding:** the lifecycle test creates its account once and calls the registration helper once. No setup helper, fixture controller, migration, seed, or other test creates that account. The registration helper contains one `Create account` click. The prior identity included a random run nonce, actor label, and random suffix, but did not encode the GitHub run/attempt or Playwright test name, did not prove scalar absence immediately before signup, and could not safely attribute a conflict after an ambiguous completion. The application Auth form also lacked a single-flight guard.
+- **Root cause:** the harness collapsed an ambiguous same-identity completion and an unexpected collision into the same terminal conflict category. It had no absent-before ownership precondition or one-time scalar reconciliation, while the UI did not explicitly reject a re-entrant submit. This was an E2E identity/attribution defect, not a Ticket 9B, Auth policy, route-guard, or RLS defect.
+
+#### Lifecycle signup fix
+
+- Synthetic identity scope now includes the workflow run ID, workflow attempt, fresh runner nonce, bounded test-name slug/digest, actor label, and fresh random suffix. No identity value is logged.
+- The fixture controller requires the scalar `absent` state immediately before the real UI signup and returns no Auth/profile row.
+- The helper still clicks the UI signup button exactly once, counts the exact loopback signup request, and fails closed if the count is zero or greater than one.
+- The application Auth form now has a single-flight submission guard. It adds no retry and trusts no Auth metadata.
+- A conflict or network ambiguity performs no second signup. Reconciliation is allowed once only when the current test proved prior absence, observed exactly one signup request, and the scalar classifier reaches `auth-only` or `ready`. Ticket 9B readiness remains explicitly bounded to 60 seconds.
+- An unexpected existing identity, absent post-state, invalid fixture, or unusable public session fails under fixed categories such as `signup-unexpected-collision`, `signup-reconciliation-invalid`, or `signup-reconciliation-session-failure`. No user is deleted and no unexpected account is adopted.
+
+#### Failure 2 - executed update with aborted response
+
+- **Expected:** one `customer_update_draft_request(...)` executes, its browser response is aborted after execution, the UI remains ambiguous and blocked, no retry occurs, and a later RLS-backed read displays the committed server state.
+- **Actual privacy-safe category:** `assertion-or-runtime`.
+- **Isolation finding:** this test already used the distinct `customer-ambiguous` actor and its own generated draft. The six passing scenarios around it, including the post-lifecycle worker scenarios, show that it was not adopting the lifecycle account or request.
+- **Root cause:** the former route handler called `route.fetch()` and then aborted, but did not explicitly disable transport retries, assert the fetched status/execution flag, keep a guard that blocked a second intercepted request before execution, or localize the failing boundary. `{ times: 1 }` also meant a hypothetical second browser mutation would bypass the interceptor before the later count assertion. This was an interception/proof gap, not an application retry or RPC defect.
+
+#### Aborted-update fix
+
+- The scenario now creates and closes an explicit independent browser context and retains its own synthetic customer and draft.
+- The interceptor remains installed for the mutation window. Only its first request may call `route.fetch({ maxRetries: 0 })`; any later request is aborted before reaching the RPC.
+- The response is aborted only after the fetched response reports successful execution. The test then requires exactly one intercepted request and exactly one browser-policy update count.
+- The UI must show only the generic unconfirmed-update state, must never show `Draft updated.`, and must keep submission disabled.
+- After removing the interceptor, a reload must increase the explicit `service_requests` read count before the test accepts the authoritative edited values. The update count must remain one.
+- Fixed `ambiguous-update-failure:<phase>` categories now isolate setup, execution, ambiguous UI, fresh RLS read, postcondition, and sign-out without printing runtime details.
+
+#### Verification and unchanged security
+
+- Node syntax checks pass for every changed JavaScript module.
+- Existing frontend/static security suite: **64/64 passed** locally.
+- Playwright discovery finds **8** tests; the fixed-scope discovery finds **1** lifecycle test, **1** aborted-response test, and **2** affected tests together. The E2E job now runs those three fixed scopes before the full eight-test scope, each against a newly started/reset and no-backup-cleaned disposable stack, while retaining the existing 30-minute job timeout.
+- Docker and Supabase CLI are unavailable on this host, so real-stack isolated, paired, and full-suite execution remains pending GitHub Actions.
+- Supabase CLI remains pinned to `2.110.0` in both jobs. The main frontend, Deno, migration, and pgTAP job from the failing E2E run was green.
+- No migration, Ticket 9B provisioning rule, route guard, RLS policy, grant, public-field validator, lifecycle RPC, state-machine guard, draft-update protection, or cancellation protection changed.
+- Browser authority remains anon-key-only and loopback-only. The fixture-admin credential remains Node-only and unprinted.
+- Playwright remains one-worker, zero-retry, bounded, and artifact-free. Screenshots, video, traces, HAR, storage state, Auth-email artifacts, database dumps, and artifact upload remain disabled.
+- Publication, exact-address handling, provider onboarding/bidding, bookings, payments, admin dashboard, and profile editing remain blocked.

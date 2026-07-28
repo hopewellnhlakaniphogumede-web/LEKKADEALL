@@ -66,6 +66,7 @@ const state = {
   },
 };
 let refreshSequence = 0;
+let authSubmissionInFlight = false;
 let draftSubmissionInFlight = false;
 let draftCancellationInFlight = false;
 let draftCancellationSequence = 0;
@@ -352,6 +353,16 @@ async function handleRecoveryCallback() {
 }
 
 async function submitAuthForm(form) {
+  if (authSubmissionInFlight) return;
+  authSubmissionInFlight = true;
+  try {
+    await submitAuthFormOnce(form);
+  } finally {
+    authSubmissionInFlight = false;
+  }
+}
+
+async function submitAuthFormOnce(form) {
   if (!state.client || !state.config) {
     state.formMessage = 'Authentication is unavailable until public configuration is supplied.';
     render();

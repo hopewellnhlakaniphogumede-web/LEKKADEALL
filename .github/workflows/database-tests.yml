@@ -142,10 +142,32 @@ jobs:
           version: 2.110.0
           github-token: ${{ github.token }}
 
-      - name: Run local-only Ticket 9A-9 Playwright boundary
+      - name: Run lifecycle signup scenario independently
         working-directory: outputs/lekkadeall-frontend-shell
         env:
           CI: "1"
+          E2E_TEST_SCOPE: lifecycle
+        run: pnpm run test:e2e:local
+
+      - name: Run aborted-response scenario independently
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: aborted
+        run: pnpm run test:e2e:local
+
+      - name: Run both affected scenarios together
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: affected
+        run: pnpm run test:e2e:local
+
+      - name: Run full local-only Ticket 9A-9 Playwright boundary
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: full
         run: pnpm run test:e2e:local
 
       - name: Enforce E2E cleanup

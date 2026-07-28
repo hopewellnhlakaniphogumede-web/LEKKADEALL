@@ -65,6 +65,29 @@ async function withNegativeActorFailureCategory(actor, category, operation) {
   }
 }
 
+const AMBIGUOUS_UPDATE_FAILURE_CATEGORIES = new Set([
+  'isolated-setup',
+  'single-update-execution',
+  'ambiguous-ui',
+  'fresh-rls-read',
+  'postcondition',
+  'sign-out',
+]);
+
+async function withAmbiguousUpdateFailureCategory(category, operation) {
+  if (!AMBIGUOUS_UPDATE_FAILURE_CATEGORIES.has(category)) {
+    throw new Error('ambiguous-update-failure-category-invalid');
+  }
+  try {
+    return await operation();
+  } catch {
+    await test.step(`ambiguous-update-failure:${category}`, async () => {
+      throw new Error('privacy-safe-ambiguous-update-boundary-failure');
+    });
+    return undefined;
+  }
+}
+
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
   test.setTimeout(180_000);
   const customerA = syntheticAccount('customer-rls-a');
@@ -290,43 +313,90 @@ test('a stale edit is rejected after another tab cancels the draft', async ({ co
   await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
 });
 
-test('an executed update with an aborted response is not retried and requires a fresh read', async ({ page }) => {
+test('an executed update with an aborted response is not retried and requires a fresh read', async ({ browser }) => {
   test.setTimeout(180_000);
   const account = syntheticAccount('customer-ambiguous');
   const created = mainDraftValues();
   const edited = editedDraftValues();
   const markers = privacyMarkers(account, created, edited);
-  const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-  const emissions = attachSensitiveEmissionAudit(page, markers);
-  await prepareSyntheticCustomerAccount(account.email, account.password);
-  await signInCustomer(page, account);
-  const requestId = await createDraftThroughUi(page, created);
-  await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
-  const editForm = await fillDraftForm(page, edited);
-
+  const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+  let page;
+  let policy;
+  let emissions;
+  let requestId;
   const rpcPattern = '**/rest/v1/rpc/customer_update_draft_request';
-  await page.route(rpcPattern, async (route) => {
-    await route.fetch();
-    await route.abort('failed');
-  }, { times: 1 });
-  await editForm.getByRole('button', { name: 'Save draft changes' }).click();
-  await expect(page.getByText('The update could not be confirmed. Refresh the draft before trying again.', { exact: true })).toBeVisible();
-  await expect(page.locator('form[data-draft-edit-form] button[type="submit"]')).toBeDisabled();
-  expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+  try {
+    await withAmbiguousUpdateFailureCategory('isolated-setup', async () => {
+      page = await context.newPage();
+      policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+      emissions = attachSensitiveEmissionAudit(page, markers);
+      await prepareSyntheticCustomerAccount(account.email, account.password);
+      await signInCustomer(page, account);
+      requestId = await createDraftThroughUi(page, created);
+      await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+    });
 
-  await page.unroute(rpcPattern);
-  await page.reload();
-  await expect(page.locator('input[name="title"]')).toHaveValue(edited.title);
-  expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
-  await page.getByRole('link', { name: 'Back to draft' }).click();
-  await page.getByRole('button', { name: 'Cancel draft' }).click();
-  await page.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
-  await expect(page.getByText('Draft cancelled.', { exact: true })).toBeVisible();
-  await assertCustomerLifecyclePostconditions(account.email, requestId);
-  policy.assertClean();
-  emissions.assertClean();
-  await signOutCustomer(page);
-  await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+    let interceptedUpdateCount = 0;
+    let updateExecuted = false;
+    let responseAborted = false;
+    await page.route(rpcPattern, async (route) => {
+      interceptedUpdateCount += 1;
+      if (interceptedUpdateCount !== 1) {
+        await route.abort('failed');
+        return;
+      }
+      const response = await route.fetch({ maxRetries: 0 });
+      updateExecuted = response.ok();
+      await route.abort('failed');
+      responseAborted = true;
+    });
+
+    await withAmbiguousUpdateFailureCategory('single-update-execution', async () => {
+      const editForm = await fillDraftForm(page, edited);
+      await editForm.getByRole('button', { name: 'Save draft changes' }).click();
+      await expect(page.getByText(
+        'The update could not be confirmed. Refresh the draft before trying again.',
+        { exact: true },
+      )).toBeVisible();
+      expect(interceptedUpdateCount).toBe(1);
+      expect(updateExecuted).toBe(true);
+      expect(responseAborted).toBe(true);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+    });
+
+    await withAmbiguousUpdateFailureCategory('ambiguous-ui', async () => {
+      await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
+      await expect(page.locator('form[data-draft-edit-form] button[type="submit"]')).toBeDisabled();
+    });
+
+    await page.unroute(rpcPattern);
+    await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
+      const readBaseline = policy.getTableReadCount('service_requests');
+      await page.reload();
+      await expect.poll(() => policy.getTableReadCount('service_requests')).toBeGreaterThan(readBaseline);
+      await expect(page.locator('input[name="title"]')).toHaveValue(edited.title);
+      await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+    });
+
+    await withAmbiguousUpdateFailureCategory('postcondition', async () => {
+      await page.getByRole('link', { name: 'Back to draft' }).click();
+      await page.getByRole('button', { name: 'Cancel draft' }).click();
+      await page.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
+      await expect(page.getByText('Draft cancelled.', { exact: true })).toBeVisible();
+      await assertCustomerLifecyclePostconditions(account.email, requestId);
+      policy.assertClean();
+      emissions.assertClean();
+    });
+
+    await withAmbiguousUpdateFailureCategory('sign-out', async () => {
+      await signOutCustomer(page);
+      await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+    });
+  } finally {
+    await page?.unroute(rpcPattern);
+    await context.close();
+  }
 });
 
 test('recovery routes fail closed without persisting a PKCE verifier', async ({ page }) => {

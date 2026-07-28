@@ -1,23 +1,39 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import {
   ACTIVE_CATEGORY_ID,
+  assertSyntheticAccountAbsent,
+  reconcileAmbiguousUiSignup,
   waitForProvisionedCustomerProfile,
 } from './local-fixtures.mjs';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const E2E_RUN_ID_PATTERN = /^[0-9a-f]{16}$/u;
+const E2E_RUN_ID_PATTERN = /^r(?:[0-9]{1,20}|local[0-9]{1,10})-a[0-9]{1,6}-[0-9a-f]{8}$/u;
 const AUTH_STORAGE_KEY_PATTERN = /^sb-[a-z0-9-]+-auth-token$/iu;
+
+function testIdentityComponent() {
+  const title = String(test.info().title ?? '');
+  const slug = title.toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 12);
+  const digest = createHash('sha256').update(title).digest('hex').slice(0, 8);
+  if (!slug) throw new Error('synthetic-test-identity-invalid');
+  return `${slug}-${digest}`;
+}
 
 export function syntheticAccount(label) {
   const runId = String(process.env.E2E_RUN_ID ?? '');
   const actor = String(label ?? '').toLowerCase();
-  if (!E2E_RUN_ID_PATTERN.test(runId) || !/^[a-z0-9][a-z0-9-]{0,40}$/u.test(actor)) {
+  if (!E2E_RUN_ID_PATTERN.test(runId) || !/^[a-z0-9][a-z0-9-]{0,23}$/u.test(actor)) {
     throw new Error('synthetic-account-identity-invalid');
   }
-  const actorSuffix = randomBytes(8).toString('hex');
+  const testComponent = testIdentityComponent();
+  const actorSuffix = randomBytes(6).toString('hex');
+  const localPart = `${runId}.${testComponent}.${actor}.${actorSuffix}`;
+  if (localPart.length > 100) throw new Error('synthetic-account-identity-too-long');
   return Object.freeze({
-    email: `${runId}.${actor}.${actorSuffix}@lekkadeall.invalid`,
+    email: `${localPart}@lekkadeall.invalid`,
     password: `E2e-${randomBytes(18).toString('base64url')}!9`,
   });
 }
@@ -39,7 +55,47 @@ async function failRegistration(category) {
   });
 }
 
+async function reconcileSingleUiSignup(page, account, signupRequestCount) {
+  if (signupRequestCount === 0) {
+    await failRegistration('signup-network-failure');
+    return;
+  }
+  if (signupRequestCount !== 1) {
+    await failRegistration('signup-duplicate-request');
+    return;
+  }
+  try {
+    await reconcileAmbiguousUiSignup(account.email);
+  } catch (error) {
+    if (error?.message === 'synthetic-ui-signup-reconciliation-absent') {
+      await failRegistration('signup-unexpected-collision');
+    } else if (error?.message === 'synthetic-ui-signup-reconciliation-invalid') {
+      await failRegistration('signup-reconciliation-invalid');
+    } else {
+      await failRegistration('profile-readiness-timeout');
+    }
+    return;
+  }
+  const storageCount = await authStorageEntryCount(page);
+  if (storageCount === 0) {
+    try {
+      await signInCustomer(page, account);
+    } catch {
+      await failRegistration('signup-reconciliation-session-failure');
+    }
+  } else if (storageCount !== 1) {
+    await failRegistration('signup-reconciliation-session-failure');
+  }
+}
+
 export async function registerCustomer(page, account) {
+  await test.step('registration-phase:identity-precondition', async () => {
+    try {
+      await assertSyntheticAccountAbsent(account.email);
+    } catch {
+      await failRegistration('signup-unexpected-collision');
+    }
+  });
   await page.goto('/auth/register');
   const form = page.locator('form[data-auth-form="register"]');
   await form.locator('input[name="email"]').fill(account.email);
@@ -47,6 +103,18 @@ export async function registerCustomer(page, account) {
 
   await test.step('registration-phase:signup-request', async () => {
     let response;
+    let signupRequestCount = 0;
+    const countSignupRequest = (request) => {
+      try {
+        const url = new URL(request.url());
+        if (url.pathname === '/auth/v1/signup' && request.method() === 'POST') {
+          signupRequestCount += 1;
+        }
+      } catch {
+        // A malformed request cannot be the exact loopback signup boundary.
+      }
+    };
+    page.on('request', countSignupRequest);
     try {
       const signupResponse = page.waitForResponse((candidate) => {
         const url = new URL(candidate.url());
@@ -56,13 +124,19 @@ export async function registerCustomer(page, account) {
       await form.getByRole('button', { name: 'Create account' }).click();
       response = await signupResponse;
     } catch {
-      await failRegistration('signup-network-failure');
+      await reconcileSingleUiSignup(page, account, signupRequestCount);
+      return;
+    } finally {
+      page.off('request', countSignupRequest);
+    }
+    if (signupRequestCount !== 1) {
+      await failRegistration('signup-duplicate-request');
       return;
     }
     if (response.status() === 429) {
       await failRegistration('signup-http-429');
     } else if ([409, 422].includes(response.status())) {
-      await failRegistration('signup-http-conflict');
+      await reconcileSingleUiSignup(page, account, signupRequestCount);
     } else if (!response.ok()) {
       await failRegistration('signup-http-other');
     }

@@ -21,7 +21,27 @@ const runtimeConfigPath = join(frontendRoot, 'runtime-config.local.js');
 const staticServerPath = join(scriptDirectory, 'static-server.mjs');
 const appUrl = 'http://127.0.0.1:4173';
 const outputDirectory = join(tmpdir(), `lekkadeall-e2e-output-${process.pid}`);
-const runId = randomBytes(8).toString('hex');
+const WORKFLOW_RUN_PATTERN = /^[0-9]{1,20}$/u;
+const WORKFLOW_ATTEMPT_PATTERN = /^[0-9]{1,6}$/u;
+const TEST_SCOPE_ARGS = Object.freeze({
+  full: [],
+  lifecycle: ['--grep', 'customer registration through cancelled draft completes against real local RLS and RPCs'],
+  aborted: ['--grep', 'an executed update with an aborted response is not retried and requires a fresh read'],
+  affected: ['--grep', '(?:customer registration through cancelled draft completes against real local RLS and RPCs|an executed update with an aborted response is not retried and requires a fresh read)'],
+});
+
+function buildRunId() {
+  const workflowRun = WORKFLOW_RUN_PATTERN.test(String(process.env.GITHUB_RUN_ID ?? ''))
+    ? String(process.env.GITHUB_RUN_ID)
+    : `local${process.pid}`;
+  const workflowAttempt = WORKFLOW_ATTEMPT_PATTERN.test(String(process.env.GITHUB_RUN_ATTEMPT ?? ''))
+    ? String(process.env.GITHUB_RUN_ATTEMPT)
+    : '0';
+  return `r${workflowRun}-a${workflowAttempt}-${randomBytes(4).toString('hex')}`;
+}
+
+const runId = buildRunId();
+const testScope = String(process.env.E2E_TEST_SCOPE ?? 'full');
 let frontendServer;
 let supabaseStarted = false;
 let runtimeConfigCreated = false;
@@ -50,8 +70,13 @@ function assertCleanupPath(target) {
 
 function runPlaywright(environment) {
   return new Promise((resolvePromise, reject) => {
+    const scopeArgs = TEST_SCOPE_ARGS[testScope];
+    if (!scopeArgs) {
+      reject(new Error('e2e-test-scope-invalid'));
+      return;
+    }
     const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-    const child = spawn(command, ['exec', 'playwright', 'test'], {
+    const child = spawn(command, ['exec', 'playwright', 'test', ...scopeArgs], {
       cwd: frontendRoot,
       env: environment,
       shell: false,

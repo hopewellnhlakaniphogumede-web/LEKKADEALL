@@ -161,6 +161,36 @@ export async function waitForProvisionedCustomerProfile(
   throw new Error('ticket-9b-profile-readiness-timeout');
 }
 
+export async function assertSyntheticAccountAbsent(emailValue) {
+  const state = await readSyntheticAccountFixtureState(emailValue);
+  if (state !== 'absent') throw new Error('synthetic-ui-signup-identity-not-absent');
+}
+
+export async function reconcileAmbiguousUiSignup(
+  emailValue,
+  {
+    discoveryTimeoutMs = 5_000,
+    readinessTimeoutMs = 60_000,
+    intervalMs = 100,
+  } = {},
+) {
+  const email = requireSyntheticEmail(emailValue);
+  const deadline = Date.now() + discoveryTimeoutMs;
+  do {
+    const state = await readSyntheticAccountFixtureState(email);
+    if (state === 'invalid') throw new Error('synthetic-ui-signup-reconciliation-invalid');
+    if (state === 'auth-only' || state === 'ready') {
+      await waitForProvisionedCustomerProfile(email, {
+        timeoutMs: readinessTimeoutMs,
+        intervalMs: 250,
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  } while (Date.now() < deadline);
+  throw new Error('synthetic-ui-signup-reconciliation-absent');
+}
+
 async function reconcileAmbiguousSyntheticAuthCreation(
   email,
   { timeoutMs = 5_000, intervalMs = 100 } = {},
