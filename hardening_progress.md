@@ -3235,7 +3235,7 @@ No migration, production function, frontend file, workflow file, RLS policy, gra
 
 ### Ticket 9A-9 implementation — Customer draft lifecycle E2E verification — 2026-07-21
 
-**Status:** Implemented locally; GitHub Actions CI verification pending.
+**Status:** CI-verified — Success.
 
 #### E2E architecture added
 
@@ -3301,7 +3301,7 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Playwright configuration discovery successfully finds all **8** Chromium E2E scenarios.
 - Added isolated GitHub Actions job `customer-draft-lifecycle-e2e` with `needs: database-tests`, so it runs only after the existing frontend, Deno webhook, clean migration reset, and every pgTAP step pass.
 - The job installs only the pinned Chromium runtime, invokes the local-only orchestrator, uses no GitHub environment secret or remote project, uploads no browser/database/Auth artifact, and performs an additional always-run runtime-config/Supabase cleanup.
-- Docker, Supabase CLI, and the local PostgreSQL stack are unavailable on this host. The real migration reset and browser-against-database journey could not be run locally; GitHub Actions is the authoritative full E2E gate. CI status remains pending.
+- Docker, Supabase CLI, and the local PostgreSQL stack remain unavailable on this development host, so the browser-against-database journey was not run locally. GitHub Actions is the authoritative full E2E gate and is now fully green.
 
 #### Intentionally blocked and security confirmations
 
@@ -3691,7 +3691,7 @@ No migration, RLS policy, grant, production database function, validator, profil
 
 ### Ticket 9A-9 E2E correction - restricted actor setup phase isolation - 2026-07-28
 
-**Status:** Restricted/negative-actor setup correction implemented and locally static-verified; disposable-stack execution remains unavailable on this host.
+**Status:** CI-verified in GitHub Actions — Success.
 
 #### Root cause
 
@@ -3723,3 +3723,64 @@ No migration, RLS policy, grant, production database function, validator, profil
 - Playwright focused discovery: **8 synthetic Chromium scenarios discovered** with the privacy-safe reporter.
 - The complete `pnpm run test:e2e:local` command was invoked and failed at the redacted prerequisite boundary because Docker and Supabase CLI are unavailable on this host; no Playwright scenario ran and no runtime configuration or artifact was left behind.
 - Workflow path checks pass: the E2E job still runs from `outputs/lekkadeall-frontend-shell`, depends on `database-tests`, and the Supabase project remains at `outputs/marketplace-production-foundation/supabase/config.toml`.
+
+### Ticket 9A-9 CI verification closure - 2026-07-28
+
+**Workflow run:** `Fix Ticket 9A-9 negative actor E2E setup`  
+**Status:** Success  
+**Duration:** 10m 8s
+
+#### E2E tests implemented and verified
+
+All **8/8** synthetic Chromium E2E tests pass against the disposable loopback Supabase stack:
+
+1. Blocked marketplace and privileged controls remain absent from the customer shell.
+2. Signed-out customer routes and the absent admin route fail closed.
+3. Customer registration through draft creation, list/detail, update, cancellation, and final database postconditions succeeds through real local Auth, RLS, and the reviewed RPCs.
+4. Cross-customer request identifiers remain RLS-hidden and non-actionable in separate browser contexts.
+5. Restricted, suspended, closed, missing-profile, and wrong-role actors fail closed before request-domain reads or mutations.
+6. A stale edit is rejected after another tab cancels the draft.
+7. An executed update with an aborted browser response is not retried and requires a fresh read.
+8. Recovery routes fail closed without persisting a PKCE verifier.
+
+#### Failures encountered and root causes
+
+- The shared sign-out helper initially expected the site root instead of the implemented `/auth/sign-in` redirect.
+- The three aggregate journeys inherited an insufficient 60-second Playwright timeout; the five-actor matrix required a larger bounded serial timeout than the other comprehensive journeys.
+- A workflow verification step checked for a root-level Supabase project instead of the committed nested project path.
+- Registration originally combined signup-response, Auth-session, Ticket 9B profile, and dashboard readiness into one broad condition, making readiness races and failures non-deterministic and poorly attributable.
+- Registration pacing was measured from request start rather than confirmed completion, and setup-only scenarios consumed the disposable Auth sign-in/sign-up quota through unnecessary UI registrations.
+- The late provider actor inherited that local quota pressure, while its setup step combined too many phases for privacy-safe failure attribution.
+- The final negative-actor setup still treated a rejected Auth-admin response as a definite failure even when Auth might already have committed the user, and its former scalar readiness check could not distinguish absent, Auth-only, ready, and invalid fixture states.
+
+These were E2E harness, workflow-path, local quota, readiness, and fixture-setup defects. The successful runs did not require weakening application guards, RLS, provisioning, validation, or lifecycle protections.
+
+#### Final negative-actor fixture correction
+
+- All five negative actors now run serially through separate Auth creation, explicit 60-second Ticket 9B readiness, browser session, fixture-state application, and route-guard verification phases.
+- Every actor receives an independent browser context, and the browser network boundary is installed before sign-in with the exact local anon key.
+- The no-row fixture classifier distinguishes only `absent`, `auth-only`, `ready`, and `invalid`; it returns or prints no Auth/profile row, identifier, credential, or response detail.
+- Auth setup issues exactly one creation request. An ambiguous rejected response is reconciled through the scalar fixture state without retrying creation; only `auth-only` or `ready` is accepted, while `absent` and `invalid` fail closed.
+- Restricted, suspended, closed, provider, and missing-profile state is applied only after a normal browser session exists.
+- Request-table reads and create/update/cancel RPC counts are captured before guarded navigation and must remain unchanged after rejection.
+- Failure reporting remains limited to fixed privacy-safe actor, phase, and result categories.
+
+#### Final green verification
+
+- Existing frontend and static security tests: **64/64 passed**.
+- Existing Deno webhook tests: **passed**.
+- Clean migration reset and all existing pgTAP suites: **passed**.
+- Ticket 9A-9 Playwright E2E: **8/8 passed**.
+- The isolated E2E job still depends on the complete database-security job, so Playwright runs only after frontend, Deno, migration-reset, and pgTAP verification succeeds.
+- Screenshots, video, traces, HAR, saved storage state, Auth-email artifacts, database dumps, verbose reports, and artifact upload remain disabled.
+
+#### Blocked scope and unchanged protections
+
+- Publication remains blocked.
+- Exact-address collection, storage, read, reveal, encryption, geolocation, and mapping remain blocked.
+- Provider onboarding, feeds, bidding, and selection remain blocked.
+- Booking actions remain blocked.
+- Payments, checkout, refunds, payouts, and disputes remain blocked.
+- The admin dashboard remains absent.
+- Profile editing remains blocked.
+- No RLS policy, grant, Ticket 9B profile-provisioning rule, public-field validator, state-machine guard, draft-cancellation protection, or draft-update protection was weakened or changed.
