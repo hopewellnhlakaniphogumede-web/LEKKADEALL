@@ -3784,3 +3784,28 @@ These were E2E harness, workflow-path, local quota, readiness, and fixture-setup
 - The admin dashboard remains absent.
 - Profile editing remains blocked.
 - No RLS policy, grant, Ticket 9B profile-provisioning rule, public-field validator, state-machine guard, draft-cancellation protection, or draft-update protection was weakened or changed.
+
+### Ticket 9A-9 CI correction - deterministic Supabase CLI installation - 2026-07-28
+
+**Status:** Exact known-good CLI pin implemented; replacement GitHub Actions verification pending.
+
+#### Failure and root cause
+
+- The workflow failed in `Set up Supabase CLI` before the Ticket 9A-9 Playwright tests started with `Failed to resolve latest Supabase CLI release: rate limit exceeded`.
+- This was an external GitHub release-resolution failure caused by `version: latest`. It was not an application, migration, pgTAP, Deno, frontend, or Playwright assertion failure.
+- The preceding successful `Fix Ticket 9A-9 negative actor E2E setup` run used Supabase CLI `2.110.0`. That run completed with **Status: Success** in **10m 8s** and passed the complete main security/database job followed by all **8/8** Ticket 9A-9 Playwright tests.
+
+#### Deterministic correction
+
+- Both Supabase setup steps now use `supabase/setup-cli@v2` with the exact version `2.110.0`; no setup step uses `latest`.
+- Both steps pass only the workflow-scoped `${{ github.token }}`. Workflow permissions remain read-only with `contents: read`; no personal access token, production secret, or remote Supabase credential was added.
+- The main migrations/pgTAP job retains `outputs/marketplace-production-foundation` as its default working directory.
+- The disposable Ticket 9A-9 runner still starts, resets, and stops Supabase from `outputs/marketplace-production-foundation`, while Playwright runs from `outputs/lekkadeall-frontend-shell`.
+- `customer-draft-lifecycle-e2e` still declares `needs: database-tests`, so the E2E boundary cannot run until frontend, Deno, clean migration reset, and every pgTAP suite pass.
+
+#### Security and scope confirmation
+
+- No migration, RLS policy, grant, policy, function, trigger, Ticket 9B provisioning rule, public-field validator, marketplace state-machine guard, draft-cancellation protection, draft-update protection, or test changed.
+- The E2E remains loopback-only, disposable, one-worker, retry-free, and anon-key-only in the browser. No mutation retry was added.
+- Screenshots, video, traces, HAR, saved storage state, Auth-email artifacts, database dumps, and artifact upload remain disabled.
+- Publication, exact-address handling, provider onboarding/bidding, booking actions, payments, admin dashboard, and profile editing remain blocked.

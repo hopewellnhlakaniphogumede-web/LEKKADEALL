@@ -47,9 +47,10 @@ jobs:
         run: docker version
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 2.110.0
+          github-token: ${{ github.token }}
 
       - name: Verify committed local Supabase config
         working-directory: .
@@ -136,9 +137,10 @@ jobs:
         run: docker version
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 2.110.0
+          github-token: ${{ github.token }}
 
       - name: Run local-only Ticket 9A-9 Playwright boundary
         working-directory: outputs/lekkadeall-frontend-shell
