@@ -99,7 +99,12 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(reporterSource, /signup-http-429\|signup-http-conflict\|signup-http-other/);
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
-  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|fresh-rls-read\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(
+    reporterSource,
+    /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
+  );
+  assert.match(reporterSource, /if \(!step\.error && SAFE_PROGRESS_PHASE\.test\(step\.title\)\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -261,11 +266,11 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
   assert.match(
     securitySource,
-    /ambiguous-ui[\s\S]*interception-release[\s\S]*Fetch\.disable[\s\S]*Fetch\.requestPaused[\s\S]*cdpSession\.detach\(\)[\s\S]*fresh-rls-read/u,
+    /ambiguous-ui[\s\S]*interceptor-release-start[\s\S]*Fetch\.disable[\s\S]*fetch-disabled[\s\S]*Fetch\.requestPaused[\s\S]*listenerCount\('Fetch\.requestPaused'\)[\s\S]*cdpSession\.detach\(\)[\s\S]*cdp-detached/u,
   );
   assert.match(
     securitySource,
-    /getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*toBeGreaterThan\(readBaseline\)/u,
+    /detail-navigation[\s\S]*getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read[\s\S]*toBe\(readBaseline \+ 1\)[\s\S]*rls-read-observed/u,
   );
   assert.match(
     securitySource,
@@ -273,8 +278,10 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.match(
     securitySource,
-    /fresh-rls-read[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
+    /canonical-values[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)[\s\S]*canonical-values-verified[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
   );
+  assert.match(securitySource, /mutation-executed/);
+  assert.match(securitySource, /ambiguous-update-failure:cleanup[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u);
   assert.doesNotMatch(securitySource, /page\.reload\(\)|name: 'Back to draft'/u);
 });
 

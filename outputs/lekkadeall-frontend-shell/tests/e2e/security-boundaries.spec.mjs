@@ -72,9 +72,22 @@ const AMBIGUOUS_UPDATE_FAILURE_CATEGORIES = new Set([
   'single-update-execution',
   'ambiguous-ui',
   'interception-release',
+  'detail-navigation',
   'fresh-rls-read',
+  'canonical-values',
   'postcondition',
   'sign-out',
+  'cleanup',
+]);
+const AMBIGUOUS_UPDATE_PROGRESS_PHASES = new Set([
+  'mutation-executed',
+  'interceptor-release-start',
+  'fetch-disabled',
+  'cdp-detached',
+  'detail-navigation',
+  'rls-read-observed',
+  'canonical-values-verified',
+  'cleanup',
 ]);
 
 async function withAmbiguousUpdateFailureCategory(category, operation) {
@@ -89,6 +102,13 @@ async function withAmbiguousUpdateFailureCategory(category, operation) {
     });
     return undefined;
   }
+}
+
+async function markAmbiguousUpdateProgress(phase) {
+  if (!AMBIGUOUS_UPDATE_PROGRESS_PHASES.has(phase)) {
+    throw new Error('ambiguous-update-progress-phase-invalid');
+  }
+  await test.step(`ambiguous-update:${phase}`, async () => {});
 }
 
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
@@ -413,6 +433,7 @@ test('an executed update with an aborted response is not retried and requires a 
       expect(responseAborted).toBe(true);
       expect(interceptionFailure).toBe(false);
       expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      await markAmbiguousUpdateProgress('mutation-executed');
     });
 
     await withAmbiguousUpdateFailureCategory('ambiguous-ui', async () => {
@@ -422,17 +443,32 @@ test('an executed update with an aborted response is not retried and requires a 
     });
 
     await withAmbiguousUpdateFailureCategory('interception-release', async () => {
+      await markAmbiguousUpdateProgress('interceptor-release-start');
       await cdpSession.send('Fetch.disable');
+      await markAmbiguousUpdateProgress('fetch-disabled');
       cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
+      expect(cdpSession.listenerCount('Fetch.requestPaused')).toBe(0);
       pausedUpdateHandler = undefined;
       await cdpSession.detach();
       cdpSession = undefined;
+      await markAmbiguousUpdateProgress('cdp-detached');
+    });
+
+    let readBaseline;
+    await withAmbiguousUpdateFailureCategory('detail-navigation', async () => {
+      expect(cdpSession).toBeUndefined();
+      expect(pausedUpdateHandler).toBeUndefined();
+      readBaseline = policy.getTableReadCount('service_requests');
+      await openDraftDetail(page, requestId);
+      await markAmbiguousUpdateProgress('detail-navigation');
     });
 
     await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
-      const readBaseline = policy.getTableReadCount('service_requests');
-      await openDraftDetail(page, requestId);
-      await expect.poll(() => policy.getTableReadCount('service_requests')).toBeGreaterThan(readBaseline);
+      await expect.poll(() => policy.getTableReadCount('service_requests')).toBe(readBaseline + 1);
+      await markAmbiguousUpdateProgress('rls-read-observed');
+    });
+
+    await withAmbiguousUpdateFailureCategory('canonical-values', async () => {
       const detail = page.locator('.request-detail-card');
       const expectedRequestedStart = formatSastDateTime(`${edited.requestedStart}:00+02:00`);
       const expectedBudget = formatZarBudgetMinor(Math.round(Number(edited.budget) * 100));
@@ -446,6 +482,7 @@ test('an executed update with an aborted response is not retried and requires a 
       await expect(detail.getByText(expectedBudget, { exact: true })).toBeVisible();
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
       expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      await markAmbiguousUpdateProgress('canonical-values-verified');
     });
 
     await withAmbiguousUpdateFailureCategory('postcondition', async () => {
@@ -462,16 +499,31 @@ test('an executed update with an aborted response is not retried and requires a 
       await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
     });
   } finally {
+    let cleanupFailed = false;
     if (cdpSession) {
-      if (pausedUpdateHandler) cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
+      if (pausedUpdateHandler) {
+        cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
+        pausedUpdateHandler = undefined;
+      }
       try {
         await cdpSession.send('Fetch.disable');
         await cdpSession.detach();
       } catch {
-        // The context teardown below is the final fail-closed cleanup boundary.
+        cleanupFailed = true;
       }
     }
-    await context.close();
+    try {
+      await context.close();
+    } catch {
+      cleanupFailed = true;
+    }
+    if (cleanupFailed) {
+      await test.step('ambiguous-update-failure:cleanup', async () => {
+        throw new Error('privacy-safe-ambiguous-update-boundary-failure');
+      });
+    } else {
+      await markAmbiguousUpdateProgress('cleanup');
+    }
   }
 });
 
