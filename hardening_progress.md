@@ -3857,3 +3857,35 @@ These were E2E harness, workflow-path, local quota, readiness, and fixture-setup
 - Browser authority remains anon-key-only and loopback-only. The fixture-admin credential remains Node-only and unprinted.
 - Playwright remains one-worker, zero-retry, bounded, and artifact-free. Screenshots, video, traces, HAR, storage state, Auth-email artifacts, database dumps, and artifact upload remain disabled.
 - Publication, exact-address handling, provider onboarding/bidding, bookings, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction - bounded Auth identity and original-response abort - 2026-07-29
+
+**Status:** Two current harness defects corrected; disposable Supabase-backed verification is pending on a Docker/Supabase-capable runner.
+
+This correction supersedes two narrow implementation details in the 2026-07-28 entry above: an explicit signup conflict is not eligible for ambiguous reconciliation, and the aborted-update scenario no longer uses `route.fetch()`.
+
+#### Failure 1 - lifecycle UI signup
+
+- **Expected:** the lifecycle actor has a fresh, run/attempt/test/actor-scoped identity, sends exactly one real UI signup, receives a local Auth session, satisfies the unchanged Ticket 9B one-profile `customer`/`active` invariant, and continues through the real RLS/RPC lifecycle.
+- **Actual privacy-safe category:** `registration-failure:signup-http-conflict`.
+- **Root cause:** the helper treated an explicit `409`/`422` response as though it were a no-response transport ambiguity and attempted to adopt the observed account through reconciliation. An explicit server response is not ambiguous. The lifecycle source does not call either fixture Auth-creation helper, contains one registration call and one signup click, and the application has a global single-flight Auth submission guard. The checked-in E2E defect was therefore unsafe conflict attribution/reconciliation, not a Ticket 9B, Auth metadata, route-guard, or RLS defect.
+- **Fix:** the full validated run ID still carries workflow run, attempt, and fresh runner nonce. Fixed SHA-256-derived test and actor components plus a fresh 40-bit random suffix preserve all required identity scopes in a maximum 63-character local-part. This removes avoidable identity-format variability but is not used to adopt or retry a collision.
+- **Ambiguity rule:** the browser still performs one `Create account` click under the application single-flight guard. Only a one-request/no-observable-response transport ambiguity may use scalar no-row reconciliation. An explicit `409`/`422` response fails closed as `signup-http-conflict`; it is not reconciled, signed up again, or adopted. The lifecycle source is statically required not to use either fixture Auth-creation helper.
+
+#### Failure 2 - executed update with aborted response
+
+- **Expected:** one isolated `customer_update_draft_request(...)` reaches the server, the original browser response is aborted after a successful server status, no second mutation executes, no optimistic success appears, and a fresh RLS-backed read is required before cancellation.
+- **Actual privacy-safe category:** `assertion-or-runtime`.
+- **Root cause:** `route.fetch()` performs an interceptor-owned fetch and then aborts the routed request. That did not model aborting the original browser response directly and left the execution/response identity dependent on route-proxy timing. The application RPC, retry policy, and database state machine were unchanged.
+- **Fix:** a Chromium Fetch-domain session pauses the original request. It continues exactly the first request with response interception enabled, verifies the response-stage status without reading the body, and fails that same response back to the browser. Any second request is failed at request stage before server execution. The interceptor stays active through the ambiguous UI and fresh-read checks.
+- The assertions require exactly one request-stage interception, one response-stage interception, one browser-policy RPC count, a successful execution status, an aborted browser response, no `Draft updated.` message, a disabled submit action, and an increased `service_requests` RLS-read count after reload before the later deliberate cancellation.
+
+#### Redacted verification
+
+- Existing frontend/static security suite: **64/64 passed**.
+- Node syntax checks passed for the three changed E2E JavaScript modules.
+- A loopback-only local Chromium protocol probe passed: the first original request executed exactly once, its same request ID reached response stage and was aborted, and a deliberately issued second request was stopped before reaching the local server.
+- The requested `lifecycle`, `aborted`, `affected`, and `full` runner scopes were invoked, but all stopped before Supabase startup because this Windows host has neither Docker nor the Supabase CLI. No Playwright scenario ran, so no 8/8 result is claimed. The privacy-safe runner withheld internal details as designed.
+- The previously reported main frontend, Deno, migration-reset, and pgTAP job remains the authoritative green result for those unchanged surfaces. No migration, RLS, grant, trusted RPC, validator, route guard, Ticket 9B trigger, cancellation rule, update rule, or restricted/provider fixture changed.
+- The E2E configuration remains loopback-only, disposable, one-worker, no-retry, anon-key-only in browser code, and artifact-free. No credential, email, password, token, Auth code, request body, header, URL, or database row was logged.
+- Publication, exact address, provider bidding, booking actions, payments, admin dashboard, and profile editing remain blocked.

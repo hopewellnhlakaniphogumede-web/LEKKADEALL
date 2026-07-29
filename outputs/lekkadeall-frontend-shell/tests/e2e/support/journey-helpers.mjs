@@ -10,16 +10,12 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const E2E_RUN_ID_PATTERN = /^r(?:[0-9]{1,20}|local[0-9]{1,10})-a[0-9]{1,6}-[0-9a-f]{8}$/u;
 const AUTH_STORAGE_KEY_PATTERN = /^sb-[a-z0-9-]+-auth-token$/iu;
+const EMAIL_LOCAL_PART_MAX_LENGTH = 64;
 
 function testIdentityComponent() {
   const title = String(test.info().title ?? '');
-  const slug = title.toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .slice(0, 12);
-  const digest = createHash('sha256').update(title).digest('hex').slice(0, 8);
-  if (!slug) throw new Error('synthetic-test-identity-invalid');
-  return `${slug}-${digest}`;
+  if (!title) throw new Error('synthetic-test-identity-invalid');
+  return createHash('sha256').update(title).digest('hex').slice(0, 6);
 }
 
 export function syntheticAccount(label) {
@@ -29,9 +25,12 @@ export function syntheticAccount(label) {
     throw new Error('synthetic-account-identity-invalid');
   }
   const testComponent = testIdentityComponent();
-  const actorSuffix = randomBytes(6).toString('hex');
-  const localPart = `${runId}.${testComponent}.${actor}.${actorSuffix}`;
-  if (localPart.length > 100) throw new Error('synthetic-account-identity-too-long');
+  const actorComponent = createHash('sha256').update(actor).digest('hex').slice(0, 6);
+  const actorSuffix = randomBytes(5).toString('hex');
+  const localPart = `${runId}.${testComponent}.${actorComponent}.${actorSuffix}`;
+  if (localPart.length > EMAIL_LOCAL_PART_MAX_LENGTH) {
+    throw new Error('synthetic-account-identity-too-long');
+  }
   return Object.freeze({
     email: `${localPart}@lekkadeall.invalid`,
     password: `E2e-${randomBytes(18).toString('base64url')}!9`,
@@ -136,7 +135,7 @@ export async function registerCustomer(page, account) {
     if (response.status() === 429) {
       await failRegistration('signup-http-429');
     } else if ([409, 422].includes(response.status())) {
-      await reconcileSingleUiSignup(page, account, signupRequestCount);
+      await failRegistration('signup-http-conflict');
     } else if (!response.ok()) {
       await failRegistration('signup-http-other');
     }

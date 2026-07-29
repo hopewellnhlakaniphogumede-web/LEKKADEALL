@@ -97,6 +97,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
+  assert.match(reporterSource, /signup-http-429\|signup-http-conflict\|signup-http-other/);
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|fresh-rls-read\|postcondition\|sign-out\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
@@ -121,11 +122,30 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(helperSource, /process\.env\.E2E_RUN_ID/);
   assert.match(helperSource, /test\.info\(\)\.title/);
   assert.match(helperSource, /createHash\('sha256'\)/);
-  assert.match(helperSource, /randomBytes\(6\)\.toString\('hex'\)/);
+  assert.equal((helperSource.match(/digest\('hex'\)\.slice\(0, 6\)/gu) ?? []).length, 2);
+  assert.match(helperSource, /randomBytes\(5\)\.toString\('hex'\)/);
+  assert.match(helperSource, /EMAIL_LOCAL_PART_MAX_LENGTH\s*=\s*64/);
+  assert.match(
+    helperSource,
+    /`\$\{runId\}\.\$\{testComponent\}\.\$\{actorComponent\}\.\$\{actorSuffix\}`/u,
+  );
+  const longestRunId = `r${'9'.repeat(20)}-a${'9'.repeat(6)}-${'a'.repeat(8)}`;
+  const longestLocalPart = [
+    longestRunId,
+    'b'.repeat(6),
+    'c'.repeat(6),
+    'd'.repeat(10),
+  ].join('.');
+  assert.equal(longestLocalPart.length, 63);
   assert.match(helperSource, /assertSyntheticAccountAbsent/);
   assert.match(helperSource, /reconcileAmbiguousUiSignup/);
   assert.match(helperSource, /signupRequestCount !== 1/);
+  assert.equal((helperSource.match(/await reconcileSingleUiSignup\(/gu) ?? []).length, 1);
   assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.match(
+    helperSource,
+    /\[409, 422\]\.includes\(response\.status\(\)\)[\s\S]*failRegistration\('signup-http-conflict'\)/u,
+  );
   assert.match(appSource, /if \(authSubmissionInFlight\) return;/);
   assert.match(appSource, /authSubmissionInFlight = true;[\s\S]*await submitAuthFormOnce\(form\);[\s\S]*authSubmissionInFlight = false;/u);
   assert.match(helperSource, /registration-phase:signup-request/);
@@ -197,6 +217,8 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   assert.equal((
     `${blockedSource}\n${lifecycleSource}\n${securitySource}`.match(/registerCustomer\(/gu) ?? []
   ).length, 2);
+  assert.equal((lifecycleSource.match(/registerCustomer\(page, account\)/gu) ?? []).length, 1);
+  assert.doesNotMatch(lifecycleSource, /prepareSyntheticCustomerAccount|createSyntheticLocalAuthUser/u);
   assert.match(
     securitySource,
     /prepareSyntheticCustomerAccount\(customerA\.email, customerA\.password\)[\s\S]*signInCustomer\(pageA, customerA\)[\s\S]*registerCustomer\(pageB, customerB\)/u,
@@ -226,8 +248,16 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,
   );
   assert.match(securitySource, /browser\.newContext\(\{ baseURL: appUrl, serviceWorkers: 'allow' \}\)/);
-  assert.match(securitySource, /route\.fetch\(\{ maxRetries: 0 \}\)/);
-  assert.match(securitySource, /interceptedUpdateCount !== 1[\s\S]*route\.abort\('failed'\)/u);
+  assert.match(securitySource, /context\.newCDPSession\(page\)/);
+  assert.match(
+    securitySource,
+    /Fetch\.continueRequest[\s\S]*interceptResponse:\s*true[\s\S]*Fetch\.failRequest/u,
+  );
+  assert.match(
+    securitySource,
+    /interceptedUpdateCount === 1[\s\S]*Fetch\.continueRequest[\s\S]*Fetch\.failRequest/u,
+  );
+  assert.doesNotMatch(securitySource, /route\.fetch\(/u);
   assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
   assert.match(securitySource, /getTableReadCount\('service_requests'\)[\s\S]*page\.reload\(\)[\s\S]*toBeGreaterThan\(readBaseline\)/u);
 });

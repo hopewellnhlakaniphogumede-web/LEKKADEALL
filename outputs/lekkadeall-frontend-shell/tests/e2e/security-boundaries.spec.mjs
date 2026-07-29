@@ -324,7 +324,8 @@ test('an executed update with an aborted response is not retried and requires a 
   let policy;
   let emissions;
   let requestId;
-  const rpcPattern = '**/rest/v1/rpc/customer_update_draft_request';
+  let cdpSession;
+  let pausedUpdateHandler;
   try {
     await withAmbiguousUpdateFailureCategory('isolated-setup', async () => {
       page = await context.newPage();
@@ -337,18 +338,63 @@ test('an executed update with an aborted response is not retried and requires a 
     });
 
     let interceptedUpdateCount = 0;
+    let interceptedResponseCount = 0;
     let updateExecuted = false;
     let responseAborted = false;
-    await page.route(rpcPattern, async (route) => {
-      interceptedUpdateCount += 1;
-      if (interceptedUpdateCount !== 1) {
-        await route.abort('failed');
-        return;
+    let interceptionFailure = false;
+    let firstUpdateRequestId;
+    cdpSession = await context.newCDPSession(page);
+    pausedUpdateHandler = async (event) => {
+      const isResponseStage = Object.hasOwn(event, 'responseStatusCode')
+        || Object.hasOwn(event, 'responseErrorReason');
+      try {
+        if (isResponseStage) {
+          interceptedResponseCount += 1;
+          if (event.requestId !== firstUpdateRequestId) {
+            interceptionFailure = true;
+          }
+          updateExecuted = Number.isInteger(event.responseStatusCode)
+            && event.responseStatusCode >= 200
+            && event.responseStatusCode < 300;
+          await cdpSession.send('Fetch.failRequest', {
+            requestId: event.requestId,
+            errorReason: 'Aborted',
+          });
+          responseAborted = true;
+          return;
+        }
+
+        interceptedUpdateCount += 1;
+        if (interceptedUpdateCount === 1) {
+          firstUpdateRequestId = event.requestId;
+          await cdpSession.send('Fetch.continueRequest', {
+            requestId: event.requestId,
+            interceptResponse: true,
+          });
+          return;
+        }
+        await cdpSession.send('Fetch.failRequest', {
+          requestId: event.requestId,
+          errorReason: 'Aborted',
+        });
+      } catch {
+        interceptionFailure = true;
+        try {
+          await cdpSession.send('Fetch.failRequest', {
+            requestId: event.requestId,
+            errorReason: 'Aborted',
+          });
+        } catch {
+          // Cleanup remains privacy-safe; the fixed category reports the boundary.
+        }
       }
-      const response = await route.fetch({ maxRetries: 0 });
-      updateExecuted = response.ok();
-      await route.abort('failed');
-      responseAborted = true;
+    };
+    cdpSession.on('Fetch.requestPaused', pausedUpdateHandler);
+    await cdpSession.send('Fetch.enable', {
+      patterns: [{
+        urlPattern: '*customer_update_draft_request*',
+        requestStage: 'Request',
+      }],
     });
 
     await withAmbiguousUpdateFailureCategory('single-update-execution', async () => {
@@ -359,17 +405,19 @@ test('an executed update with an aborted response is not retried and requires a 
         { exact: true },
       )).toBeVisible();
       expect(interceptedUpdateCount).toBe(1);
+      expect(interceptedResponseCount).toBe(1);
       expect(updateExecuted).toBe(true);
       expect(responseAborted).toBe(true);
+      expect(interceptionFailure).toBe(false);
       expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
     });
 
     await withAmbiguousUpdateFailureCategory('ambiguous-ui', async () => {
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
       await expect(page.locator('form[data-draft-edit-form] button[type="submit"]')).toBeDisabled();
+      expect(interceptedUpdateCount).toBe(1);
     });
 
-    await page.unroute(rpcPattern);
     await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
       const readBaseline = policy.getTableReadCount('service_requests');
       await page.reload();
@@ -377,6 +425,11 @@ test('an executed update with an aborted response is not retried and requires a 
       await expect(page.locator('input[name="title"]')).toHaveValue(edited.title);
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
       expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      await cdpSession.send('Fetch.disable');
+      cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
+      pausedUpdateHandler = undefined;
+      await cdpSession.detach();
+      cdpSession = undefined;
     });
 
     await withAmbiguousUpdateFailureCategory('postcondition', async () => {
@@ -394,7 +447,15 @@ test('an executed update with an aborted response is not retried and requires a 
       await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
     });
   } finally {
-    await page?.unroute(rpcPattern);
+    if (cdpSession) {
+      if (pausedUpdateHandler) cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
+      try {
+        await cdpSession.send('Fetch.disable');
+        await cdpSession.detach();
+      } catch {
+        // The context teardown below is the final fail-closed cleanup boundary.
+      }
+    }
     await context.close();
   }
 });
