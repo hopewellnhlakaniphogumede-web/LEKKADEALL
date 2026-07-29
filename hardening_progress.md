@@ -3889,3 +3889,32 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - The previously reported main frontend, Deno, migration-reset, and pgTAP job remains the authoritative green result for those unchanged surfaces. No migration, RLS, grant, trusted RPC, validator, route guard, Ticket 9B trigger, cancellation rule, update rule, or restricted/provider fixture changed.
 - The E2E configuration remains loopback-only, disposable, one-worker, no-retry, anon-key-only in browser code, and artifact-free. No credential, email, password, token, Auth code, request body, header, URL, or database row was logged.
 - Publication, exact address, provider bidding, booking actions, payments, admin dashboard, and profile editing remain blocked.
+
+### Ticket 9A-9 E2E correction - interceptor release before fresh verification - 2026-07-29
+
+**Status:** Narrow ambiguous-update harness correction implemented; real-stack browser verification is pending on a Docker/Supabase-capable runner.
+
+#### Confirmed root cause
+
+- The original update request had already proved that exactly one `customer_update_draft_request(...)` reached a successful response stage before that original browser response was aborted.
+- The subsequent `fresh-rls-read` phase incorrectly combined reload, authoritative-value assertions, Fetch shutdown, listener removal, and CDP detach.
+- Because the response-abort interceptor remained active during reload, an interceptor teardown or detach failure was misclassified as a fresh RLS-read failure. This was E2E phase ownership and cleanup ordering, not an RPC, RLS, route-guard, provisioning, validation, cancellation, or state-machine defect.
+
+#### Correction
+
+- `ambiguous-ui` still proves that `Draft updated.` was never shown, submission remains disabled, and no second intercepted update occurred.
+- A new allowlisted privacy-safe `interception-release` phase calls `Fetch.disable`, removes the paused-request listener, and detaches the CDP session completely before any verification navigation.
+- `fresh-rls-read` now records the `service_requests` baseline and uses `openDraftDetail(...)` for a normal navigation to the owned draft detail route. It requires the read count to increase before accepting the page.
+- The freshly loaded detail page must render the canonical draft status, active category, edited title, description, suburb, city, requested start, and budget. The exact `customer_update_draft_request(...)` RPC count must remain one, and `Draft updated.` must still be absent.
+- Cancellation starts directly on that freshly loaded detail page; the scenario no longer reloads the blocked edit page or follows its `Back to draft` link.
+- The static boundary suite now requires this release-before-navigation order and the separate privacy-safe phase.
+
+#### Verification and unchanged security
+
+- Node syntax checks passed for the three changed JavaScript modules.
+- The focused Ticket 9A-9 static boundary file passed **11/11**.
+- The complete existing frontend/static suite passed **64/64**.
+- The requested `aborted`, `affected`, and `full` runner scopes were invoked. Each stopped at the privacy-safe startup gate before Playwright because this host has neither Docker nor the Supabase CLI. No independent scenario, combined pair, or full eight-scenario browser result is claimed; cleanup left no generated runtime config or Playwright report directory.
+- Playwright remains Chromium-only, one-worker, and zero-retry. Screenshots, videos, traces, HAR, saved storage state, Auth-email artifacts, database dumps, verbose failure details, and artifact upload remain disabled.
+- No optimistic success, automatic update retry, or alternate mutation path was added.
+- `customer_update_draft_request(...)`, RLS, route guards, Ticket 9B profile provisioning, public-field validation, cancellation, state-machine protections, and privacy redaction are unchanged. Signup, negative-actor, provider, cross-customer, and lifecycle setup were not modified.

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { formatSastDateTime, formatZarBudgetMinor } from '../../customer-requests.js';
 import {
+  ACTIVE_CATEGORY_NAME,
   assertCustomerLifecyclePostconditions,
   assertDistinctSyntheticUsers,
   assertSyntheticProfileAbsent,
@@ -69,6 +71,7 @@ const AMBIGUOUS_UPDATE_FAILURE_CATEGORIES = new Set([
   'isolated-setup',
   'single-update-execution',
   'ambiguous-ui',
+  'interception-release',
   'fresh-rls-read',
   'postcondition',
   'sign-out',
@@ -418,13 +421,7 @@ test('an executed update with an aborted response is not retried and requires a 
       expect(interceptedUpdateCount).toBe(1);
     });
 
-    await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
-      const readBaseline = policy.getTableReadCount('service_requests');
-      await page.reload();
-      await expect.poll(() => policy.getTableReadCount('service_requests')).toBeGreaterThan(readBaseline);
-      await expect(page.locator('input[name="title"]')).toHaveValue(edited.title);
-      await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
-      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+    await withAmbiguousUpdateFailureCategory('interception-release', async () => {
       await cdpSession.send('Fetch.disable');
       cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
       pausedUpdateHandler = undefined;
@@ -432,8 +429,26 @@ test('an executed update with an aborted response is not retried and requires a 
       cdpSession = undefined;
     });
 
+    await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
+      const readBaseline = policy.getTableReadCount('service_requests');
+      await openDraftDetail(page, requestId);
+      await expect.poll(() => policy.getTableReadCount('service_requests')).toBeGreaterThan(readBaseline);
+      const detail = page.locator('.request-detail-card');
+      const expectedRequestedStart = formatSastDateTime(`${edited.requestedStart}:00+02:00`);
+      const expectedBudget = formatZarBudgetMinor(Math.round(Number(edited.budget) * 100));
+      await expect(page.getByRole('heading', { name: edited.title, exact: true })).toBeVisible();
+      await expect(detail.getByText('Draft', { exact: true })).toBeVisible();
+      await expect(detail.getByText(ACTIVE_CATEGORY_NAME, { exact: true })).toBeVisible();
+      await expect(detail.getByText(edited.description, { exact: true })).toBeVisible();
+      await expect(detail.getByText(edited.suburb, { exact: true })).toBeVisible();
+      await expect(detail.getByText(edited.city, { exact: true })).toBeVisible();
+      await expect(detail.getByText(expectedRequestedStart, { exact: true })).toBeVisible();
+      await expect(detail.getByText(expectedBudget, { exact: true })).toBeVisible();
+      await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+    });
+
     await withAmbiguousUpdateFailureCategory('postcondition', async () => {
-      await page.getByRole('link', { name: 'Back to draft' }).click();
       await page.getByRole('button', { name: 'Cancel draft' }).click();
       await page.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
       await expect(page.getByText('Draft cancelled.', { exact: true })).toBeVisible();

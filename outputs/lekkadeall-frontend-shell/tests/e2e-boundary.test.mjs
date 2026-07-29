@@ -99,7 +99,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(reporterSource, /signup-http-429\|signup-http-conflict\|signup-http-other/);
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
-  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|fresh-rls-read\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|fresh-rls-read\|postcondition\|sign-out\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -259,7 +259,23 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.doesNotMatch(securitySource, /route\.fetch\(/u);
   assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
-  assert.match(securitySource, /getTableReadCount\('service_requests'\)[\s\S]*page\.reload\(\)[\s\S]*toBeGreaterThan\(readBaseline\)/u);
+  assert.match(
+    securitySource,
+    /ambiguous-ui[\s\S]*interception-release[\s\S]*Fetch\.disable[\s\S]*Fetch\.requestPaused[\s\S]*cdpSession\.detach\(\)[\s\S]*fresh-rls-read/u,
+  );
+  assert.match(
+    securitySource,
+    /getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*toBeGreaterThan\(readBaseline\)/u,
+  );
+  assert.match(
+    securitySource,
+    /getByRole\('heading', \{ name: edited\.title, exact: true \}\)[\s\S]*ACTIVE_CATEGORY_NAME[\s\S]*edited\.description[\s\S]*edited\.suburb[\s\S]*edited\.city[\s\S]*expectedRequestedStart[\s\S]*expectedBudget/u,
+  );
+  assert.match(
+    securitySource,
+    /fresh-rls-read[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
+  );
+  assert.doesNotMatch(securitySource, /page\.reload\(\)|name: 'Back to draft'/u);
 });
 
 test('CI E2E job is isolated behind the complete database security job', async () => {
