@@ -102,7 +102,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
   assert.match(
     reporterSource,
-    /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
+    /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|response-listener-removed\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
   );
   assert.match(reporterSource, /if \(!step\.error && SAFE_PROGRESS_PHASE\.test\(step\.title\)\)/);
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
@@ -264,13 +264,38 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.doesNotMatch(securitySource, /route\.fetch\(/u);
   assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
+  const ambiguousScenarioStart = securitySource.indexOf(
+    "test('an executed update with an aborted response is not retried and requires a fresh read'",
+  );
+  const ambiguousScenarioEnd = securitySource.indexOf(
+    "test('recovery routes fail closed without persisting a PKCE verifier'",
+  );
+  assert.ok(ambiguousScenarioStart >= 0);
+  assert.ok(ambiguousScenarioEnd > ambiguousScenarioStart);
+  const ambiguousScenarioSource = securitySource.slice(ambiguousScenarioStart, ambiguousScenarioEnd);
+  let previousReleaseStep = -1;
+  for (const releaseStep of [
+    "withAmbiguousUpdateFailureCategory('interception-release'",
+    "cdpSession.send('Fetch.disable')",
+    "cdpSession.off('Fetch.requestPaused', pausedUpdateHandler)",
+    "markAmbiguousUpdateProgress('response-listener-removed')",
+    'cdpSession.detach()',
+    'interceptionReleased = true',
+    "readBaseline = policy.getTableReadCount('service_requests')",
+    'openDraftDetail(page, requestId)',
+    "withAmbiguousUpdateFailureCategory('fresh-rls-read'",
+  ]) {
+    const releaseStepIndex = ambiguousScenarioSource.indexOf(releaseStep);
+    assert.ok(releaseStepIndex > previousReleaseStep, `${releaseStep} must follow interceptor release order`);
+    previousReleaseStep = releaseStepIndex;
+  }
   assert.match(
     securitySource,
-    /ambiguous-ui[\s\S]*interceptor-release-start[\s\S]*Fetch\.disable[\s\S]*fetch-disabled[\s\S]*Fetch\.requestPaused[\s\S]*listenerCount\('Fetch\.requestPaused'\)[\s\S]*cdpSession\.detach\(\)[\s\S]*cdp-detached/u,
+    /ambiguous-ui[\s\S]*interceptor-release-start[\s\S]*Fetch\.disable[\s\S]*fetch-disabled[\s\S]*Fetch\.requestPaused[\s\S]*listenerCount\('Fetch\.requestPaused'\)[\s\S]*response-listener-removed[\s\S]*cdpSession\.detach\(\)[\s\S]*interceptionReleased = true[\s\S]*cdp-detached/u,
   );
   assert.match(
     securitySource,
-    /detail-navigation[\s\S]*getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read[\s\S]*toBe\(readBaseline \+ 1\)[\s\S]*rls-read-observed/u,
+    /detail-navigation[\s\S]*expect\(interceptionReleased\)\.toBe\(true\)[\s\S]*getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read[\s\S]*toBe\(readBaseline \+ 1\)[\s\S]*rls-read-observed/u,
   );
   assert.match(
     securitySource,
@@ -278,10 +303,21 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.match(
     securitySource,
-    /canonical-values[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)[\s\S]*canonical-values-verified[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
+    /canonical-values[\s\S]*expect\(executedUpdateRpcCount\)\.toBe\(1\)[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(executedUpdateRpcCount\)[\s\S]*canonical-values-verified[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
   );
+  assert.ok((
+    ambiguousScenarioSource
+      .match(/getRpcCount\('customer_update_draft_request'\)\)\.toBe\(executedUpdateRpcCount\)/gu) ?? []
+  ).length >= 4);
   assert.match(securitySource, /mutation-executed/);
-  assert.match(securitySource, /ambiguous-update-failure:cleanup[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u);
+  assert.match(
+    securitySource,
+    /const cleanupFailureCategory = interceptionCleanupFailed \? 'interception-release' : 'cleanup'/u,
+  );
+  assert.match(
+    securitySource,
+    /ambiguous-update-failure:\$\{cleanupFailureCategory\}[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u,
+  );
   assert.doesNotMatch(securitySource, /page\.reload\(\)|name: 'Back to draft'/u);
 });
 

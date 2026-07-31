@@ -3903,11 +3903,12 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 #### Correction
 
 - `ambiguous-ui` still proves that `Draft updated.` was never shown, submission remains disabled, and no second intercepted update occurred.
-- A new allowlisted privacy-safe `interception-release` phase calls `Fetch.disable`, removes the paused-request listener, and detaches the CDP session completely before any verification navigation.
+- A new allowlisted privacy-safe `interception-release` phase calls `Fetch.disable`, removes the paused-request listener, emits the fixed `response-listener-removed` milestone, and detaches the CDP session completely before any verification navigation. Navigation additionally requires the explicit released state and absent session/listener.
 - `fresh-rls-read` now records the `service_requests` baseline and uses `openDraftDetail(...)` for a normal navigation to the owned draft detail route. It requires the read count to increase before accepting the page.
-- The freshly loaded detail page must render the canonical draft status, active category, edited title, description, suburb, city, requested start, and budget. The exact `customer_update_draft_request(...)` RPC count must remain one, and `Draft updated.` must still be absent.
+- The freshly loaded detail page must render the canonical draft status, active category, edited title, description, suburb, city, requested start, and budget. The captured `customer_update_draft_request(...)` RPC count must remain exactly one across ambiguous UI, interceptor release, fresh read, canonical verification, and cancellation, and `Draft updated.` must still be absent.
 - Cancellation starts directly on that freshly loaded detail page; the scenario no longer reloads the blocked edit page or follows its `Back to draft` link.
-- The static boundary suite now requires this release-before-navigation order and the separate privacy-safe phase.
+- Fallback CDP teardown failures are reported as `interception-release`, while context cleanup remains `cleanup`; neither can be misclassified as `fresh-rls-read`.
+- The static boundary suite now requires the complete disable/listener-removal/detach/released-state/read-baseline/navigation/fresh-read order and the separate privacy-safe phase.
 
 #### Verification and unchanged security
 
@@ -3915,6 +3916,7 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - The focused Ticket 9A-9 static boundary file passed **11/11**.
 - The complete existing frontend/static suite passed **64/64**.
 - The requested `aborted`, `affected`, and `full` runner scopes were invoked. Each stopped at the privacy-safe startup gate before Playwright because this host has neither Docker nor the Supabase CLI. No independent scenario, combined pair, or full eight-scenario browser result is claimed; cleanup left no generated runtime config or Playwright report directory.
+- After the actual E2E source changes, prerequisite checks returned `docker:not-found` and `supabase:not-found`. The changed independent scenario could not execute locally, so no changed-source Playwright pass is claimed; `aborted`, `affected`, and `full` runtime verification remains required on GitHub Actions or another Docker/Supabase-capable runner. The focused static Ticket 9A-9 boundary file passed **11/11**, syntax checks passed for the three E2E JavaScript modules, and the complete frontend/static suite passed **64/64**.
 - Playwright remains Chromium-only, one-worker, and zero-retry. Screenshots, videos, traces, HAR, saved storage state, Auth-email artifacts, database dumps, verbose failure details, and artifact upload remain disabled.
 - No optimistic success, automatic update retry, or alternate mutation path was added.
 - `customer_update_draft_request(...)`, RLS, route guards, Ticket 9B profile provisioning, public-field validation, cancellation, state-machine protections, and privacy redaction are unchanged. Signup, negative-actor, provider, cross-customer, and lifecycle setup were not modified.

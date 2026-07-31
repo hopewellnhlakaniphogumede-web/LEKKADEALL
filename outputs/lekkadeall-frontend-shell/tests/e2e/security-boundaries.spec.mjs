@@ -83,6 +83,7 @@ const AMBIGUOUS_UPDATE_PROGRESS_PHASES = new Set([
   'mutation-executed',
   'interceptor-release-start',
   'fetch-disabled',
+  'response-listener-removed',
   'cdp-detached',
   'detail-navigation',
   'rls-read-observed',
@@ -349,6 +350,8 @@ test('an executed update with an aborted response is not retried and requires a 
   let requestId;
   let cdpSession;
   let pausedUpdateHandler;
+  let interceptionReleased = false;
+  let executedUpdateRpcCount;
   try {
     await withAmbiguousUpdateFailureCategory('isolated-setup', async () => {
       page = await context.newPage();
@@ -432,7 +435,8 @@ test('an executed update with an aborted response is not retried and requires a 
       expect(updateExecuted).toBe(true);
       expect(responseAborted).toBe(true);
       expect(interceptionFailure).toBe(false);
-      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      executedUpdateRpcCount = policy.getRpcCount('customer_update_draft_request');
+      expect(executedUpdateRpcCount).toBe(1);
       await markAmbiguousUpdateProgress('mutation-executed');
     });
 
@@ -440,6 +444,7 @@ test('an executed update with an aborted response is not retried and requires a 
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
       await expect(page.locator('form[data-draft-edit-form] button[type="submit"]')).toBeDisabled();
       expect(interceptedUpdateCount).toBe(1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
     });
 
     await withAmbiguousUpdateFailureCategory('interception-release', async () => {
@@ -449,13 +454,17 @@ test('an executed update with an aborted response is not retried and requires a 
       cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
       expect(cdpSession.listenerCount('Fetch.requestPaused')).toBe(0);
       pausedUpdateHandler = undefined;
+      await markAmbiguousUpdateProgress('response-listener-removed');
       await cdpSession.detach();
       cdpSession = undefined;
+      interceptionReleased = true;
       await markAmbiguousUpdateProgress('cdp-detached');
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
     });
 
     let readBaseline;
     await withAmbiguousUpdateFailureCategory('detail-navigation', async () => {
+      expect(interceptionReleased).toBe(true);
       expect(cdpSession).toBeUndefined();
       expect(pausedUpdateHandler).toBeUndefined();
       readBaseline = policy.getTableReadCount('service_requests');
@@ -465,6 +474,7 @@ test('an executed update with an aborted response is not retried and requires a 
 
     await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
       await expect.poll(() => policy.getTableReadCount('service_requests')).toBe(readBaseline + 1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await markAmbiguousUpdateProgress('rls-read-observed');
     });
 
@@ -481,11 +491,14 @@ test('an executed update with an aborted response is not retried and requires a 
       await expect(detail.getByText(expectedRequestedStart, { exact: true })).toBeVisible();
       await expect(detail.getByText(expectedBudget, { exact: true })).toBeVisible();
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
-      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      expect(executedUpdateRpcCount).toBe(1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await markAmbiguousUpdateProgress('canonical-values-verified');
     });
 
     await withAmbiguousUpdateFailureCategory('postcondition', async () => {
+      expect(interceptionReleased).toBe(true);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await page.getByRole('button', { name: 'Cancel draft' }).click();
       await page.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
       await expect(page.getByText('Draft cancelled.', { exact: true })).toBeVisible();
@@ -499,7 +512,8 @@ test('an executed update with an aborted response is not retried and requires a 
       await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
     });
   } finally {
-    let cleanupFailed = false;
+    let interceptionCleanupFailed = false;
+    let contextCleanupFailed = false;
     if (cdpSession) {
       if (pausedUpdateHandler) {
         cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
@@ -509,16 +523,17 @@ test('an executed update with an aborted response is not retried and requires a 
         await cdpSession.send('Fetch.disable');
         await cdpSession.detach();
       } catch {
-        cleanupFailed = true;
+        interceptionCleanupFailed = true;
       }
     }
     try {
       await context.close();
     } catch {
-      cleanupFailed = true;
+      contextCleanupFailed = true;
     }
-    if (cleanupFailed) {
-      await test.step('ambiguous-update-failure:cleanup', async () => {
+    const cleanupFailureCategory = interceptionCleanupFailed ? 'interception-release' : 'cleanup';
+    if (interceptionCleanupFailed || contextCleanupFailed) {
+      await test.step(`ambiguous-update-failure:${cleanupFailureCategory}`, async () => {
         throw new Error('privacy-safe-ambiguous-update-boundary-failure');
       });
     } else {
