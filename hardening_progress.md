@@ -3948,3 +3948,33 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - Docker and the Supabase CLI are unavailable on this host, so no changed-source runtime Playwright pass is claimed. The independent `aborted`, combined `affected`, and complete `full` scopes remain pending GitHub Actions.
 - No production application module, migration, RLS policy, grant, database function, Auth boundary, Ticket 9B provisioning rule, public-field validator, cancellation control, update control, state-machine protection, payment/webhook implementation, Supabase configuration, or Actions workflow changed.
 - Playwright remains Chromium-only, one-worker, zero-retry, loopback-only, anon-key-only in browser code, and artifact-free.
+
+### Ticket 9A-9 E2E correction - deterministic actor scopes and isolated setup attribution - 2026-08-04
+
+**Status:** Narrow E2E fixture and attribution correction implemented locally; replacement GitHub Actions verification pending.
+
+#### Workflow evidence and root causes
+
+- PR #1 produced separate `push` and `pull_request` workflow invocations for the same head. The database, migration, webhook, and pgTAP jobs were green.
+- In the `push` invocation, the independent `lifecycle`, independent `aborted`, and combined `affected` scopes passed. The aborted scenario reached all eight canonical-value pass markers after one POST mutation, Fetch/listener/CDP release, and a fresh authenticated `service_requests` read. The recovered CORS-preflight correction was therefore not implicated.
+- The `full` scope's blocked-features failure was deterministic: `customer-blocked-features` exceeded the fixture's 24-character actor-label limit and failed before Auth or any blocked-feature assertion.
+- The `full` scope's ambiguous-update failure occurred inside the prior aggregate `isolated-setup` wrapper before interception. Existing privacy-safe output could not distinguish browser context, fixture account, sign-in, draft creation, or edit-route readiness.
+- In the separate `pull_request` invocation, the independent lifecycle signup received the old combined `signup-http-conflict` category and later scopes were skipped. The existing reporter proves only a `409` or `422`; it cannot recover the exact numeric status. The scalar absence precondition and exactly-one-signup-request check completed, so the log does not prove a reused actor or automatic retry. No phone number or username exists in the synthetic identity contract.
+- Each runner invocation did start Supabase, run `db reset`, and execute no-backup cleanup in `finally`; the workflow also retained unconditional cleanup. Fixed loopback ports and runtime-config paths are reused only sequentially. The prior run ID included workflow run/attempt but used random scope and actor components, so actor generation was probabilistically unique rather than deterministic across fixed scopes.
+
+#### Correction
+
+- The runner derives an eight-character scope component from the workflow run ID, workflow attempt, and exact `E2E_TEST_SCOPE`. The actor helper derives its suffix from that run ID, test title component, and actor label. Namespaces are now deterministic and distinct across `lifecycle`, `aborted`, `affected`, and `full`, while synthetic passwords remain random and no identity is printed.
+- Explicit signup responses are categorized separately as `signup-http-409` or `signup-http-422`. Both still fail closed with one request, no reconciliation, and no retry.
+- The blocked-features actor label is now valid and the test explicitly proves no Auth session before fixture creation and customer sign-in. The prohibited-field and privileged-control assertions are unchanged.
+- Ambiguous-update setup now reports only one of five fixed allowlisted subphases: `browser-context`, `fixture-account`, `browser-session`, `draft-create`, or `edit-route`. The edit route must render its draft form before CDP interception begins.
+- Disposable-stack cleanup remains in the runner's `finally`, Playwright continues to close its isolated context in `finally`, and the workflow's cleanup step remains unconditional.
+
+#### Local verification and unchanged security
+
+- Syntax checks passed for the six changed E2E JavaScript modules.
+- The focused Ticket 9A-9 boundary suite passed **11/11**.
+- The complete frontend Node suite passed **64/64**.
+- Playwright discovery/runtime is unavailable in this checkout because ignored pnpm links target a historical workspace; Docker and Supabase CLI are also unavailable. No local Playwright result is claimed.
+- GitHub Actions must rerun all four fixed scopes and the complete eight-scenario boundary against fresh disposable stacks.
+- No production application code, migration, RLS policy, grant, database function, Auth/Supabase configuration, payment, webhook, or workflow file changed. Exact-one update RPC, no retry, no optimistic success, POST-only interception, listener/CDP release, fresh authenticated RLS verification, one worker, zero retries, and privacy-safe artifact controls remain intact.

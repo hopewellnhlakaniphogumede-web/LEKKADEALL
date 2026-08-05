@@ -26,7 +26,10 @@ export function syntheticAccount(label) {
   }
   const testComponent = testIdentityComponent();
   const actorComponent = createHash('sha256').update(actor).digest('hex').slice(0, 6);
-  const actorSuffix = randomBytes(5).toString('hex');
+  const actorSuffix = createHash('sha256')
+    .update(`${runId}:${testComponent}:${actor}`)
+    .digest('hex')
+    .slice(0, 10);
   const localPart = `${runId}.${testComponent}.${actorComponent}.${actorSuffix}`;
   if (localPart.length > EMAIL_LOCAL_PART_MAX_LENGTH) {
     throw new Error('synthetic-account-identity-too-long');
@@ -134,8 +137,10 @@ export async function registerCustomer(page, account) {
     }
     if (response.status() === 429) {
       await failRegistration('signup-http-429');
-    } else if ([409, 422].includes(response.status())) {
-      await failRegistration('signup-http-conflict');
+    } else if (response.status() === 409) {
+      await failRegistration('signup-http-409');
+    } else if (response.status() === 422) {
+      await failRegistration('signup-http-422');
     } else if (!response.ok()) {
       await failRegistration('signup-http-other');
     }

@@ -459,3 +459,21 @@ Local verification on 2026-07-31:
 - The focused `e2e-boundary.test.mjs` suite passed **11/11**.
 - The complete frontend Node suite passed **64/64**.
 - Docker and the Supabase CLI both returned `not-found`. No changed-source Playwright runtime result is claimed; the independent `aborted`, combined `affected`, and complete `full` scopes remain pending GitHub Actions.
+
+### Ticket 9A-9 fixture and scope-isolation correction
+
+The PR #1 `push` workflow run proved that the recovered POST-only interception is intact: the independent `aborted` scope and the combined `affected` scope passed the mutation-executed, interceptor-release, detached-CDP, fresh-RLS-read, all-eight-canonical-value, exact-one-RPC, and cleanup milestones. Its `full` scope instead failed before interception in two harness locations. The blocked-features actor label contained 25 characters while the synthetic actor contract permits at most 24, so that test failed during actor construction before Auth or blocked-control assertions. The ambiguous-update failure remained inside the former aggregate `isolated-setup` phase. A separate `pull_request` workflow run stopped after the independent lifecycle signup received the existing combined `409`/`422` category; its later scopes did not run. The prior log cannot distinguish those two HTTP statuses, and it contains no evidence of a phone, username, automatic retry, second signup POST, or identity that existed at the scalar precondition.
+
+The local runner now derives the final run-ID component deterministically from workflow run ID, workflow attempt, and the fixed `lifecycle`, `aborted`, `affected`, or `full` scope. Each actor suffix is deterministically derived from that run ID, Playwright test title, and reviewed actor label. This makes actor namespaces reproducible and distinct across workflow invocations, attempts, scopes, tests, and actor roles without printing an identifier. Password values remain randomly generated. The signup reporter now distinguishes fixed `signup-http-409` and `signup-http-422` categories while continuing to reject both without reconciliation or retry.
+
+The blocked-features test uses a valid `customer-blocked` actor label and proves an anonymous browser state before creating or signing in its synthetic customer. Its prohibited-control assertions are unchanged. The ambiguous-update setup now owns five fixed privacy-safe failure categories: `browser-context`, `fixture-account`, `browser-session`, `draft-create`, and `edit-route`. The edit-route phase also requires the draft edit form before interception begins. No response body, identifier, credential, customer value, URL, or database row is emitted.
+
+Local verification on 2026-08-04:
+
+- Node syntax checks passed for all six changed E2E JavaScript modules.
+- The focused `e2e-boundary.test.mjs` suite passed **11/11**.
+- The complete frontend Node suite passed **64/64**.
+- Playwright discovery and runtime execution are not claimed. The ignored local pnpm links resolve to a historical workspace and cannot load the pinned Playwright package; Docker and the Supabase CLI are also unavailable on this host.
+- GitHub Actions must rerun the independent `lifecycle` and `aborted` scopes, the combined `affected` scope, and the complete eight-scenario `full` scope against disposable Supabase stacks.
+
+No application module, migration, RLS policy, grant, database function, Auth or Supabase configuration, webhook, payment implementation, or Actions workflow changed. The project remains Chromium-only, one-worker, zero-retry, loopback-only, anon-key-only in browser code, and artifact-free.

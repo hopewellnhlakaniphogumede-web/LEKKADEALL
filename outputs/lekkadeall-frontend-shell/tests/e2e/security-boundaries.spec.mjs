@@ -90,6 +90,13 @@ const AMBIGUOUS_UPDATE_PROGRESS_PHASES = new Set([
   'canonical-values-verified',
   'cleanup',
 ]);
+const AMBIGUOUS_SETUP_FAILURE_CATEGORIES = new Set([
+  'browser-context',
+  'fixture-account',
+  'browser-session',
+  'draft-create',
+  'edit-route',
+]);
 const CANONICAL_VALUE_FIELDS = new Set([
   'status',
   'category',
@@ -110,6 +117,20 @@ async function withAmbiguousUpdateFailureCategory(category, operation) {
   } catch {
     await test.step(`ambiguous-update-failure:${category}`, async () => {
       throw new Error('privacy-safe-ambiguous-update-boundary-failure');
+    });
+    return undefined;
+  }
+}
+
+async function withAmbiguousSetupFailureCategory(category, operation) {
+  if (!AMBIGUOUS_SETUP_FAILURE_CATEGORIES.has(category)) {
+    throw new Error('ambiguous-setup-failure-category-invalid');
+  }
+  try {
+    return await operation();
+  } catch {
+    await test.step(`ambiguous-setup-failure:${category}`, async () => {
+      throw new Error('privacy-safe-ambiguous-setup-boundary-failure');
     });
     return undefined;
   }
@@ -360,7 +381,7 @@ test('an executed update with an aborted response is not retried and requires a 
   const created = mainDraftValues();
   const edited = editedDraftValues();
   const markers = privacyMarkers(account, created, edited);
-  const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+  let context;
   let page;
   let policy;
   let emissions;
@@ -371,13 +392,25 @@ test('an executed update with an aborted response is not retried and requires a 
   let executedUpdateRpcCount;
   try {
     await withAmbiguousUpdateFailureCategory('isolated-setup', async () => {
-      page = await context.newPage();
-      policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-      emissions = attachSensitiveEmissionAudit(page, markers);
-      await prepareSyntheticCustomerAccount(account.email, account.password);
-      await signInCustomer(page, account);
-      requestId = await createDraftThroughUi(page, created);
-      await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+      await withAmbiguousSetupFailureCategory('browser-context', async () => {
+        context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+        page = await context.newPage();
+        policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+        emissions = attachSensitiveEmissionAudit(page, markers);
+      });
+      await withAmbiguousSetupFailureCategory('fixture-account', async () => {
+        await prepareSyntheticCustomerAccount(account.email, account.password);
+      });
+      await withAmbiguousSetupFailureCategory('browser-session', async () => {
+        await signInCustomer(page, account);
+      });
+      await withAmbiguousSetupFailureCategory('draft-create', async () => {
+        requestId = await createDraftThroughUi(page, created);
+      });
+      await withAmbiguousSetupFailureCategory('edit-route', async () => {
+        await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+        await expect(page.locator('form[data-draft-edit-form]')).toBeVisible();
+      });
     });
 
     let interceptedUpdateCount = 0;
@@ -562,7 +595,7 @@ test('an executed update with an aborted response is not retried and requires a 
       }
     }
     try {
-      await context.close();
+      await context?.close();
     } catch {
       contextCleanupFailed = true;
     }

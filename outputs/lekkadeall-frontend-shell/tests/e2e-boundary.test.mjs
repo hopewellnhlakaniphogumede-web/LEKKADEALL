@@ -97,9 +97,10 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
-  assert.match(reporterSource, /signup-http-429\|signup-http-conflict\|signup-http-other/);
+  assert.match(reporterSource, /signup-http-409\|signup-http-422\|signup-http-429\|signup-http-other/);
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|draft-create\|edit-route\)/);
   assert.match(
     reporterSource,
     /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|response-listener-removed\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
@@ -125,8 +126,13 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   );
   assert.match(runnerSource, /GITHUB_RUN_ID/);
   assert.match(runnerSource, /GITHUB_RUN_ATTEMPT/);
-  assert.match(runnerSource, /randomBytes\(4\)\.toString\('hex'\)/);
   assert.match(runnerSource, /E2E_TEST_SCOPE/);
+  assert.match(
+    runnerSource,
+    /update\(`\$\{workflowRun\}:\$\{workflowAttempt\}:\$\{scope\}`\)[\s\S]*digest\('hex'\)[\s\S]*slice\(0, 8\)/u,
+  );
+  assert.match(runnerSource, /const runId = buildRunId\(testScope\)/);
+  assert.doesNotMatch(runnerSource, /randomBytes/u);
   assert.match(runnerSource, /E2E_RUN_ID:\s*runId/);
   assert.match(runnerSource, /\['db', 'reset'\]/);
   assert.match(runnerSource, /\['stop', '--no-backup'\]/);
@@ -135,7 +141,10 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(helperSource, /test\.info\(\)\.title/);
   assert.match(helperSource, /createHash\('sha256'\)/);
   assert.equal((helperSource.match(/digest\('hex'\)\.slice\(0, 6\)/gu) ?? []).length, 2);
-  assert.match(helperSource, /randomBytes\(5\)\.toString\('hex'\)/);
+  assert.match(
+    helperSource,
+    /update\(`\$\{runId\}:\$\{testComponent\}:\$\{actor\}`\)[\s\S]*digest\('hex'\)[\s\S]*slice\(0, 10\)/u,
+  );
   assert.match(helperSource, /EMAIL_LOCAL_PART_MAX_LENGTH\s*=\s*64/);
   assert.match(
     helperSource,
@@ -156,7 +165,7 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
   assert.match(
     helperSource,
-    /\[409, 422\]\.includes\(response\.status\(\)\)[\s\S]*failRegistration\('signup-http-conflict'\)/u,
+    /response\.status\(\) === 409[\s\S]*failRegistration\('signup-http-409'\)[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\('signup-http-422'\)/u,
   );
   assert.match(appSource, /if \(authSubmissionInFlight\) return;/);
   assert.match(appSource, /authSubmissionInFlight = true;[\s\S]*await submitAuthFormOnce\(form\);[\s\S]*authSubmissionInFlight = false;/u);
@@ -231,6 +240,12 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   ).length, 2);
   assert.equal((lifecycleSource.match(/registerCustomer\(page, account\)/gu) ?? []).length, 1);
   assert.doesNotMatch(lifecycleSource, /prepareSyntheticCustomerAccount|createSyntheticLocalAuthUser/u);
+  assert.match(blockedSource, /syntheticAccount\('customer-blocked'\)/);
+  assert.doesNotMatch(blockedSource, /customer-blocked-features/u);
+  assert.match(
+    blockedSource,
+    /page\.goto\('\/'\)[\s\S]*expectAuthSession:\s*false[\s\S]*prepareSyntheticCustomerAccount/u,
+  );
   assert.match(
     securitySource,
     /prepareSyntheticCustomerAccount\(customerA\.email, customerA\.password\)[\s\S]*signInCustomer\(pageA, customerA\)[\s\S]*registerCustomer\(pageB, customerB\)/u,
@@ -259,6 +274,11 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     securitySource,
     /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,
   );
+  for (const phase of [
+    'browser-context', 'fixture-account', 'browser-session', 'draft-create', 'edit-route',
+  ]) {
+    assert.match(securitySource, new RegExp(`withAmbiguousSetupFailureCategory\\('${phase}'`));
+  }
   assert.match(securitySource, /browser\.newContext\(\{ baseURL: appUrl, serviceWorkers: 'allow' \}\)/);
   assert.match(securitySource, /context\.newCDPSession\(page\)/);
   assert.match(

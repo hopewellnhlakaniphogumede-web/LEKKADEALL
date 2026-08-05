@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { access, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -29,19 +29,23 @@ const TEST_SCOPE_ARGS = Object.freeze({
   aborted: ['--grep', 'an executed update with an aborted response is not retried and requires a fresh read'],
   affected: ['--grep', '(?:customer registration through cancelled draft completes against real local RLS and RPCs|an executed update with an aborted response is not retried and requires a fresh read)'],
 });
+const testScope = String(process.env.E2E_TEST_SCOPE ?? 'full');
 
-function buildRunId() {
+function buildRunId(scope) {
   const workflowRun = WORKFLOW_RUN_PATTERN.test(String(process.env.GITHUB_RUN_ID ?? ''))
     ? String(process.env.GITHUB_RUN_ID)
     : `local${process.pid}`;
   const workflowAttempt = WORKFLOW_ATTEMPT_PATTERN.test(String(process.env.GITHUB_RUN_ATTEMPT ?? ''))
     ? String(process.env.GITHUB_RUN_ATTEMPT)
     : '0';
-  return `r${workflowRun}-a${workflowAttempt}-${randomBytes(4).toString('hex')}`;
+  const scopeComponent = createHash('sha256')
+    .update(`${workflowRun}:${workflowAttempt}:${scope}`)
+    .digest('hex')
+    .slice(0, 8);
+  return `r${workflowRun}-a${workflowAttempt}-${scopeComponent}`;
 }
 
-const runId = buildRunId();
-const testScope = String(process.env.E2E_TEST_SCOPE ?? 'full');
+const runId = buildRunId(testScope);
 let frontendServer;
 let supabaseStarted = false;
 let runtimeConfigCreated = false;
