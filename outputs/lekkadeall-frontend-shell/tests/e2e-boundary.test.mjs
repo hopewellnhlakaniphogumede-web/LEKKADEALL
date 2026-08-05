@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { access, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,7 +98,10 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
-  assert.match(reporterSource, /signup-http-409\|signup-http-422\|signup-http-429\|signup-http-other/);
+  assert.match(
+    reporterSource,
+    /signup-http-409\|signup-http-422-\(\?:weak-password\|signup-disabled\|user-already-exists\|validation-failed\|unknown\)\|signup-http-429\|signup-http-other/,
+  );
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
   assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|draft-create\|edit-route\)/);
@@ -127,6 +131,7 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(runnerSource, /GITHUB_RUN_ID/);
   assert.match(runnerSource, /GITHUB_RUN_ATTEMPT/);
   assert.match(runnerSource, /E2E_TEST_SCOPE/);
+  assert.doesNotMatch(runnerSource, /GITHUB_(?:REF|HEAD_REF|EVENT_NAME)/u);
   assert.match(
     runnerSource,
     /update\(`\$\{workflowRun\}:\$\{workflowAttempt\}:\$\{scope\}`\)[\s\S]*digest\('hex'\)[\s\S]*slice\(0, 8\)/u,
@@ -165,7 +170,7 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
   assert.match(
     helperSource,
-    /response\.status\(\) === 409[\s\S]*failRegistration\('signup-http-409'\)[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\('signup-http-422'\)/u,
+    /response\.status\(\) === 409[\s\S]*failRegistration\('signup-http-409'\)[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\(await signupHttp422Category\(response\)\)/u,
   );
   assert.match(appSource, /if \(authSubmissionInFlight\) return;/);
   assert.match(appSource, /authSubmissionInFlight = true;[\s\S]*await submitAuthFormOnce\(form\);[\s\S]*authSubmissionInFlight = false;/u);
@@ -183,6 +188,95 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(authConfig, /\[auth\.email\][\s\S]*enable_confirmations\s*=\s*false/u);
   assert.match(authConfig, /\[auth\.rate_limit\][\s\S]*sign_in_sign_ups\s*=\s*120/u);
   assert.match(authConfig, /local-only quota is not production configuration/u);
+});
+
+test('signup 422 classification reads only the privacy-safe Auth error header', async () => {
+  const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
+  const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const expectedCategories = new Map([
+    ['weak_password', 'signup-http-422-weak-password'],
+    ['signup_disabled', 'signup-http-422-signup-disabled'],
+    ['user_already_exists', 'signup-http-422-user-already-exists'],
+    ['validation_failed', 'signup-http-422-validation-failed'],
+  ]);
+
+  for (const [errorCode, category] of expectedCategories) {
+    assert.match(helperSource, new RegExp(`\\['${errorCode}', '${category}'\\]`, 'u'));
+    assert.match(reporterSource, new RegExp(category.replace('signup-http-422-', ''), 'u'));
+  }
+  for (const errorCode of [null, '', 'unknown_code']) {
+    assert.equal(expectedCategories.get(errorCode) ?? 'signup-http-422-unknown', 'signup-http-422-unknown');
+  }
+
+  assert.equal((helperSource.match(/headerValue\('x-sb-error-code'\)/gu) ?? []).length, 1);
+  assert.match(
+    helperSource,
+    /async function signupHttp422Category\(response\)[\s\S]*headerValue\('x-sb-error-code'\)[\s\S]*SIGNUP_HTTP_422_CATEGORIES\.get\(errorCode\) \?\? 'signup-http-422-unknown'/u,
+  );
+  assert.doesNotMatch(helperSource, /response\.(?:body|json|text)\b/u);
+  assert.doesNotMatch(helperSource, /response\.headers\(\)/u);
+  assert.doesNotMatch(helperSource, /console\.|process\.(?:stdout|stderr)|JSON\.stringify/u);
+  assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.equal((helperSource.match(/await reconcileSingleUiSignup\(/gu) ?? []).length, 1);
+  assert.match(
+    helperSource,
+    /catch \{[\s\S]*await reconcileSingleUiSignup\(page, account, signupRequestCount\);[\s\S]*return;[\s\S]*finally \{[\s\S]*page\.off\('request', countSignupRequest\);[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\(await signupHttp422Category\(response\)\)/u,
+  );
+});
+
+test('push and pull-request contexts retain valid distinct run-scoped actor properties', async () => {
+  const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const actor = 'customer-lifecycle';
+  const testTitle = 'customer registration through cancelled draft completes against real local RLS and RPCs';
+  const buildProperties = ({ workflowRun, workflowAttempt, scope }) => {
+    const scopeComponent = createHash('sha256')
+      .update(`${workflowRun}:${workflowAttempt}:${scope}`)
+      .digest('hex')
+      .slice(0, 8);
+    const runId = `r${workflowRun}-a${workflowAttempt}-${scopeComponent}`;
+    const testComponent = createHash('sha256').update(testTitle).digest('hex').slice(0, 6);
+    const actorComponent = createHash('sha256').update(actor).digest('hex').slice(0, 6);
+    const actorSuffix = createHash('sha256')
+      .update(`${runId}:${testComponent}:${actor}`)
+      .digest('hex')
+      .slice(0, 10);
+    const localPart = `${runId}.${testComponent}.${actorComponent}.${actorSuffix}`;
+    return {
+      email: `${localPart}@lekkadeall.invalid`,
+      localPart,
+      runId,
+    };
+  };
+  const pushContext = {
+    eventName: 'push',
+    headRef: '',
+    ref: 'refs/heads/fix/example-branch',
+    workflowAttempt: '1',
+    workflowRun: '12345678901',
+    scope: 'lifecycle',
+  };
+  const pullRequestContext = {
+    eventName: 'pull_request',
+    headRef: 'fix/example-branch',
+    ref: 'refs/pull/1/merge',
+    workflowAttempt: '1',
+    workflowRun: '12345678902',
+    scope: 'lifecycle',
+  };
+  const push = buildProperties(pushContext);
+  const pullRequest = buildProperties(pullRequestContext);
+
+  for (const properties of [push, pullRequest]) {
+    assert.equal(properties.runId.length, 24);
+    assert.equal(properties.localPart.length, 49);
+    assert.equal(properties.email.length, 68);
+    assert.match(properties.email, /^[a-z0-9][a-z0-9.-]{0,63}@lekkadeall\.invalid$/u);
+  }
+  assert.notEqual(push.email, pullRequest.email);
+  assert.equal(actor.length, 18);
+  assert.doesNotMatch(push.email, /refs|push|example-branch/u);
+  assert.doesNotMatch(pullRequest.email, /refs|pull|merge|example-branch/u);
+  assert.doesNotMatch(runnerSource, /GITHUB_(?:REF|HEAD_REF|EVENT_NAME)/u);
 });
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {

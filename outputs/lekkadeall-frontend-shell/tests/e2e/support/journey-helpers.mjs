@@ -11,6 +11,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const E2E_RUN_ID_PATTERN = /^r(?:[0-9]{1,20}|local[0-9]{1,10})-a[0-9]{1,6}-[0-9a-f]{8}$/u;
 const AUTH_STORAGE_KEY_PATTERN = /^sb-[a-z0-9-]+-auth-token$/iu;
 const EMAIL_LOCAL_PART_MAX_LENGTH = 64;
+const SIGNUP_HTTP_422_CATEGORIES = new Map([
+  ['weak_password', 'signup-http-422-weak-password'],
+  ['signup_disabled', 'signup-http-422-signup-disabled'],
+  ['user_already_exists', 'signup-http-422-user-already-exists'],
+  ['validation_failed', 'signup-http-422-validation-failed'],
+]);
 
 function testIdentityComponent() {
   const title = String(test.info().title ?? '');
@@ -55,6 +61,16 @@ async function failRegistration(category) {
   await test.step(`registration-failure:${category}`, async () => {
     throw new Error('privacy-safe-registration-failure');
   });
+}
+
+async function signupHttp422Category(response) {
+  let errorCode;
+  try {
+    errorCode = await response.headerValue('x-sb-error-code');
+  } catch {
+    return 'signup-http-422-unknown';
+  }
+  return SIGNUP_HTTP_422_CATEGORIES.get(errorCode) ?? 'signup-http-422-unknown';
 }
 
 async function reconcileSingleUiSignup(page, account, signupRequestCount) {
@@ -140,7 +156,7 @@ export async function registerCustomer(page, account) {
     } else if (response.status() === 409) {
       await failRegistration('signup-http-409');
     } else if (response.status() === 422) {
-      await failRegistration('signup-http-422');
+      await failRegistration(await signupHttp422Category(response));
     } else if (!response.ok()) {
       await failRegistration('signup-http-other');
     }
