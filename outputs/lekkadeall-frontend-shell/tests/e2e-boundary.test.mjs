@@ -95,7 +95,11 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /negative-actor-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
-  assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
+  assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|context-creation\|page-creation\|sign-in\|authenticated-privacy\|fixture-state-application\|route-guard-verification\|sign-out/);
+  assert.match(
+    reporterSource,
+    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
+  );
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(
@@ -224,6 +228,101 @@ test('signup 422 classification reads only the privacy-safe Auth error header', 
   );
 });
 
+test('negative actors report fixed privacy-safe browser-session boundaries', async () => {
+  const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
+  const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
+  const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const stages = [
+    'context-creation',
+    'page-creation',
+    'anonymous-storage-precondition',
+    'sign-in-network',
+    'sign-in-http-429',
+    'sign-in-http-4xx',
+    'sign-in-http-5xx',
+    'sign-in-http-unexpected',
+    'auth-session-missing',
+    'customer-route',
+    'active-profile-readiness',
+    'authenticated-privacy',
+    'context-cleanup',
+    'unknown',
+  ];
+
+  for (const stage of stages) {
+    assert.match(securitySource, new RegExp(`'${stage}'`, 'u'));
+    assert.match(reporterSource, new RegExp(stage, 'u'));
+  }
+  assert.match(
+    helperSource,
+    /privacySafeSignInFailureStage\(error\)[\s\S]*error instanceof PrivacySafeSignInError[\s\S]*: 'unknown'/u,
+  );
+  assert.match(
+    securitySource,
+    /withNegativeActorSignInFailureCategory[\s\S]*privacySafeSignInFailureStage\(error\)[\s\S]*reportNegativeActorFailure/u,
+  );
+  assert.doesNotMatch(
+    reporterSource,
+    /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\):\([^)]*browser-session/u,
+  );
+  assert.match(
+    reporterSource,
+    /step\.error && SAFE_CONTEXT_CLEANUP_FAILURE\.test\(step\.title\)[\s\S]*CLEANUP \$\{step\.title\}/u,
+  );
+  assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
+
+  const signInStart = helperSource.indexOf('export async function signInCustomer');
+  const signInEnd = helperSource.indexOf('export function futureSastInput');
+  assert.ok(signInStart >= 0);
+  assert.ok(signInEnd > signInStart);
+  const signInSource = helperSource.slice(signInStart, signInEnd);
+  assert.equal((signInSource.match(/\/auth\/v1\/token/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/grant_type/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/name: 'Sign in' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/timeout:\s*30_000/gu) ?? []).length, 4);
+  assert.match(signInSource, /candidate\.request\(\)\.method\(\) === 'POST'/u);
+  assert.doesNotMatch(signInSource, /retry|setTimeout|waitForTimeout|sleep/iu);
+  assert.match(signInSource, /status === 429[\s\S]*sign-in-http-429/u);
+  assert.match(signInSource, /status >= 400 && status < 500[\s\S]*sign-in-http-4xx/u);
+  assert.match(signInSource, /status >= 500 && status < 600[\s\S]*sign-in-http-5xx/u);
+  assert.match(signInSource, /!response\.ok\(\)[\s\S]*sign-in-http-unexpected/u);
+  assert.doesNotMatch(signInSource, /response\.(?:body|json|text|headers|headerValue)\b/u);
+  assert.doesNotMatch(
+    signInSource,
+    /console\.|process\.(?:stdout|stderr)|document\.cookie|context\.cookies|localStorage\.getItem|sessionStorage/u,
+  );
+
+  const scenarioStart = securitySource.indexOf(
+    "test('restricted suspended closed missing-profile and wrong-role actors fail closed'",
+  );
+  const scenarioEnd = securitySource.indexOf(
+    "test('a stale edit is rejected after another tab cancels the draft'",
+  );
+  assert.ok(scenarioStart >= 0);
+  assert.ok(scenarioEnd > scenarioStart);
+  const scenarioSource = securitySource.slice(scenarioStart, scenarioEnd);
+  assert.equal((scenarioSource.match(/browser\.newContext\(/gu) ?? []).length, 1);
+  assert.equal((scenarioSource.match(/context\.newPage\(\)/gu) ?? []).length, 1);
+  assert.doesNotMatch(scenarioSource, /storageState/u);
+  assert.match(
+    scenarioSource,
+    /for \(const scenario of cases\)[\s\S]*browser\.newContext[\s\S]*context\.newPage\(\)/u,
+  );
+  assert.match(scenarioSource, /finally \{[\s\S]*await context\?\.close\(\)/u);
+  assert.match(
+    scenarioSource,
+    /catch \(error\) \{[\s\S]*primaryFailure = error;[\s\S]*throw error;[\s\S]*finally \{[\s\S]*context-cleanup[\s\S]*if \(!primaryFailure\) throw cleanupFailure;/u,
+  );
+
+  assert.equal((helperSource.match(/headerValue\('x-sb-error-code'\)/gu) ?? []).length, 1);
+  assert.match(
+    securitySource,
+    /event\.request\.method !== 'POST'[\s\S]*Fetch\.continueRequest[\s\S]*interceptedUpdateCount \+= 1/u,
+  );
+  assert.match(securitySource, /expect\(executedUpdateRpcCount\)\.toBe\(1\)/u);
+  assert.match(securitySource, /openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read/u);
+});
+
 test('push and pull-request contexts retain valid distinct run-scoped actor properties', async () => {
   const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
   const actor = 'customer-lifecycle';
@@ -346,7 +445,7 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   );
   assert.match(
     securitySource,
-    /negative-actor-phase:\$\{scenario\.label\}:auth-creation[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:ticket-9b-profile-readiness[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:browser-session[\s\S]*browser\.newContext[\s\S]*attachNetworkPolicy[\s\S]*signInCustomer\(page, account\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:fixture-state-application[\s\S]*negative-actor-phase:\$\{scenario\.label\}:route-guard-verification/u,
+    /negative-actor-phase:\$\{scenario\.label\}:auth-creation[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:ticket-9b-profile-readiness[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:context-creation[\s\S]*browser\.newContext[\s\S]*negative-actor-phase:\$\{scenario\.label\}:page-creation[\s\S]*context\.newPage[\s\S]*attachNetworkPolicy[\s\S]*signInCustomer\(page, account, \{ requireAnonymousStorage: true \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:authenticated-privacy[\s\S]*negative-actor-phase:\$\{scenario\.label\}:fixture-state-application[\s\S]*negative-actor-phase:\$\{scenario\.label\}:route-guard-verification/u,
   );
   for (const actor of ['restricted', 'suspended', 'closed', 'provider', 'missing-profile']) {
     assert.match(securitySource, new RegExp(`label: '${actor}'`));
@@ -354,7 +453,8 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   for (const phase of [
     'auth-creation',
     'ticket-9b-profile-readiness',
-    'browser-session',
+    'context-creation',
+    'page-creation',
     'fixture-state-application',
     'route-guard-verification',
   ]) {

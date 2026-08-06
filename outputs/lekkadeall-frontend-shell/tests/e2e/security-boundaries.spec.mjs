@@ -21,6 +21,7 @@ import {
   mainDraftValues,
   openDraftDetail,
   privacyMarkers,
+  privacySafeSignInFailureStage,
   registerCustomer,
   signInCustomer,
   signOutCustomer,
@@ -47,22 +48,48 @@ const NEGATIVE_ACTORS = new Set([
 const NEGATIVE_ACTOR_FAILURE_CATEGORIES = new Set([
   'auth-creation',
   'ticket-9b-profile-readiness',
-  'browser-session',
+  'context-creation',
+  'page-creation',
+  'anonymous-storage-precondition',
+  'sign-in-network',
+  'sign-in-http-429',
+  'sign-in-http-4xx',
+  'sign-in-http-5xx',
+  'sign-in-http-unexpected',
+  'auth-session-missing',
+  'customer-route',
+  'active-profile-readiness',
+  'authenticated-privacy',
+  'context-cleanup',
+  'unknown',
   'fixture-state-application',
   'route-guard-verification',
   'sign-out',
 ]);
 
-async function withNegativeActorFailureCategory(actor, category, operation) {
+async function reportNegativeActorFailure(actor, category) {
   if (!NEGATIVE_ACTORS.has(actor) || !NEGATIVE_ACTOR_FAILURE_CATEGORIES.has(category)) {
     throw new Error('negative-actor-failure-category-invalid');
   }
+  await test.step(`negative-actor-failure:${actor}:${category}`, async () => {
+    throw new Error('privacy-safe-negative-actor-boundary-failure');
+  });
+}
+
+async function withNegativeActorFailureCategory(actor, category, operation) {
   try {
     return await operation();
   } catch {
-    await test.step(`negative-actor-failure:${actor}:${category}`, async () => {
-      throw new Error('privacy-safe-negative-actor-boundary-failure');
-    });
+    await reportNegativeActorFailure(actor, category);
+    return undefined;
+  }
+}
+
+async function withNegativeActorSignInFailureCategory(actor, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    await reportNegativeActorFailure(actor, privacySafeSignInFailureStage(error));
     return undefined;
   }
 }
@@ -237,6 +264,7 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
       let policy;
       let markers;
       let emissions;
+      let primaryFailure;
       try {
         await test.step(`negative-actor-phase:${scenario.label}:auth-creation`, async () => {
           await withNegativeActorFailureCategory(scenario.label, 'auth-creation', () => (
@@ -252,14 +280,35 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
           );
         });
 
-        await test.step(`negative-actor-phase:${scenario.label}:browser-session`, async () => {
-          await withNegativeActorFailureCategory(scenario.label, 'browser-session', async () => {
-            context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
-            page = await context.newPage();
+        await test.step(`negative-actor-phase:${scenario.label}:context-creation`, async () => {
+          context = await withNegativeActorFailureCategory(
+            scenario.label,
+            'context-creation',
+            () => browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' }),
+          );
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:page-creation`, async () => {
+          page = await withNegativeActorFailureCategory(
+            scenario.label,
+            'page-creation',
+            () => context.newPage(),
+          );
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:sign-in`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'unknown', async () => {
             policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
             markers = privacyMarkers(account);
             emissions = attachSensitiveEmissionAudit(page, markers);
-            await signInCustomer(page, account);
+          });
+          await withNegativeActorSignInFailureCategory(scenario.label, () => (
+            signInCustomer(page, account, { requireAnonymousStorage: true })
+          ));
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:authenticated-privacy`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'authenticated-privacy', async () => {
             await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
           });
         });
@@ -332,8 +381,19 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
             await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
           });
         });
+      } catch (error) {
+        primaryFailure = error;
+        throw error;
       } finally {
-        await context?.close();
+        try {
+          await context?.close();
+        } catch {
+          try {
+            await reportNegativeActorFailure(scenario.label, 'context-cleanup');
+          } catch (cleanupFailure) {
+            if (!primaryFailure) throw cleanupFailure;
+          }
+        }
       }
     });
   }

@@ -17,6 +17,36 @@ const SIGNUP_HTTP_422_CATEGORIES = new Map([
   ['user_already_exists', 'signup-http-422-user-already-exists'],
   ['validation_failed', 'signup-http-422-validation-failed'],
 ]);
+const SIGN_IN_FAILURE_STAGES = new Set([
+  'anonymous-storage-precondition',
+  'sign-in-network',
+  'sign-in-http-429',
+  'sign-in-http-4xx',
+  'sign-in-http-5xx',
+  'sign-in-http-unexpected',
+  'auth-session-missing',
+  'customer-route',
+  'active-profile-readiness',
+]);
+
+class PrivacySafeSignInError extends Error {
+  constructor(stage) {
+    super('privacy-safe-fixture-sign-in-failure');
+    this.name = 'PrivacySafeSignInError';
+    this.stage = stage;
+  }
+}
+
+function failSignIn(stage) {
+  if (!SIGN_IN_FAILURE_STAGES.has(stage)) throw new Error('privacy-safe-sign-in-stage-invalid');
+  throw new PrivacySafeSignInError(stage);
+}
+
+export function privacySafeSignInFailureStage(error) {
+  return error instanceof PrivacySafeSignInError && SIGN_IN_FAILURE_STAGES.has(error.stage)
+    ? error.stage
+    : 'unknown';
+}
 
 function testIdentityComponent() {
   const title = String(test.info().title ?? '');
@@ -193,13 +223,16 @@ export async function signOutCustomer(page) {
   await expect(page.getByRole('heading', { name: 'Sign in to your workspace.' })).toBeVisible();
 }
 
-export async function signInCustomer(page, account) {
-  await page.goto('/auth/sign-in');
-  const form = page.locator('form[data-auth-form="sign-in"]');
-  await form.locator('input[name="email"]').fill(account.email);
-  await form.locator('input[name="password"]').fill(account.password);
+export async function signInCustomer(page, account, { requireAnonymousStorage = false } = {}) {
   let response;
   try {
+    await page.goto('/auth/sign-in');
+    if (requireAnonymousStorage && await authStorageEntryCount(page) !== 0) {
+      failSignIn('anonymous-storage-precondition');
+    }
+    const form = page.locator('form[data-auth-form="sign-in"]');
+    await form.locator('input[name="email"]').fill(account.email);
+    await form.locator('input[name="password"]').fill(account.password);
     const signInResponse = page.waitForResponse((candidate) => {
       const url = new URL(candidate.url());
       return url.pathname === '/auth/v1/token'
@@ -208,21 +241,34 @@ export async function signInCustomer(page, account) {
     }, { timeout: 30_000 });
     await form.getByRole('button', { name: 'Sign in' }).click();
     response = await signInResponse;
-  } catch {
-    throw new Error('fixture-sign-in-network-failure');
+  } catch (error) {
+    if (error instanceof PrivacySafeSignInError) throw error;
+    failSignIn('sign-in-network');
   }
-  if (response.status() === 429) throw new Error('fixture-sign-in-http-429');
-  if (!response.ok()) throw new Error('fixture-sign-in-http-failure');
+  const status = response.status();
+  if (status === 429) failSignIn('sign-in-http-429');
+  if (status >= 400 && status < 500) failSignIn('sign-in-http-4xx');
+  if (status >= 500 && status < 600) failSignIn('sign-in-http-5xx');
+  if (!response.ok()) failSignIn('sign-in-http-unexpected');
   try {
     await expect.poll(
       () => authStorageEntryCount(page),
       { timeout: 30_000, message: 'local Auth session readiness failed' },
     ).toBe(1);
   } catch {
-    throw new Error('fixture-sign-in-session-missing');
+    failSignIn('auth-session-missing');
   }
-  await expect(page).toHaveURL(/\/app\/customer\/?$/u, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { name: 'Your safe account view.' })).toBeVisible({ timeout: 30_000 });
+  try {
+    await expect(page).toHaveURL(/\/app\/customer\/?$/u, { timeout: 30_000 });
+  } catch {
+    failSignIn('customer-route');
+  }
+  try {
+    await expect(page.getByRole('heading', { name: 'Your safe account view.' }))
+      .toBeVisible({ timeout: 30_000 });
+  } catch {
+    failSignIn('active-profile-readiness');
+  }
 }
 
 export function futureSastInput(days = 3, minuteOffset = 0) {
