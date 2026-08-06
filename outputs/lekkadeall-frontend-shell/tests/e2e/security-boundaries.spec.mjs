@@ -21,6 +21,7 @@ import {
   mainDraftValues,
   openDraftDetail,
   privacyMarkers,
+  privacySafeSignInFailureStage,
   registerCustomer,
   signInCustomer,
   signOutCustomer,
@@ -47,22 +48,48 @@ const NEGATIVE_ACTORS = new Set([
 const NEGATIVE_ACTOR_FAILURE_CATEGORIES = new Set([
   'auth-creation',
   'ticket-9b-profile-readiness',
-  'browser-session',
+  'context-creation',
+  'page-creation',
+  'anonymous-storage-precondition',
+  'sign-in-network',
+  'sign-in-http-429',
+  'sign-in-http-4xx',
+  'sign-in-http-5xx',
+  'sign-in-http-unexpected',
+  'auth-session-missing',
+  'customer-route',
+  'active-profile-readiness',
+  'authenticated-privacy',
+  'context-cleanup',
+  'unknown',
   'fixture-state-application',
   'route-guard-verification',
   'sign-out',
 ]);
 
-async function withNegativeActorFailureCategory(actor, category, operation) {
+async function reportNegativeActorFailure(actor, category) {
   if (!NEGATIVE_ACTORS.has(actor) || !NEGATIVE_ACTOR_FAILURE_CATEGORIES.has(category)) {
     throw new Error('negative-actor-failure-category-invalid');
   }
+  await test.step(`negative-actor-failure:${actor}:${category}`, async () => {
+    throw new Error('privacy-safe-negative-actor-boundary-failure');
+  });
+}
+
+async function withNegativeActorFailureCategory(actor, category, operation) {
   try {
     return await operation();
   } catch {
-    await test.step(`negative-actor-failure:${actor}:${category}`, async () => {
-      throw new Error('privacy-safe-negative-actor-boundary-failure');
-    });
+    await reportNegativeActorFailure(actor, category);
+    return undefined;
+  }
+}
+
+async function withNegativeActorSignInFailureCategory(actor, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    await reportNegativeActorFailure(actor, privacySafeSignInFailureStage(error));
     return undefined;
   }
 }
@@ -83,11 +110,29 @@ const AMBIGUOUS_UPDATE_PROGRESS_PHASES = new Set([
   'mutation-executed',
   'interceptor-release-start',
   'fetch-disabled',
+  'response-listener-removed',
   'cdp-detached',
   'detail-navigation',
   'rls-read-observed',
   'canonical-values-verified',
   'cleanup',
+]);
+const AMBIGUOUS_SETUP_FAILURE_CATEGORIES = new Set([
+  'browser-context',
+  'fixture-account',
+  'browser-session',
+  'draft-create',
+  'edit-route',
+]);
+const CANONICAL_VALUE_FIELDS = new Set([
+  'status',
+  'category',
+  'title',
+  'description',
+  'suburb',
+  'city',
+  'start',
+  'budget',
 ]);
 
 async function withAmbiguousUpdateFailureCategory(category, operation) {
@@ -104,11 +149,32 @@ async function withAmbiguousUpdateFailureCategory(category, operation) {
   }
 }
 
+async function withAmbiguousSetupFailureCategory(category, operation) {
+  if (!AMBIGUOUS_SETUP_FAILURE_CATEGORIES.has(category)) {
+    throw new Error('ambiguous-setup-failure-category-invalid');
+  }
+  try {
+    return await operation();
+  } catch {
+    await test.step(`ambiguous-setup-failure:${category}`, async () => {
+      throw new Error('privacy-safe-ambiguous-setup-boundary-failure');
+    });
+    return undefined;
+  }
+}
+
 async function markAmbiguousUpdateProgress(phase) {
   if (!AMBIGUOUS_UPDATE_PROGRESS_PHASES.has(phase)) {
     throw new Error('ambiguous-update-progress-phase-invalid');
   }
   await test.step(`ambiguous-update:${phase}`, async () => {});
+}
+
+async function markCanonicalValuePass(field) {
+  if (!CANONICAL_VALUE_FIELDS.has(field)) {
+    throw new Error('canonical-value-field-invalid');
+  }
+  await test.step(`canonical-values:${field}-pass`, async () => {});
 }
 
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
@@ -198,6 +264,7 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
       let policy;
       let markers;
       let emissions;
+      let primaryFailure;
       try {
         await test.step(`negative-actor-phase:${scenario.label}:auth-creation`, async () => {
           await withNegativeActorFailureCategory(scenario.label, 'auth-creation', () => (
@@ -213,14 +280,35 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
           );
         });
 
-        await test.step(`negative-actor-phase:${scenario.label}:browser-session`, async () => {
-          await withNegativeActorFailureCategory(scenario.label, 'browser-session', async () => {
-            context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
-            page = await context.newPage();
+        await test.step(`negative-actor-phase:${scenario.label}:context-creation`, async () => {
+          context = await withNegativeActorFailureCategory(
+            scenario.label,
+            'context-creation',
+            () => browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' }),
+          );
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:page-creation`, async () => {
+          page = await withNegativeActorFailureCategory(
+            scenario.label,
+            'page-creation',
+            () => context.newPage(),
+          );
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:sign-in`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'unknown', async () => {
             policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
             markers = privacyMarkers(account);
             emissions = attachSensitiveEmissionAudit(page, markers);
-            await signInCustomer(page, account);
+          });
+          await withNegativeActorSignInFailureCategory(scenario.label, () => (
+            signInCustomer(page, account, { requireAnonymousStorage: true })
+          ));
+        });
+
+        await test.step(`negative-actor-phase:${scenario.label}:authenticated-privacy`, async () => {
+          await withNegativeActorFailureCategory(scenario.label, 'authenticated-privacy', async () => {
             await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
           });
         });
@@ -293,8 +381,19 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
             await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
           });
         });
+      } catch (error) {
+        primaryFailure = error;
+        throw error;
       } finally {
-        await context?.close();
+        try {
+          await context?.close();
+        } catch {
+          try {
+            await reportNegativeActorFailure(scenario.label, 'context-cleanup');
+          } catch (cleanupFailure) {
+            if (!primaryFailure) throw cleanupFailure;
+          }
+        }
       }
     });
   }
@@ -342,22 +441,36 @@ test('an executed update with an aborted response is not retried and requires a 
   const created = mainDraftValues();
   const edited = editedDraftValues();
   const markers = privacyMarkers(account, created, edited);
-  const context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+  let context;
   let page;
   let policy;
   let emissions;
   let requestId;
   let cdpSession;
   let pausedUpdateHandler;
+  let interceptionReleased = false;
+  let executedUpdateRpcCount;
   try {
     await withAmbiguousUpdateFailureCategory('isolated-setup', async () => {
-      page = await context.newPage();
-      policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-      emissions = attachSensitiveEmissionAudit(page, markers);
-      await prepareSyntheticCustomerAccount(account.email, account.password);
-      await signInCustomer(page, account);
-      requestId = await createDraftThroughUi(page, created);
-      await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+      await withAmbiguousSetupFailureCategory('browser-context', async () => {
+        context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+        page = await context.newPage();
+        policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+        emissions = attachSensitiveEmissionAudit(page, markers);
+      });
+      await withAmbiguousSetupFailureCategory('fixture-account', async () => {
+        await prepareSyntheticCustomerAccount(account.email, account.password);
+      });
+      await withAmbiguousSetupFailureCategory('browser-session', async () => {
+        await signInCustomer(page, account);
+      });
+      await withAmbiguousSetupFailureCategory('draft-create', async () => {
+        requestId = await createDraftThroughUi(page, created);
+      });
+      await withAmbiguousSetupFailureCategory('edit-route', async () => {
+        await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+        await expect(page.locator('form[data-draft-edit-form]')).toBeVisible();
+      });
     });
 
     let interceptedUpdateCount = 0;
@@ -373,7 +486,7 @@ test('an executed update with an aborted response is not retried and requires a 
       try {
         if (isResponseStage) {
           interceptedResponseCount += 1;
-          if (event.requestId !== firstUpdateRequestId) {
+          if (event.request.method !== 'POST' || event.requestId !== firstUpdateRequestId) {
             interceptionFailure = true;
           }
           updateExecuted = Number.isInteger(event.responseStatusCode)
@@ -384,6 +497,13 @@ test('an executed update with an aborted response is not retried and requires a 
             errorReason: 'Aborted',
           });
           responseAborted = true;
+          return;
+        }
+
+        if (event.request.method !== 'POST') {
+          await cdpSession.send('Fetch.continueRequest', {
+            requestId: event.requestId,
+          });
           return;
         }
 
@@ -432,7 +552,8 @@ test('an executed update with an aborted response is not retried and requires a 
       expect(updateExecuted).toBe(true);
       expect(responseAborted).toBe(true);
       expect(interceptionFailure).toBe(false);
-      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      executedUpdateRpcCount = policy.getRpcCount('customer_update_draft_request');
+      expect(executedUpdateRpcCount).toBe(1);
       await markAmbiguousUpdateProgress('mutation-executed');
     });
 
@@ -440,6 +561,7 @@ test('an executed update with an aborted response is not retried and requires a 
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
       await expect(page.locator('form[data-draft-edit-form] button[type="submit"]')).toBeDisabled();
       expect(interceptedUpdateCount).toBe(1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
     });
 
     await withAmbiguousUpdateFailureCategory('interception-release', async () => {
@@ -449,13 +571,17 @@ test('an executed update with an aborted response is not retried and requires a 
       cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
       expect(cdpSession.listenerCount('Fetch.requestPaused')).toBe(0);
       pausedUpdateHandler = undefined;
+      await markAmbiguousUpdateProgress('response-listener-removed');
       await cdpSession.detach();
       cdpSession = undefined;
+      interceptionReleased = true;
       await markAmbiguousUpdateProgress('cdp-detached');
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
     });
 
     let readBaseline;
     await withAmbiguousUpdateFailureCategory('detail-navigation', async () => {
+      expect(interceptionReleased).toBe(true);
       expect(cdpSession).toBeUndefined();
       expect(pausedUpdateHandler).toBeUndefined();
       readBaseline = policy.getTableReadCount('service_requests');
@@ -465,6 +591,7 @@ test('an executed update with an aborted response is not retried and requires a 
 
     await withAmbiguousUpdateFailureCategory('fresh-rls-read', async () => {
       await expect.poll(() => policy.getTableReadCount('service_requests')).toBe(readBaseline + 1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await markAmbiguousUpdateProgress('rls-read-observed');
     });
 
@@ -472,20 +599,34 @@ test('an executed update with an aborted response is not retried and requires a 
       const detail = page.locator('.request-detail-card');
       const expectedRequestedStart = formatSastDateTime(`${edited.requestedStart}:00+02:00`);
       const expectedBudget = formatZarBudgetMinor(Math.round(Number(edited.budget) * 100));
-      await expect(page.getByRole('heading', { name: edited.title, exact: true })).toBeVisible();
-      await expect(detail.getByText('Draft', { exact: true })).toBeVisible();
-      await expect(detail.getByText(ACTIVE_CATEGORY_NAME, { exact: true })).toBeVisible();
+      await expect(detail).toBeVisible();
+      await expect(page.locator('form[data-draft-edit-form]')).toHaveCount(0);
+      await expect(detail.locator('.request-detail-status .status-chip')).toHaveText('Draft');
+      await markCanonicalValuePass('status');
+      await expect(detail.locator('.request-detail-status span:not(.status-chip)'))
+        .toHaveText(ACTIVE_CATEGORY_NAME);
+      await markCanonicalValuePass('category');
+      await expect(page.locator('.dashboard-heading h1')).toHaveText(edited.title);
+      await markCanonicalValuePass('title');
       await expect(detail.getByText(edited.description, { exact: true })).toBeVisible();
+      await markCanonicalValuePass('description');
       await expect(detail.getByText(edited.suburb, { exact: true })).toBeVisible();
+      await markCanonicalValuePass('suburb');
       await expect(detail.getByText(edited.city, { exact: true })).toBeVisible();
+      await markCanonicalValuePass('city');
       await expect(detail.getByText(expectedRequestedStart, { exact: true })).toBeVisible();
+      await markCanonicalValuePass('start');
       await expect(detail.getByText(expectedBudget, { exact: true })).toBeVisible();
+      await markCanonicalValuePass('budget');
       await expect(page.getByText('Draft updated.', { exact: true })).toHaveCount(0);
-      expect(policy.getRpcCount('customer_update_draft_request')).toBe(1);
+      expect(executedUpdateRpcCount).toBe(1);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await markAmbiguousUpdateProgress('canonical-values-verified');
     });
 
     await withAmbiguousUpdateFailureCategory('postcondition', async () => {
+      expect(interceptionReleased).toBe(true);
+      expect(policy.getRpcCount('customer_update_draft_request')).toBe(executedUpdateRpcCount);
       await page.getByRole('button', { name: 'Cancel draft' }).click();
       await page.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
       await expect(page.getByText('Draft cancelled.', { exact: true })).toBeVisible();
@@ -499,7 +640,8 @@ test('an executed update with an aborted response is not retried and requires a 
       await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
     });
   } finally {
-    let cleanupFailed = false;
+    let interceptionCleanupFailed = false;
+    let contextCleanupFailed = false;
     if (cdpSession) {
       if (pausedUpdateHandler) {
         cdpSession.off('Fetch.requestPaused', pausedUpdateHandler);
@@ -509,16 +651,17 @@ test('an executed update with an aborted response is not retried and requires a 
         await cdpSession.send('Fetch.disable');
         await cdpSession.detach();
       } catch {
-        cleanupFailed = true;
+        interceptionCleanupFailed = true;
       }
     }
     try {
-      await context.close();
+      await context?.close();
     } catch {
-      cleanupFailed = true;
+      contextCleanupFailed = true;
     }
-    if (cleanupFailed) {
-      await test.step('ambiguous-update-failure:cleanup', async () => {
+    const cleanupFailureCategory = interceptionCleanupFailed ? 'interception-release' : 'cleanup';
+    if (interceptionCleanupFailed || contextCleanupFailed) {
+      await test.step(`ambiguous-update-failure:${cleanupFailureCategory}`, async () => {
         throw new Error('privacy-safe-ambiguous-update-boundary-failure');
       });
     } else {

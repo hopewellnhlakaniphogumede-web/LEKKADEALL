@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { access, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,17 +95,32 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /guard-state:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /negative-actor-phase:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
   assert.match(reporterSource, /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\)/);
-  assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|browser-session\|fixture-state-application\|route-guard-verification\|sign-out/);
-  assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
-  assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
-  assert.match(reporterSource, /signup-http-429\|signup-http-conflict\|signup-http-other/);
-  assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
-  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|context-creation\|page-creation\|sign-in\|authenticated-privacy\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(
     reporterSource,
-    /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
+    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
   );
-  assert.match(reporterSource, /if \(!step\.error && SAFE_PROGRESS_PHASE\.test\(step\.title\)\)/);
+  assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
+  assert.match(
+    reporterSource,
+    /signup-http-409\|signup-http-422-\(\?:weak-password\|signup-disabled\|user-already-exists\|validation-failed\|unknown\)\|signup-http-429\|signup-http-other/,
+  );
+  assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
+  assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|draft-create\|edit-route\)/);
+  assert.match(
+    reporterSource,
+    /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|response-listener-removed\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
+  );
+  assert.match(
+    reporterSource,
+    /canonical-values:\(\?:status\|category\|title\|description\|suburb\|city\|start\|budget\)-pass/,
+  );
+  assert.match(
+    reporterSource,
+    /if \(!step\.error && \(SAFE_PROGRESS_PHASE\.test\(step\.title\)[\s\S]*SAFE_CANONICAL_VALUE_PHASE\.test\(step\.title\)\)\)/u,
+  );
   assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
 });
 
@@ -118,8 +134,14 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   );
   assert.match(runnerSource, /GITHUB_RUN_ID/);
   assert.match(runnerSource, /GITHUB_RUN_ATTEMPT/);
-  assert.match(runnerSource, /randomBytes\(4\)\.toString\('hex'\)/);
   assert.match(runnerSource, /E2E_TEST_SCOPE/);
+  assert.doesNotMatch(runnerSource, /GITHUB_(?:REF|HEAD_REF|EVENT_NAME)/u);
+  assert.match(
+    runnerSource,
+    /update\(`\$\{workflowRun\}:\$\{workflowAttempt\}:\$\{scope\}`\)[\s\S]*digest\('hex'\)[\s\S]*slice\(0, 8\)/u,
+  );
+  assert.match(runnerSource, /const runId = buildRunId\(testScope\)/);
+  assert.doesNotMatch(runnerSource, /randomBytes/u);
   assert.match(runnerSource, /E2E_RUN_ID:\s*runId/);
   assert.match(runnerSource, /\['db', 'reset'\]/);
   assert.match(runnerSource, /\['stop', '--no-backup'\]/);
@@ -128,7 +150,10 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(helperSource, /test\.info\(\)\.title/);
   assert.match(helperSource, /createHash\('sha256'\)/);
   assert.equal((helperSource.match(/digest\('hex'\)\.slice\(0, 6\)/gu) ?? []).length, 2);
-  assert.match(helperSource, /randomBytes\(5\)\.toString\('hex'\)/);
+  assert.match(
+    helperSource,
+    /update\(`\$\{runId\}:\$\{testComponent\}:\$\{actor\}`\)[\s\S]*digest\('hex'\)[\s\S]*slice\(0, 10\)/u,
+  );
   assert.match(helperSource, /EMAIL_LOCAL_PART_MAX_LENGTH\s*=\s*64/);
   assert.match(
     helperSource,
@@ -149,7 +174,7 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
   assert.match(
     helperSource,
-    /\[409, 422\]\.includes\(response\.status\(\)\)[\s\S]*failRegistration\('signup-http-conflict'\)/u,
+    /response\.status\(\) === 409[\s\S]*failRegistration\('signup-http-409'\)[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\(await signupHttp422Category\(response\)\)/u,
   );
   assert.match(appSource, /if \(authSubmissionInFlight\) return;/);
   assert.match(appSource, /authSubmissionInFlight = true;[\s\S]*await submitAuthFormOnce\(form\);[\s\S]*authSubmissionInFlight = false;/u);
@@ -167,6 +192,190 @@ test('local Auth registration uses run-scoped identity and explicit readiness co
   assert.match(authConfig, /\[auth\.email\][\s\S]*enable_confirmations\s*=\s*false/u);
   assert.match(authConfig, /\[auth\.rate_limit\][\s\S]*sign_in_sign_ups\s*=\s*120/u);
   assert.match(authConfig, /local-only quota is not production configuration/u);
+});
+
+test('signup 422 classification reads only the privacy-safe Auth error header', async () => {
+  const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
+  const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const expectedCategories = new Map([
+    ['weak_password', 'signup-http-422-weak-password'],
+    ['signup_disabled', 'signup-http-422-signup-disabled'],
+    ['user_already_exists', 'signup-http-422-user-already-exists'],
+    ['validation_failed', 'signup-http-422-validation-failed'],
+  ]);
+
+  for (const [errorCode, category] of expectedCategories) {
+    assert.match(helperSource, new RegExp(`\\['${errorCode}', '${category}'\\]`, 'u'));
+    assert.match(reporterSource, new RegExp(category.replace('signup-http-422-', ''), 'u'));
+  }
+  for (const errorCode of [null, '', 'unknown_code']) {
+    assert.equal(expectedCategories.get(errorCode) ?? 'signup-http-422-unknown', 'signup-http-422-unknown');
+  }
+
+  assert.equal((helperSource.match(/headerValue\('x-sb-error-code'\)/gu) ?? []).length, 1);
+  assert.match(
+    helperSource,
+    /async function signupHttp422Category\(response\)[\s\S]*headerValue\('x-sb-error-code'\)[\s\S]*SIGNUP_HTTP_422_CATEGORIES\.get\(errorCode\) \?\? 'signup-http-422-unknown'/u,
+  );
+  assert.doesNotMatch(helperSource, /response\.(?:body|json|text)\b/u);
+  assert.doesNotMatch(helperSource, /response\.headers\(\)/u);
+  assert.doesNotMatch(helperSource, /console\.|process\.(?:stdout|stderr)|JSON\.stringify/u);
+  assert.equal((helperSource.match(/name: 'Create account' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.equal((helperSource.match(/await reconcileSingleUiSignup\(/gu) ?? []).length, 1);
+  assert.match(
+    helperSource,
+    /catch \{[\s\S]*await reconcileSingleUiSignup\(page, account, signupRequestCount\);[\s\S]*return;[\s\S]*finally \{[\s\S]*page\.off\('request', countSignupRequest\);[\s\S]*response\.status\(\) === 422[\s\S]*failRegistration\(await signupHttp422Category\(response\)\)/u,
+  );
+});
+
+test('negative actors report fixed privacy-safe browser-session boundaries', async () => {
+  const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
+  const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
+  const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const stages = [
+    'context-creation',
+    'page-creation',
+    'anonymous-storage-precondition',
+    'sign-in-network',
+    'sign-in-http-429',
+    'sign-in-http-4xx',
+    'sign-in-http-5xx',
+    'sign-in-http-unexpected',
+    'auth-session-missing',
+    'customer-route',
+    'active-profile-readiness',
+    'authenticated-privacy',
+    'context-cleanup',
+    'unknown',
+  ];
+
+  for (const stage of stages) {
+    assert.match(securitySource, new RegExp(`'${stage}'`, 'u'));
+    assert.match(reporterSource, new RegExp(stage, 'u'));
+  }
+  assert.match(
+    helperSource,
+    /privacySafeSignInFailureStage\(error\)[\s\S]*error instanceof PrivacySafeSignInError[\s\S]*: 'unknown'/u,
+  );
+  assert.match(
+    securitySource,
+    /withNegativeActorSignInFailureCategory[\s\S]*privacySafeSignInFailureStage\(error\)[\s\S]*reportNegativeActorFailure/u,
+  );
+  assert.doesNotMatch(
+    reporterSource,
+    /negative-actor-failure:\(restricted\|suspended\|closed\|provider\|missing-profile\):\([^)]*browser-session/u,
+  );
+  assert.match(
+    reporterSource,
+    /step\.error && SAFE_CONTEXT_CLEANUP_FAILURE\.test\(step\.title\)[\s\S]*CLEANUP \$\{step\.title\}/u,
+  );
+  assert.doesNotMatch(reporterSource, /step\.error\.(?:message|stack|name|cause)/iu);
+
+  const signInStart = helperSource.indexOf('export async function signInCustomer');
+  const signInEnd = helperSource.indexOf('export function futureSastInput');
+  assert.ok(signInStart >= 0);
+  assert.ok(signInEnd > signInStart);
+  const signInSource = helperSource.slice(signInStart, signInEnd);
+  assert.equal((signInSource.match(/\/auth\/v1\/token/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/grant_type/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/name: 'Sign in' \}\)\.click\(\)/gu) ?? []).length, 1);
+  assert.equal((signInSource.match(/timeout:\s*30_000/gu) ?? []).length, 4);
+  assert.match(signInSource, /candidate\.request\(\)\.method\(\) === 'POST'/u);
+  assert.doesNotMatch(signInSource, /retry|setTimeout|waitForTimeout|sleep/iu);
+  assert.match(signInSource, /status === 429[\s\S]*sign-in-http-429/u);
+  assert.match(signInSource, /status >= 400 && status < 500[\s\S]*sign-in-http-4xx/u);
+  assert.match(signInSource, /status >= 500 && status < 600[\s\S]*sign-in-http-5xx/u);
+  assert.match(signInSource, /!response\.ok\(\)[\s\S]*sign-in-http-unexpected/u);
+  assert.doesNotMatch(signInSource, /response\.(?:body|json|text|headers|headerValue)\b/u);
+  assert.doesNotMatch(
+    signInSource,
+    /console\.|process\.(?:stdout|stderr)|document\.cookie|context\.cookies|localStorage\.getItem|sessionStorage/u,
+  );
+
+  const scenarioStart = securitySource.indexOf(
+    "test('restricted suspended closed missing-profile and wrong-role actors fail closed'",
+  );
+  const scenarioEnd = securitySource.indexOf(
+    "test('a stale edit is rejected after another tab cancels the draft'",
+  );
+  assert.ok(scenarioStart >= 0);
+  assert.ok(scenarioEnd > scenarioStart);
+  const scenarioSource = securitySource.slice(scenarioStart, scenarioEnd);
+  assert.equal((scenarioSource.match(/browser\.newContext\(/gu) ?? []).length, 1);
+  assert.equal((scenarioSource.match(/context\.newPage\(\)/gu) ?? []).length, 1);
+  assert.doesNotMatch(scenarioSource, /storageState/u);
+  assert.match(
+    scenarioSource,
+    /for \(const scenario of cases\)[\s\S]*browser\.newContext[\s\S]*context\.newPage\(\)/u,
+  );
+  assert.match(scenarioSource, /finally \{[\s\S]*await context\?\.close\(\)/u);
+  assert.match(
+    scenarioSource,
+    /catch \(error\) \{[\s\S]*primaryFailure = error;[\s\S]*throw error;[\s\S]*finally \{[\s\S]*context-cleanup[\s\S]*if \(!primaryFailure\) throw cleanupFailure;/u,
+  );
+
+  assert.equal((helperSource.match(/headerValue\('x-sb-error-code'\)/gu) ?? []).length, 1);
+  assert.match(
+    securitySource,
+    /event\.request\.method !== 'POST'[\s\S]*Fetch\.continueRequest[\s\S]*interceptedUpdateCount \+= 1/u,
+  );
+  assert.match(securitySource, /expect\(executedUpdateRpcCount\)\.toBe\(1\)/u);
+  assert.match(securitySource, /openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read/u);
+});
+
+test('push and pull-request contexts retain valid distinct run-scoped actor properties', async () => {
+  const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const actor = 'customer-lifecycle';
+  const testTitle = 'customer registration through cancelled draft completes against real local RLS and RPCs';
+  const buildProperties = ({ workflowRun, workflowAttempt, scope }) => {
+    const scopeComponent = createHash('sha256')
+      .update(`${workflowRun}:${workflowAttempt}:${scope}`)
+      .digest('hex')
+      .slice(0, 8);
+    const runId = `r${workflowRun}-a${workflowAttempt}-${scopeComponent}`;
+    const testComponent = createHash('sha256').update(testTitle).digest('hex').slice(0, 6);
+    const actorComponent = createHash('sha256').update(actor).digest('hex').slice(0, 6);
+    const actorSuffix = createHash('sha256')
+      .update(`${runId}:${testComponent}:${actor}`)
+      .digest('hex')
+      .slice(0, 10);
+    const localPart = `${runId}.${testComponent}.${actorComponent}.${actorSuffix}`;
+    return {
+      email: `${localPart}@lekkadeall.invalid`,
+      localPart,
+      runId,
+    };
+  };
+  const pushContext = {
+    eventName: 'push',
+    headRef: '',
+    ref: 'refs/heads/fix/example-branch',
+    workflowAttempt: '1',
+    workflowRun: '12345678901',
+    scope: 'lifecycle',
+  };
+  const pullRequestContext = {
+    eventName: 'pull_request',
+    headRef: 'fix/example-branch',
+    ref: 'refs/pull/1/merge',
+    workflowAttempt: '1',
+    workflowRun: '12345678902',
+    scope: 'lifecycle',
+  };
+  const push = buildProperties(pushContext);
+  const pullRequest = buildProperties(pullRequestContext);
+
+  for (const properties of [push, pullRequest]) {
+    assert.equal(properties.runId.length, 24);
+    assert.equal(properties.localPart.length, 49);
+    assert.equal(properties.email.length, 68);
+    assert.match(properties.email, /^[a-z0-9][a-z0-9.-]{0,63}@lekkadeall\.invalid$/u);
+  }
+  assert.notEqual(push.email, pullRequest.email);
+  assert.equal(actor.length, 18);
+  assert.doesNotMatch(push.email, /refs|push|example-branch/u);
+  assert.doesNotMatch(pullRequest.email, /refs|pull|merge|example-branch/u);
+  assert.doesNotMatch(runnerSource, /GITHUB_(?:REF|HEAD_REF|EVENT_NAME)/u);
 });
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
@@ -224,13 +433,19 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   ).length, 2);
   assert.equal((lifecycleSource.match(/registerCustomer\(page, account\)/gu) ?? []).length, 1);
   assert.doesNotMatch(lifecycleSource, /prepareSyntheticCustomerAccount|createSyntheticLocalAuthUser/u);
+  assert.match(blockedSource, /syntheticAccount\('customer-blocked'\)/);
+  assert.doesNotMatch(blockedSource, /customer-blocked-features/u);
+  assert.match(
+    blockedSource,
+    /page\.goto\('\/'\)[\s\S]*expectAuthSession:\s*false[\s\S]*prepareSyntheticCustomerAccount/u,
+  );
   assert.match(
     securitySource,
     /prepareSyntheticCustomerAccount\(customerA\.email, customerA\.password\)[\s\S]*signInCustomer\(pageA, customerA\)[\s\S]*registerCustomer\(pageB, customerB\)/u,
   );
   assert.match(
     securitySource,
-    /negative-actor-phase:\$\{scenario\.label\}:auth-creation[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:ticket-9b-profile-readiness[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:browser-session[\s\S]*browser\.newContext[\s\S]*attachNetworkPolicy[\s\S]*signInCustomer\(page, account\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:fixture-state-application[\s\S]*negative-actor-phase:\$\{scenario\.label\}:route-guard-verification/u,
+    /negative-actor-phase:\$\{scenario\.label\}:auth-creation[\s\S]*createSyntheticLocalAuthUser\(account\.email, account\.password\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:ticket-9b-profile-readiness[\s\S]*waitForProvisionedCustomerProfile\(account\.email, \{ timeoutMs: 60_000 \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:context-creation[\s\S]*browser\.newContext[\s\S]*negative-actor-phase:\$\{scenario\.label\}:page-creation[\s\S]*context\.newPage[\s\S]*attachNetworkPolicy[\s\S]*signInCustomer\(page, account, \{ requireAnonymousStorage: true \}\)[\s\S]*negative-actor-phase:\$\{scenario\.label\}:authenticated-privacy[\s\S]*negative-actor-phase:\$\{scenario\.label\}:fixture-state-application[\s\S]*negative-actor-phase:\$\{scenario\.label\}:route-guard-verification/u,
   );
   for (const actor of ['restricted', 'suspended', 'closed', 'provider', 'missing-profile']) {
     assert.match(securitySource, new RegExp(`label: '${actor}'`));
@@ -238,7 +453,8 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
   for (const phase of [
     'auth-creation',
     'ticket-9b-profile-readiness',
-    'browser-session',
+    'context-creation',
+    'page-creation',
     'fixture-state-application',
     'route-guard-verification',
   ]) {
@@ -252,6 +468,11 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     securitySource,
     /an executed update with an aborted response[\s\S]*prepareSyntheticCustomerAccount\(account\.email, account\.password\)[\s\S]*signInCustomer\(page, account\)[\s\S]*createDraftThroughUi/u,
   );
+  for (const phase of [
+    'browser-context', 'fixture-account', 'browser-session', 'draft-create', 'edit-route',
+  ]) {
+    assert.match(securitySource, new RegExp(`withAmbiguousSetupFailureCategory\\('${phase}'`));
+  }
   assert.match(securitySource, /browser\.newContext\(\{ baseURL: appUrl, serviceWorkers: 'allow' \}\)/);
   assert.match(securitySource, /context\.newCDPSession\(page\)/);
   assert.match(
@@ -262,26 +483,78 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     securitySource,
     /interceptedUpdateCount === 1[\s\S]*Fetch\.continueRequest[\s\S]*Fetch\.failRequest/u,
   );
+  assert.match(
+    securitySource,
+    /event\.request\.method !== 'POST'[\s\S]*Fetch\.continueRequest[\s\S]*interceptedUpdateCount \+= 1/u,
+  );
+  assert.match(
+    securitySource,
+    /isResponseStage[\s\S]*event\.request\.method !== 'POST'[\s\S]*event\.requestId !== firstUpdateRequestId/u,
+  );
   assert.doesNotMatch(securitySource, /route\.fetch\(/u);
   assert.match(securitySource, /getByText\('Draft updated\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/);
+  const ambiguousScenarioStart = securitySource.indexOf(
+    "test('an executed update with an aborted response is not retried and requires a fresh read'",
+  );
+  const ambiguousScenarioEnd = securitySource.indexOf(
+    "test('recovery routes fail closed without persisting a PKCE verifier'",
+  );
+  assert.ok(ambiguousScenarioStart >= 0);
+  assert.ok(ambiguousScenarioEnd > ambiguousScenarioStart);
+  const ambiguousScenarioSource = securitySource.slice(ambiguousScenarioStart, ambiguousScenarioEnd);
+  let previousReleaseStep = -1;
+  for (const releaseStep of [
+    "withAmbiguousUpdateFailureCategory('interception-release'",
+    "cdpSession.send('Fetch.disable')",
+    "cdpSession.off('Fetch.requestPaused', pausedUpdateHandler)",
+    "markAmbiguousUpdateProgress('response-listener-removed')",
+    'cdpSession.detach()',
+    'interceptionReleased = true',
+    "readBaseline = policy.getTableReadCount('service_requests')",
+    'openDraftDetail(page, requestId)',
+    "withAmbiguousUpdateFailureCategory('fresh-rls-read'",
+  ]) {
+    const releaseStepIndex = ambiguousScenarioSource.indexOf(releaseStep);
+    assert.ok(releaseStepIndex > previousReleaseStep, `${releaseStep} must follow interceptor release order`);
+    previousReleaseStep = releaseStepIndex;
+  }
   assert.match(
     securitySource,
-    /ambiguous-ui[\s\S]*interceptor-release-start[\s\S]*Fetch\.disable[\s\S]*fetch-disabled[\s\S]*Fetch\.requestPaused[\s\S]*listenerCount\('Fetch\.requestPaused'\)[\s\S]*cdpSession\.detach\(\)[\s\S]*cdp-detached/u,
+    /ambiguous-ui[\s\S]*interceptor-release-start[\s\S]*Fetch\.disable[\s\S]*fetch-disabled[\s\S]*Fetch\.requestPaused[\s\S]*listenerCount\('Fetch\.requestPaused'\)[\s\S]*response-listener-removed[\s\S]*cdpSession\.detach\(\)[\s\S]*interceptionReleased = true[\s\S]*cdp-detached/u,
   );
   assert.match(
     securitySource,
-    /detail-navigation[\s\S]*getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read[\s\S]*toBe\(readBaseline \+ 1\)[\s\S]*rls-read-observed/u,
+    /detail-navigation[\s\S]*expect\(interceptionReleased\)\.toBe\(true\)[\s\S]*getTableReadCount\('service_requests'\)[\s\S]*openDraftDetail\(page, requestId\)[\s\S]*fresh-rls-read[\s\S]*toBe\(readBaseline \+ 1\)[\s\S]*rls-read-observed/u,
   );
   assert.match(
     securitySource,
-    /getByRole\('heading', \{ name: edited\.title, exact: true \}\)[\s\S]*ACTIVE_CATEGORY_NAME[\s\S]*edited\.description[\s\S]*edited\.suburb[\s\S]*edited\.city[\s\S]*expectedRequestedStart[\s\S]*expectedBudget/u,
+    /request-detail-card[\s\S]*form\[data-draft-edit-form\][\s\S]*request-detail-status \.status-chip[\s\S]*ACTIVE_CATEGORY_NAME[\s\S]*dashboard-heading h1[\s\S]*edited\.description[\s\S]*edited\.suburb[\s\S]*edited\.city[\s\S]*expectedRequestedStart[\s\S]*expectedBudget/u,
   );
+  let previousCanonicalMarker = -1;
+  for (const field of [
+    'status', 'category', 'title', 'description', 'suburb', 'city', 'start', 'budget',
+  ]) {
+    const markerIndex = ambiguousScenarioSource.indexOf(`markCanonicalValuePass('${field}')`);
+    assert.ok(markerIndex > previousCanonicalMarker, `${field} marker must follow its strict assertion`);
+    previousCanonicalMarker = markerIndex;
+  }
   assert.match(
     securitySource,
-    /canonical-values[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)[\s\S]*canonical-values-verified[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
+    /canonical-values[\s\S]*expect\(executedUpdateRpcCount\)\.toBe\(1\)[\s\S]*getRpcCount\('customer_update_draft_request'\)\)\.toBe\(executedUpdateRpcCount\)[\s\S]*canonical-values-verified[\s\S]*postcondition[\s\S]*getByRole\('button', \{ name: 'Cancel draft' \}\)\.click\(\)/u,
   );
+  assert.ok((
+    ambiguousScenarioSource
+      .match(/getRpcCount\('customer_update_draft_request'\)\)\.toBe\(executedUpdateRpcCount\)/gu) ?? []
+  ).length >= 4);
   assert.match(securitySource, /mutation-executed/);
-  assert.match(securitySource, /ambiguous-update-failure:cleanup[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u);
+  assert.match(
+    securitySource,
+    /const cleanupFailureCategory = interceptionCleanupFailed \? 'interception-release' : 'cleanup'/u,
+  );
+  assert.match(
+    securitySource,
+    /ambiguous-update-failure:\$\{cleanupFailureCategory\}[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u,
+  );
   assert.doesNotMatch(securitySource, /page\.reload\(\)|name: 'Back to draft'/u);
 });
 

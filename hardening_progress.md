@@ -3903,11 +3903,12 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 #### Correction
 
 - `ambiguous-ui` still proves that `Draft updated.` was never shown, submission remains disabled, and no second intercepted update occurred.
-- A new allowlisted privacy-safe `interception-release` phase calls `Fetch.disable`, removes the paused-request listener, and detaches the CDP session completely before any verification navigation.
+- A new allowlisted privacy-safe `interception-release` phase calls `Fetch.disable`, removes the paused-request listener, emits the fixed `response-listener-removed` milestone, and detaches the CDP session completely before any verification navigation. Navigation additionally requires the explicit released state and absent session/listener.
 - `fresh-rls-read` now records the `service_requests` baseline and uses `openDraftDetail(...)` for a normal navigation to the owned draft detail route. It requires the read count to increase before accepting the page.
-- The freshly loaded detail page must render the canonical draft status, active category, edited title, description, suburb, city, requested start, and budget. The exact `customer_update_draft_request(...)` RPC count must remain one, and `Draft updated.` must still be absent.
+- The freshly loaded detail page must render the canonical draft status, active category, edited title, description, suburb, city, requested start, and budget. The captured `customer_update_draft_request(...)` RPC count must remain exactly one across ambiguous UI, interceptor release, fresh read, canonical verification, and cancellation, and `Draft updated.` must still be absent.
 - Cancellation starts directly on that freshly loaded detail page; the scenario no longer reloads the blocked edit page or follows its `Back to draft` link.
-- The static boundary suite now requires this release-before-navigation order and the separate privacy-safe phase.
+- Fallback CDP teardown failures are reported as `interception-release`, while context cleanup remains `cleanup`; neither can be misclassified as `fresh-rls-read`.
+- The static boundary suite now requires the complete disable/listener-removal/detach/released-state/read-baseline/navigation/fresh-read order and the separate privacy-safe phase.
 
 #### Verification and unchanged security
 
@@ -3915,6 +3916,65 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - The focused Ticket 9A-9 static boundary file passed **11/11**.
 - The complete existing frontend/static suite passed **64/64**.
 - The requested `aborted`, `affected`, and `full` runner scopes were invoked. Each stopped at the privacy-safe startup gate before Playwright because this host has neither Docker nor the Supabase CLI. No independent scenario, combined pair, or full eight-scenario browser result is claimed; cleanup left no generated runtime config or Playwright report directory.
+- After the actual E2E source changes, prerequisite checks returned `docker:not-found` and `supabase:not-found`. The changed independent scenario could not execute locally, so no changed-source Playwright pass is claimed; `aborted`, `affected`, and `full` runtime verification remains required on GitHub Actions or another Docker/Supabase-capable runner. The focused static Ticket 9A-9 boundary file passed **11/11**, syntax checks passed for the three E2E JavaScript modules, and the complete frontend/static suite passed **64/64**.
 - Playwright remains Chromium-only, one-worker, and zero-retry. Screenshots, videos, traces, HAR, saved storage state, Auth-email artifacts, database dumps, verbose failure details, and artifact upload remain disabled.
 - No optimistic success, automatic update retry, or alternate mutation path was added.
 - `customer_update_draft_request(...)`, RLS, route guards, Ticket 9B profile provisioning, public-field validation, cancellation, state-machine protections, and privacy redaction are unchanged. Signup, negative-actor, provider, cross-customer, and lifecycle setup were not modified.
+
+### Ticket 9A-9 E2E correction - distinguish preflight from the update POST - 2026-07-31
+
+**Status:** Canonical-title harness failure corrected; Supabase-backed Playwright verification remains pending in GitHub Actions.
+
+#### Failing field and representation review
+
+- The latest independent aborted-response run passed interceptor release, Fetch disablement, listener removal, CDP detach, detail navigation, and the fresh `service_requests` RLS-read milestone before reporting `ambiguous-update-failure:canonical-values`.
+- The failure followed the fresh-read marker by the configured 10-second assertion timeout. `title` was the first canonical assertion, so `title` is the identified failing field without exposing either expected or rendered content.
+- The expected representation is the server-canonical title rendered as the newly loaded detail-page heading. The synthetic title is already trimmed ASCII in NFC, so its raw and server-canonical representations are equal. The other assertions already use category display name, user-facing status label, formatted SAST, formatted ZAR, and a description with no newline-normalization difference.
+- The detail page had completed a new authenticated RLS read and the correction now also requires the edit form to be absent. Stale edit-form elements were not the source of the comparison.
+
+#### Root cause and correction
+
+- The Chromium Fetch URL pattern matches both the intended RPC POST and any browser CORS preflight. The paused-request handler did not distinguish methods, so a successful preflight response could be mistaken for successful mutation execution and then aborted before the POST was sent. The later detail read therefore rendered the unchanged canonical title.
+- Non-POST requests are now continued without response interception. Only the POST increments the intercepted mutation count, receives response interception, and may establish the request ID whose successful response is aborted.
+- The response-stage check additionally requires the same POST method and request ID. Exactly one network-policy `customer_update_draft_request(...)` count remains required throughout ambiguity, release, fresh read, canonical verification, and cancellation; no mutation retry was introduced.
+- All eight canonical assertions remain strict and are scoped to the newly loaded detail card or its page heading. The reporter emits only allowlisted pass markers for status, category, title, description, suburb, city, requested start, and budget. It still emits no submitted value, response body, URL, credential, token, customer data, or database row.
+- Fetch is still disabled, its listener removed, and CDP detached before detail navigation. The update UI remains blocked without optimistic success, and cancellation still starts from the fresh detail page.
+
+#### Verification and unchanged security
+
+- Node syntax checks passed for the three changed E2E JavaScript files.
+- The focused Ticket 9A-9 boundary suite passed **11/11**.
+- The complete frontend/static Node suite passed **64/64**.
+- Docker and the Supabase CLI are unavailable on this host, so no changed-source runtime Playwright pass is claimed. The independent `aborted`, combined `affected`, and complete `full` scopes remain pending GitHub Actions.
+- No production application module, migration, RLS policy, grant, database function, Auth boundary, Ticket 9B provisioning rule, public-field validator, cancellation control, update control, state-machine protection, payment/webhook implementation, Supabase configuration, or Actions workflow changed.
+- Playwright remains Chromium-only, one-worker, zero-retry, loopback-only, anon-key-only in browser code, and artifact-free.
+
+### Ticket 9A-9 E2E correction - deterministic actor scopes and isolated setup attribution - 2026-08-04
+
+**Status:** Narrow E2E fixture and attribution correction implemented locally; replacement GitHub Actions verification pending.
+
+#### Workflow evidence and root causes
+
+- PR #1 produced separate `push` and `pull_request` workflow invocations for the same head. The database, migration, webhook, and pgTAP jobs were green.
+- In the `push` invocation, the independent `lifecycle`, independent `aborted`, and combined `affected` scopes passed. The aborted scenario reached all eight canonical-value pass markers after one POST mutation, Fetch/listener/CDP release, and a fresh authenticated `service_requests` read. The recovered CORS-preflight correction was therefore not implicated.
+- The `full` scope's blocked-features failure was deterministic: `customer-blocked-features` exceeded the fixture's 24-character actor-label limit and failed before Auth or any blocked-feature assertion.
+- The `full` scope's ambiguous-update failure occurred inside the prior aggregate `isolated-setup` wrapper before interception. Existing privacy-safe output could not distinguish browser context, fixture account, sign-in, draft creation, or edit-route readiness.
+- In the separate `pull_request` invocation, the independent lifecycle signup received the old combined `signup-http-conflict` category and later scopes were skipped. The existing reporter proves only a `409` or `422`; it cannot recover the exact numeric status. The scalar absence precondition and exactly-one-signup-request check completed, so the log does not prove a reused actor or automatic retry. No phone number or username exists in the synthetic identity contract.
+- Each runner invocation did start Supabase, run `db reset`, and execute no-backup cleanup in `finally`; the workflow also retained unconditional cleanup. Fixed loopback ports and runtime-config paths are reused only sequentially. The prior run ID included workflow run/attempt but used random scope and actor components, so actor generation was probabilistically unique rather than deterministic across fixed scopes.
+
+#### Correction
+
+- The runner derives an eight-character scope component from the workflow run ID, workflow attempt, and exact `E2E_TEST_SCOPE`. The actor helper derives its suffix from that run ID, test title component, and actor label. Namespaces are now deterministic and distinct across `lifecycle`, `aborted`, `affected`, and `full`, while synthetic passwords remain random and no identity is printed.
+- Explicit signup responses are categorized separately as `signup-http-409` or `signup-http-422`. Both still fail closed with one request, no reconciliation, and no retry.
+- The blocked-features actor label is now valid and the test explicitly proves no Auth session before fixture creation and customer sign-in. The prohibited-field and privileged-control assertions are unchanged.
+- Ambiguous-update setup now reports only one of five fixed allowlisted subphases: `browser-context`, `fixture-account`, `browser-session`, `draft-create`, or `edit-route`. The edit route must render its draft form before CDP interception begins.
+- Disposable-stack cleanup remains in the runner's `finally`, Playwright continues to close its isolated context in `finally`, and the workflow's cleanup step remains unconditional.
+
+#### Local verification and unchanged security
+
+- Syntax checks passed for the six changed E2E JavaScript modules.
+- The focused Ticket 9A-9 boundary suite passed **11/11**.
+- The complete frontend Node suite passed **64/64**.
+- Playwright discovery/runtime is unavailable in this checkout because ignored pnpm links target a historical workspace; Docker and Supabase CLI are also unavailable. No local Playwright result is claimed.
+- GitHub Actions must rerun all four fixed scopes and the complete eight-scenario boundary against fresh disposable stacks.
+- No production application code, migration, RLS policy, grant, database function, Auth/Supabase configuration, payment, webhook, or workflow file changed. Exact-one update RPC, no retry, no optimistic success, POST-only interception, listener/CDP release, fresh authenticated RLS verification, one worker, zero retries, and privacy-safe artifact controls remain intact.

@@ -18,10 +18,12 @@ test.beforeAll(() => {
 });
 
 test('blocked marketplace and privileged controls remain absent from the customer shell', async ({ page }) => {
-  const account = syntheticAccount('customer-blocked-features');
+  const account = syntheticAccount('customer-blocked');
   const markers = privacyMarkers(account);
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
+  await page.goto('/');
+  await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
   await prepareSyntheticCustomerAccount(account.email, account.password);
   await signInCustomer(page, account);
 
