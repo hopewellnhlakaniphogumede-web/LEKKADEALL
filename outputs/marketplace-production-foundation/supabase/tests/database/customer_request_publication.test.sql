@@ -27,6 +27,29 @@ insert into public.service_requests (
   pg_catalog.now() - interval '2 hours', pg_catalog.now() - interval '2 hours'
 );
 
+-- dblink rejects passwordless connections from the local Supabase postgres
+-- role because that role is intentionally not a superuser. Generate a
+-- disposable credential inside this disposable database instead of placing a
+-- credential in source or workflow output. Both race sessions are constrained
+-- to this server's loopback listener, current port, and current database.
+do $$
+declare
+  v_password text := pg_catalog.replace(pg_catalog.gen_random_uuid()::pg_catalog.text, '-', '');
+begin
+  execute pg_catalog.format(
+    'create role ticket9a11_concurrency_login login password %L',
+    v_password
+  );
+  perform pg_catalog.set_config(
+    'lekkadeall.ticket9a11_concurrency_password',
+    v_password,
+    false
+  );
+end;
+$$;
+
+grant authenticated to ticket9a11_concurrency_login;
+
 commit;
 
 begin;
@@ -49,15 +72,43 @@ create temporary table ticket9a11_concurrency_results (
 insert into ticket9a11_concurrency_results (connection_name) values ('a'), ('b');
 
 select is(
-  extensions.dblink_connect('ticket9a11_a', 'dbname=' || pg_catalog.current_database()),
+  extensions.dblink_connect(
+    'ticket9a11_a',
+    pg_catalog.format(
+      'hostaddr=127.0.0.1 port=%s dbname=%L user=%L password=%L',
+      pg_catalog.current_setting('port'),
+      pg_catalog.current_database(),
+      'ticket9a11_concurrency_login',
+      pg_catalog.current_setting('lekkadeall.ticket9a11_concurrency_password')
+    )
+  ),
   'OK',
   'first independent concurrency session connects'
 );
 select is(
-  extensions.dblink_connect('ticket9a11_b', 'dbname=' || pg_catalog.current_database()),
+  extensions.dblink_connect(
+    'ticket9a11_b',
+    pg_catalog.format(
+      'hostaddr=127.0.0.1 port=%s dbname=%L user=%L password=%L',
+      pg_catalog.current_setting('port'),
+      pg_catalog.current_database(),
+      'ticket9a11_concurrency_login',
+      pg_catalog.current_setting('lekkadeall.ticket9a11_concurrency_password')
+    )
+  ),
   'OK',
   'second independent concurrency session connects'
 );
+
+do $$
+begin
+  perform pg_catalog.set_config(
+    'lekkadeall.ticket9a11_concurrency_password',
+    '',
+    false
+  );
+end;
+$$;
 
 do $$
 begin
@@ -773,3 +824,5 @@ delete from public.service_categories
 where id = '00000000-0000-0000-0000-000000011090';
 
 commit;
+
+drop role ticket9a11_concurrency_login;
