@@ -485,7 +485,7 @@ select has_function(
 );
 
 select function_returns(
-  'public', 'customer_publish_draft_request', array['uuid'], 'public.request_status',
+  'public', 'customer_publish_draft_request', array['uuid'], 'request_status',
   'publication returns only request_status'
 );
 
@@ -528,7 +528,7 @@ select is(
   'publication boundary does not read the private address table'
 );
 
-select like(
+select alike(
   pg_catalog.pg_get_functiondef('public.customer_publish_draft_request(uuid)'::regprocedure),
   '%private.assert_service_request_public_fields(%',
   'publication calls the authoritative public-field validator'
@@ -624,7 +624,7 @@ select is(pg_temp.publish_draft_error('00000000-0000-0000-0000-000000011114'),
   '22023:Draft publication is unavailable', 'draft with past requested start is rejected');
 select is(pg_temp.publish_draft_error('00000000-0000-0000-0000-000000011115'),
   '22023:Draft publication is unavailable', 'draft without closing-time runway is rejected');
-select like(pg_temp.publish_draft_error('00000000-0000-0000-0000-000000011116'),
+select alike(pg_temp.publish_draft_error('00000000-0000-0000-0000-000000011116'),
   '22023:%', 'unsafe public fields are rejected by the authoritative validator');
 select is(pg_temp.publish_draft_error('00000000-0000-0000-0000-000000011117'),
   '42501:Draft is not available for publication', 'deprecated public address residue is rejected');
