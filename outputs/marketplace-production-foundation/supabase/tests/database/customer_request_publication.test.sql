@@ -636,12 +636,16 @@ select is(
 );
 
 -- Active-owner address-independent publication and authoritative postconditions.
+reset role;
+
 select is(
   (select count(*) from private.service_request_addresses
    where request_id = '00000000-0000-0000-0000-000000011101'),
   0::bigint,
   'successful publication fixture has no private address row'
 );
+
+set local role authenticated;
 
 select is(
   public.customer_publish_draft_request('00000000-0000-0000-0000-000000011101')::text,
