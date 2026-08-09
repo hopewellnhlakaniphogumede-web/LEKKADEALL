@@ -31,7 +31,7 @@ insert into public.service_requests (
 -- role because that role is intentionally not a superuser. Generate a
 -- disposable credential inside this disposable database instead of placing a
 -- credential in source or workflow output. Both race sessions are constrained
--- to this server's loopback listener, current port, and current database.
+-- to the current server address, current port, and current database.
 do $$
 declare
   v_password text := pg_catalog.replace(pg_catalog.gen_random_uuid()::pg_catalog.text, '-', '');
@@ -75,7 +75,8 @@ select is(
   extensions.dblink_connect(
     'ticket9a11_a',
     pg_catalog.format(
-      'hostaddr=127.0.0.1 port=%s dbname=%L user=%L password=%L',
+      'hostaddr=%s port=%s dbname=%L user=%L password=%L',
+      pg_catalog.inet_server_addr(),
       pg_catalog.current_setting('port'),
       pg_catalog.current_database(),
       'ticket9a11_concurrency_login',
@@ -89,7 +90,8 @@ select is(
   extensions.dblink_connect(
     'ticket9a11_b',
     pg_catalog.format(
-      'hostaddr=127.0.0.1 port=%s dbname=%L user=%L password=%L',
+      'hostaddr=%s port=%s dbname=%L user=%L password=%L',
+      pg_catalog.inet_server_addr(),
       pg_catalog.current_setting('port'),
       pg_catalog.current_database(),
       'ticket9a11_concurrency_login',
