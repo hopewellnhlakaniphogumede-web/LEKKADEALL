@@ -809,7 +809,7 @@ select is(
     from public.provider_profiles
     where user_id = '00000000-0000-0000-0000-000000010201'
   ),
-  'Owner Services|25|not_started|pending',
+  'Owner Services|25.00|not_started|pending',
   'provider profile contains only normalized application fields and safe pending statuses'
 );
 
