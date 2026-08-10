@@ -167,12 +167,17 @@ test('only reviewed request mutation modules contain RPC boundaries and blocked 
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
   const requestSource = entries.find(([name]) => name === 'request-draft.js')[1];
   const cancellationSource = entries.find(([name]) => name === 'request-cancellation.js')[1];
+  const publicationSource = entries.find(([name]) => name === 'request-publication.js')[1];
   const updateSource = entries.find(([name]) => name === 'request-update.js')[1];
-  const otherSource = entries.filter(([name]) => !['request-draft.js', 'request-cancellation.js', 'request-update.js'].includes(name)).map(([, source]) => source).join('\n');
+  const otherSource = entries.filter(([name]) => ![
+    'request-draft.js', 'request-cancellation.js', 'request-publication.js', 'request-update.js',
+  ].includes(name)).map(([, source]) => source).join('\n');
   assert.equal((requestSource.match(/\.rpc\(/g) ?? []).length, 1);
   assert.match(requestSource, /\.rpc\(CUSTOMER_CREATE_DRAFT_RPC, payload\)/);
   assert.equal((cancellationSource.match(/\.rpc\(/g) ?? []).length, 1);
   assert.match(cancellationSource, /\.rpc\(CUSTOMER_CANCEL_DRAFT_RPC, \{/);
+  assert.equal((publicationSource.match(/\.rpc\(/g) ?? []).length, 1);
+  assert.match(publicationSource, /\.rpc\('customer_publish_draft_request', \{/);
   assert.equal((updateSource.match(/\.rpc\(/g) ?? []).length, 1);
   assert.match(updateSource, /\.rpc\(CUSTOMER_UPDATE_DRAFT_RPC, payload\)/);
   assert.doesNotMatch(otherSource, /\.rpc\(/);

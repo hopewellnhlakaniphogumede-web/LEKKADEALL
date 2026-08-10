@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   ACTIVE_CATEGORY_NAME,
   assertCustomerLifecyclePostconditions,
+  assertCustomerPublicationPostconditions,
 } from './support/local-fixtures.mjs';
 import {
   createDraftThroughUi,
@@ -42,6 +43,7 @@ test('signed-out customer routes and absent admin route fail closed', async ({ p
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'That page is not available.' })).toBeVisible();
   await assertBrowserPrivacy(page, { expectAuthSession: false });
+  expect(policy.getRpcCount('customer_publish_draft_request')).toBe(0);
   policy.assertClean();
   emissions.assertClean();
 });
@@ -49,11 +51,17 @@ test('signed-out customer routes and absent admin route fail closed', async ({ p
 test('customer registration through cancelled draft completes against real local RLS and RPCs', async ({ page }) => {
   test.setTimeout(300_000);
   const account = syntheticAccount('customer-lifecycle');
-  const created = mainDraftValues();
+  const published = mainDraftValues();
+  const created = {
+    ...mainDraftValues(),
+    title: 'Prepare synthetic guest room',
+    description: 'Prepare and paint the guest room walls using a neutral finish.',
+  };
   const edited = editedDraftValues();
-  const markers = privacyMarkers(account, created, edited);
+  const markers = privacyMarkers(account, published, created, edited);
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
+  let publishedRequestId;
   let requestId;
 
   await test.step('lifecycle-phase:registration', async () => {
@@ -79,7 +87,7 @@ test('customer registration through cancelled draft completes against real local
   });
 
   await test.step('lifecycle-phase:create', async () => {
-  requestId = await createDraftThroughUi(page, created);
+  publishedRequestId = await createDraftThroughUi(page, published);
   expect(policy.getRpcCount('customer_create_draft_request')).toBe(1);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
   });
@@ -87,15 +95,45 @@ test('customer registration through cancelled draft completes against real local
   await test.step('lifecycle-phase:list-detail', async () => {
   await page.getByRole('link', { name: 'View all requests' }).click();
   await expect(page).toHaveURL(/\/app\/customer\/requests\/?$/u);
-  await expect(page.getByRole('heading', { name: created.title })).toBeVisible();
+  await expect(page.getByRole('heading', { name: published.title })).toBeVisible();
   await expect(page.getByText('Draft', { exact: true })).toBeVisible();
 
-  await openDraftDetail(page, requestId);
-  await expect(page.getByRole('heading', { name: created.title })).toBeVisible();
-  await expect(page.getByText(created.description)).toBeVisible();
+  await openDraftDetail(page, publishedRequestId);
+  await expect(page.getByRole('heading', { name: published.title })).toBeVisible();
+  await expect(page.getByText(published.description)).toBeVisible();
   await expect(page.getByRole('link', { name: 'Edit draft' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cancel draft' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /publish/iu })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Publish request' })).toBeVisible();
+  });
+
+  await test.step('lifecycle-phase:publish', async () => {
+  await page.getByRole('button', { name: 'Publish request' }).click();
+  await expect(page.getByRole('heading', { name: 'Publish this request?' })).toBeVisible();
+  await expect(page.locator('[data-publish-draft-form] input, [data-publish-draft-form] textarea')).toHaveCount(0);
+  await expect(page.getByText('Draft', { exact: true })).toBeVisible();
+  await expect(page.getByText('Request published.', { exact: true })).toHaveCount(0);
+  const readBaseline = policy.getTableReadCount('service_requests');
+  await page.locator('[data-publish-draft-form]').getByRole('button', { name: 'Publish request' }).click();
+  await expect(page.getByText('Request published.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Open', { exact: true })).toBeVisible();
+  await expect.poll(() => policy.getTableReadCount('service_requests')).toBe(readBaseline + 1);
+  expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+  await expect(page.getByRole('link', { name: 'Edit draft' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
+  await openDraftDetail(page, publishedRequestId);
+  await expect(page.getByText('Open', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
+  expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+  await assertCustomerPublicationPostconditions(account.email, publishedRequestId);
+  await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+  });
+
+  await test.step('lifecycle-phase:create', async () => {
+  requestId = await createDraftThroughUi(page, created);
+  expect(policy.getRpcCount('customer_create_draft_request')).toBe(2);
+  await openDraftDetail(page, requestId);
+  await expect(page.getByRole('button', { name: 'Publish request' })).toBeVisible();
   });
 
   await test.step('lifecycle-phase:update', async () => {
@@ -122,6 +160,7 @@ test('customer registration through cancelled draft completes against real local
   expect(policy.getRpcCount('customer_cancel_draft_request')).toBe(1);
   await expect(page.getByRole('link', { name: 'Edit draft' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
   });
 
   await test.step('lifecycle-phase:postcondition', async () => {
@@ -129,6 +168,7 @@ test('customer registration through cancelled draft completes against real local
   await expect(page.getByRole('heading', { name: edited.title })).toBeVisible();
   await expect(page.getByText('Cancelled', { exact: true })).toBeVisible();
   await assertCustomerLifecyclePostconditions(account.email, requestId);
+  await assertCustomerPublicationPostconditions(account.email, publishedRequestId);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
 
   policy.assertClean();

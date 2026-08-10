@@ -14,6 +14,10 @@ import {
   DRAFT_CANCELLATION_CONFIRM_TEXT,
   DRAFT_CANCELLATION_CONFIRM_TITLE,
 } from './request-cancellation.js';
+import {
+  DRAFT_PUBLICATION_CONFIRM_TEXT,
+  DRAFT_PUBLICATION_CONFIRM_TITLE,
+} from './request-publication.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -339,25 +343,46 @@ function customerRequestDetailPage(view) {
   const request = result.data;
   const category = activeCategoryLabel(view.categories, request.category_id);
   const cancellation = view.customerDraftCancellation ?? {};
+  const publication = view.customerDraftPublication ?? {};
   const editHref = customerRequestEditHref(request.id);
-  let cancellationContent = '';
+  let draftActionsContent = '';
+  if (publication.message) {
+    draftActionsContent = `<p class="draft-cancellation-message draft-publication-message ${publication.confirmed ? 'is-success' : ''}" role="status">${escapeHtml(publication.message)}</p>`;
+  }
   if (cancellation.message) {
-    cancellationContent = `<p class="draft-cancellation-message ${cancellation.confirmed ? 'is-success' : ''}" role="status">${escapeHtml(cancellation.message)}</p>`;
+    draftActionsContent += `<p class="draft-cancellation-message ${cancellation.confirmed ? 'is-success' : ''}" role="status">${escapeHtml(cancellation.message)}</p>`;
   }
   if (request.status === 'draft') {
-    cancellationContent += cancellation.confirming && !cancellation.blocked
-      ? `<section class="draft-cancellation-confirmation" role="alertdialog" aria-labelledby="cancel-draft-title" aria-describedby="cancel-draft-description">
+    if (publication.confirming && !publication.blocked) {
+      draftActionsContent += `<section class="draft-cancellation-confirmation draft-publication-confirmation" role="alertdialog" aria-labelledby="publish-draft-title" aria-describedby="publish-draft-description">
+          <h2 id="publish-draft-title">${escapeHtml(DRAFT_PUBLICATION_CONFIRM_TITLE)}</h2>
+          <p id="publish-draft-description">${escapeHtml(DRAFT_PUBLICATION_CONFIRM_TEXT)}</p>
+          <form data-publish-draft-form>
+            <button class="button button-secondary" type="button" data-publish-draft-action="keep" ${publication.submitting ? 'disabled' : ''}>Keep draft</button>
+            <button class="button button-primary" type="submit" ${publication.submitting ? 'disabled' : ''}>${publication.submitting ? 'Publishing requestâ€¦' : 'Publish request'}</button>
+          </form>
+        </section>`;
+    } else if (cancellation.confirming && !cancellation.blocked) {
+      draftActionsContent += `<section class="draft-cancellation-confirmation" role="alertdialog" aria-labelledby="cancel-draft-title" aria-describedby="cancel-draft-description">
           <h2 id="cancel-draft-title">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TITLE)}</h2>
           <p id="cancel-draft-description">${escapeHtml(DRAFT_CANCELLATION_CONFIRM_TEXT)}</p>
           <form data-cancel-draft-form>
             <button class="button button-secondary" type="button" data-cancel-draft-action="keep" ${cancellation.submitting ? 'disabled' : ''}>Keep draft</button>
             <button class="button button-danger" type="submit" ${cancellation.submitting ? 'disabled' : ''}>${cancellation.submitting ? 'Cancelling draftâ€¦' : 'Cancel draft'}</button>
           </form>
-        </section>`
-      : `<section class="draft-cancellation-control" aria-label="Draft actions">
-          <div><h2>Draft actions</h2><p>Editing and cancellation are enforced as draft-only by the database.</p></div>
-          <div class="draft-action-buttons"><a class="button button-primary" href="${escapeHtml(editHref)}" data-nav>Edit draft</a>${cancellation.blocked ? '' : '<button class="button button-danger-outline" type="button" data-cancel-draft-action="open">Cancel draft</button>'}</div>
         </section>`;
+    } else if (!publication.blocked) {
+      const cancellationButton = cancellation.blocked
+        ? ''
+        : '<button class="button button-danger-outline" type="button" data-cancel-draft-action="open">Cancel draft</button>';
+      const publicationButton = cancellation.blocked
+        ? ''
+        : '<button class="button button-primary" type="button" data-publish-draft-action="open">Publish request</button>';
+      draftActionsContent += `<section class="draft-cancellation-control" aria-label="Draft actions">
+          <div><h2>Draft actions</h2><p>Editing, cancellation and publication are enforced as draft-only by the database.</p></div>
+          <div class="draft-action-buttons"><a class="button button-primary" href="${escapeHtml(editHref)}" data-nav>Edit draft</a>${cancellationButton}${publicationButton}</div>
+        </section>`;
+    }
   }
   return appPage('Request details', `
     <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>${escapeHtml(request.title)}</h1><p>Protected details returned through your existing RLS boundary.</p></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>
@@ -373,8 +398,8 @@ function customerRequestDetailPage(view) {
         <div><dt>Updated</dt><dd>${escapeHtml(formatSastDateTime(request.updated_at))}</dd></div>
       </dl>
     </article>
-    ${cancellationContent}
-    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned draft may be edited or cancelled. Publication, exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
+    ${draftActionsContent}
+    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned eligible draft may be edited, cancelled or published. Exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
   `);
 }
 

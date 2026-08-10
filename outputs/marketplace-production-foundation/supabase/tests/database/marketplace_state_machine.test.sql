@@ -125,10 +125,7 @@ returns boolean
 language plpgsql
 as $$
 begin
-  perform public.customer_publish_request(
-    p_request_id,
-    now() + interval '2 days'
-  );
+  perform public.customer_publish_draft_request(p_request_id);
 
   return true;
 exception

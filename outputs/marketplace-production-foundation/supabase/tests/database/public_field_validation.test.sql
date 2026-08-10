@@ -80,10 +80,7 @@ returns boolean
 language plpgsql
 as $$
 begin
-  perform public.customer_publish_request(
-    p_request_id,
-    now() + interval '2 days'
-  );
+  perform public.customer_publish_draft_request(p_request_id);
   return true;
 exception
   when others then return false;
@@ -773,18 +770,18 @@ select is(
     where id = '00000000-0000-0000-0000-000000000951'
   ),
   'draft',
-  'failed legacy publication leaves status draft'
+  'failed hardened publication leaves status draft'
 );
 
 select is(
   (
     select count(*)
     from public.audit_events
-    where action = 'customer.service_request_published'
+    where action = 'customer.service_request_draft_published'
       and object_id = '00000000-0000-0000-0000-000000000951'
   ),
   0::bigint,
-  'failed legacy publication writes no publication success audit'
+  'failed hardened publication writes no publication success audit'
 );
 
 -- 94-95. Ticket 5 address isolation and compatibility access remain intact.

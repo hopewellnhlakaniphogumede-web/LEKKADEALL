@@ -477,3 +477,21 @@ Local verification on 2026-08-04:
 - GitHub Actions must rerun the independent `lifecycle` and `aborted` scopes, the combined `affected` scope, and the complete eight-scenario `full` scope against disposable Supabase stacks.
 
 No application module, migration, RLS policy, grant, database function, Auth or Supabase configuration, webhook, payment implementation, or Actions workflow changed. The project remains Chromium-only, one-worker, zero-retry, loopback-only, anon-key-only in browser code, and artifact-free.
+
+## Ticket 9A-11 Phase 3 customer publication E2E verification
+
+Phase 3 extends the existing disposable-loopback Playwright boundary without changing production frontend or database code. The registered-customer lifecycle now publishes one owned draft through the explicit confirmation UI before creating a separate draft for the unchanged edit-and-cancel journey. The publication path requires exactly one `customer_publish_draft_request` RPC with only `p_request_id`, an additional authenticated `service_requests` read, the authoritative `Open` status, and removal of Edit, Cancel, and Publish controls. A second navigation proves that repeated publication is non-actionable and does not send another RPC.
+
+The cross-customer, signed-out, restricted, suspended, closed, missing-profile, and wrong-role scenarios now also require zero publication RPCs and no actionable Publish control. The browser network policy allowlists only the new RPC name and its one-key payload while continuing to reject direct table DML, broad reads, non-loopback requests, and service-role authorization. A no-row-output fixture invariant confirms the published row has internally consistent timestamps, no private exact-address row, bid, or booking, and exactly one fixed publication audit event.
+
+The isolated ambiguous-publication scenario uses Chromium Fetch interception on the original request. Non-POST requests are continued untouched; only the first publication POST is continued to response stage, tied to its request ID, and aborted after a successful server response. It requires one request-stage interception, one response-stage interception, one browser-policy RPC count, no optimistic success, and no remaining draft-mutation controls. Fetch interception is disabled, its listener removed, and CDP detached before a normal detail navigation. Only a fresh authenticated read may then establish `Open`; the publication count must remain exactly one.
+
+Local verification on 2026-08-10:
+
+- Syntax checks passed for all seven changed E2E/static JavaScript modules.
+- The focused `e2e-boundary.test.mjs` suite passed **15/15**.
+- The complete frontend Node suite passed **77/77**.
+- Docker and the Supabase CLI are unavailable on this host, so no changed-source disposable-stack Playwright result is claimed.
+- Playwright discovery is also unavailable because the ignored local pnpm links still reference a historical workspace and cannot resolve the pinned runtime. GitHub Actions remains authoritative for the independent and full real-stack runs.
+
+No worker, retry, artifact, timeout-policy, production application, migration, RLS, grant, Auth, address, payment, booking, provider, or workflow behavior was changed. Phase 3 adds no retry, sleep, direct browser DML, optimistic publication success, exact-address access, or sensitive output.

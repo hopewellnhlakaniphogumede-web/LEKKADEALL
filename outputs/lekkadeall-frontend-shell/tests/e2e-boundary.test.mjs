@@ -87,7 +87,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
   const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
   assert.equal((lifecycleSource.match(/test\.setTimeout\(300_000\)/gu) ?? []).length, 1);
-  assert.equal((securitySource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 3);
+  assert.equal((securitySource.match(/test\.setTimeout\(180_000\)/gu) ?? []).length, 4);
   assert.equal((securitySource.match(/test\.setTimeout\(600_000\)/gu) ?? []).length, 1);
   assert.match(reporterSource, /timedOut:\s*'timeout'/);
   assert.match(reporterSource, /failed:\s*'assertion-or-runtime'/);
@@ -100,7 +100,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
     reporterSource,
     /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
   );
-  assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|update\|cancel\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|publish\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(
     reporterSource,
@@ -108,6 +108,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   );
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(reporterSource, /ambiguous-publication-failure:\(isolated-setup\|single-publication-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|postcondition\|sign-out\|cleanup\)/);
   assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|draft-create\|edit-route\)/);
   assert.match(
     reporterSource,
@@ -383,6 +384,7 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     'customer_create_draft_request',
     'customer_update_draft_request',
     'customer_cancel_draft_request',
+    'customer_publish_draft_request',
   ]);
   const networkSource = await readFile(join(here, 'e2e/support/network-policy.mjs'), 'utf8');
   for (const token of [
@@ -556,6 +558,93 @@ test('only lifecycle and cross-customer B use UI signup; setup-only actors use f
     /ambiguous-update-failure:\$\{cleanupFailureCategory\}[\s\S]*markAmbiguousUpdateProgress\('cleanup'\)/u,
   );
   assert.doesNotMatch(securitySource, /page\.reload\(\)|name: 'Back to draft'/u);
+});
+
+test('customer publication E2E is RPC-only, server-confirmed, non-retryable and privacy-safe', async () => {
+  const lifecycleSource = await readFile(join(here, 'e2e/customer-draft-lifecycle.spec.mjs'), 'utf8');
+  const securitySource = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
+  const networkSource = await readFile(join(here, 'e2e/support/network-policy.mjs'), 'utf8');
+  const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
+
+  const listDetailStart = lifecycleSource.indexOf("test.step('lifecycle-phase:list-detail'");
+  const publishStart = lifecycleSource.indexOf("test.step('lifecycle-phase:publish'");
+  const secondCreateStart = lifecycleSource.indexOf("test.step('lifecycle-phase:create'", publishStart);
+  assert.ok(listDetailStart >= 0);
+  assert.ok(publishStart > listDetailStart);
+  assert.ok(secondCreateStart > publishStart);
+  const listDetailSource = lifecycleSource.slice(listDetailStart, publishStart);
+  const publishSource = lifecycleSource.slice(publishStart, secondCreateStart);
+  assert.match(listDetailSource, /getByRole\('button', \{ name: 'Publish request' \}\)\)\.toBeVisible\(\)/u);
+  assert.doesNotMatch(listDetailSource, /name: \/publish\/iu\s*\}\)\)\.toHaveCount\(0\)/u);
+  assert.match(publishSource, /name: 'Publish this request\?'/u);
+  assert.match(publishSource, /data-publish-draft-form/u);
+  assert.match(publishSource, /getByText\('Draft', \{ exact: true \}\)\)\.toBeVisible\(\)/u);
+  assert.match(publishSource, /getByText\('Request published\.', \{ exact: true \}\)\)\.toHaveCount\(0\)/u);
+  assert.match(
+    publishSource,
+    /readBaseline = policy\.getTableReadCount\('service_requests'\)[\s\S]*data-publish-draft-form[\s\S]*Request published\.[\s\S]*getTableReadCount\('service_requests'\)\)\.toBe\(readBaseline \+ 1\)/u,
+  );
+  assert.equal((publishSource.match(/getRpcCount\('customer_publish_draft_request'\)\)\.toBe\(1\)/gu) ?? []).length, 2);
+  assert.match(publishSource, /Open[\s\S]*Edit draft[\s\S]*Cancel draft[\s\S]*Publish request/u);
+  assert.match(publishSource, /openDraftDetail\(page, publishedRequestId\)[\s\S]*getRpcCount\('customer_publish_draft_request'\)\)\.toBe\(1\)/u);
+  assert.match(publishSource, /assertCustomerPublicationPostconditions\(account\.email, publishedRequestId\)/u);
+  assert.match(lifecycleSource, /getRpcCount\('customer_create_draft_request'\)\)\.toBe\(2\)/u);
+  assert.match(lifecycleSource, /getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)/u);
+  assert.match(lifecycleSource, /getRpcCount\('customer_cancel_draft_request'\)\)\.toBe\(1\)/u);
+
+  assert.match(networkSource, /customer_publish_draft_request:\s*\['p_request_id'\]/u);
+  assert.match(securitySource, /pageA[\s\S]*name: 'Publish request'[\s\S]*policyA\.getRpcCount\('customer_publish_draft_request'\)\)\.toBe\(0\)/u);
+  assert.match(
+    securitySource,
+    /requestMutationBaseline[\s\S]*'customer_publish_draft_request'[\s\S]*\/app\/customer\/requests\/detail\/\?requestId=[\s\S]*name: 'Publish request'[\s\S]*getRpcCount\(functionName\)\)\.toBe\(count\)/u,
+  );
+
+  const ambiguousStart = securitySource.indexOf(
+    "test('an executed publication with an aborted response is not retried and requires a fresh read'",
+  );
+  const ambiguousEnd = securitySource.indexOf(
+    "test('recovery routes fail closed without persisting a PKCE verifier'",
+  );
+  assert.ok(ambiguousStart >= 0);
+  assert.ok(ambiguousEnd > ambiguousStart);
+  const ambiguousSource = securitySource.slice(ambiguousStart, ambiguousEnd);
+  assert.match(ambiguousSource, /urlPattern: '\*customer_publish_draft_request\*'/u);
+  assert.match(
+    ambiguousSource,
+    /event\.request\.method !== 'POST'[\s\S]*Fetch\.continueRequest[\s\S]*interceptedPublicationCount \+= 1/u,
+  );
+  assert.match(
+    ambiguousSource,
+    /isResponseStage[\s\S]*event\.request\.method !== 'POST'[\s\S]*event\.requestId !== firstPublicationRequestId/u,
+  );
+  assert.match(ambiguousSource, /interceptedPublicationCount\)\.toBe\(1\)[\s\S]*interceptedResponseCount\)\.toBe\(1\)/u);
+  assert.match(ambiguousSource, /Publication could not be confirmed[\s\S]*Request published\.[\s\S]*toHaveCount\(0\)/u);
+  let previousBoundary = -1;
+  for (const boundary of [
+    "cdpSession.send('Fetch.disable')",
+    "cdpSession.off('Fetch.requestPaused', pausedPublicationHandler)",
+    "listenerCount('Fetch.requestPaused')",
+    'cdpSession.detach()',
+    "readBaseline = policy.getTableReadCount('service_requests')",
+    'openDraftDetail(page, requestId)',
+    "getTableReadCount('service_requests')).toBe(readBaseline + 1)",
+  ]) {
+    const index = ambiguousSource.indexOf(boundary, previousBoundary + 1);
+    assert.ok(index > previousBoundary, `${boundary} must retain publication reconciliation order`);
+    previousBoundary = index;
+  }
+  assert.ok((
+    ambiguousSource.match(/getRpcCount\('customer_publish_draft_request'\)\)\.toBe\(1\)/gu) ?? []
+  ).length >= 4);
+  assert.match(ambiguousSource, /getByText\('Open', \{ exact: true \}\)\)\.toBeVisible\(\)/u);
+  assert.match(ambiguousSource, /assertCustomerPublicationPostconditions\(account\.email, requestId\)/u);
+  assert.doesNotMatch(ambiguousSource, /route\.fetch\(|setInterval|maxRetries|new Promise|\bretry\s*\(/iu);
+  assert.match(ambiguousSource, /cleanupFailed && !primaryFailure/u);
+
+  assert.match(fixtureSource, /assertCustomerPublicationPostconditions/u);
+  assert.match(fixtureSource, /private\.service_request_addresses[\s\S]*publication boundary row was created/u);
+  assert.match(fixtureSource, /customer\.service_request_draft_published/u);
+  assert.doesNotMatch(`${lifecycleSource}\n${securitySource}`, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/u);
 });
 
 test('CI E2E job is isolated behind the complete database security job', async () => {

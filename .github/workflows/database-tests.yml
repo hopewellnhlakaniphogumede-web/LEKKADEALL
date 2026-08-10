@@ -83,6 +83,9 @@ jobs:
       - name: Run marketplace state machine pgTAP tests
         run: supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 
+      - name: Run customer request publication pgTAP tests
+        run: supabase test db supabase/tests/database/customer_request_publication.test.sql
+
       - name: Run customer draft cancellation pgTAP tests
         run: supabase test db supabase/tests/database/customer_draft_cancellation.test.sql
 
