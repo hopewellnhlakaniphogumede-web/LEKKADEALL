@@ -572,4 +572,79 @@ export async function assertCustomerLifecyclePostconditions(emailValue, requestI
   `);
 }
 
+export async function assertCustomerPublicationPostconditions(emailValue, requestIdValue) {
+  const email = requireSyntheticEmail(emailValue);
+  const requestId = requireUuid(requestIdValue);
+  await runSql(`
+    do $e2e$
+    declare
+      v_user_id uuid;
+    begin
+      select u.id into v_user_id
+      from auth.users as u
+      where pg_catalog.lower(u.email) = ${sqlLiteral(email)}
+      order by u.created_at desc
+      limit 1;
+
+      if v_user_id is null
+         or not exists (
+           select 1 from public.profiles as p
+           where p.id = v_user_id
+             and p.role = 'customer'::public.user_role
+             and p.account_status = 'active'
+         ) then
+        raise exception 'publication actor invariant failed';
+      end if;
+
+      if not exists (
+        select 1 from public.service_requests as sr
+        where sr.id = '${requestId}'::uuid
+          and sr.customer_id = v_user_id
+          and sr.status = 'open'::public.request_status
+          and sr.published_at is not null
+          and sr.closes_at > sr.published_at
+          and sr.closes_at < sr.requested_start
+          and sr.awarded_at is null
+          and sr.cancelled_at is null
+          and sr.precise_address_ciphertext is null
+      ) then
+        raise exception 'publication request invariant failed';
+      end if;
+
+      if exists (select 1 from private.service_request_addresses as sra where sra.request_id = '${requestId}'::uuid)
+         or exists (select 1 from public.bids as b where b.request_id = '${requestId}'::uuid)
+         or exists (select 1 from public.bookings as b where b.request_id = '${requestId}'::uuid) then
+        raise exception 'publication boundary row was created';
+      end if;
+
+      if (select pg_catalog.count(*) from public.audit_events as ae
+          where ae.object_type = 'service_request'
+            and ae.object_id = '${requestId}'
+            and ae.action = 'customer.service_request_draft_created') <> 1
+         or (select pg_catalog.count(*) from public.audit_events as ae
+             where ae.object_type = 'service_request'
+               and ae.object_id = '${requestId}'
+               and ae.action = 'customer.service_request_draft_published') <> 1 then
+        raise exception 'publication audit count failed';
+      end if;
+
+      if not exists (
+        select 1 from public.audit_events as ae
+        where ae.object_type = 'service_request'
+          and ae.object_id = '${requestId}'
+          and ae.action = 'customer.service_request_draft_published'
+          and ae.reason = 'Customer published own draft service request'
+          and ae.metadata = pg_catalog.jsonb_build_object(
+            'request_id', '${requestId}'::uuid,
+            'previous_status', 'draft',
+            'new_status', 'open'
+          )
+      ) then
+        raise exception 'publication audit invariant failed';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
 export { DB_CONTAINER_NAME, requireSyntheticEmail, requireUuid, runSql };

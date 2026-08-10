@@ -3,6 +3,7 @@ import { formatSastDateTime, formatZarBudgetMinor } from '../../customer-request
 import {
   ACTIVE_CATEGORY_NAME,
   assertCustomerLifecyclePostconditions,
+  assertCustomerPublicationPostconditions,
   assertDistinctSyntheticUsers,
   assertSyntheticProfileAbsent,
   assertSyntheticProviderFixtureIsIsolated,
@@ -124,6 +125,17 @@ const AMBIGUOUS_SETUP_FAILURE_CATEGORIES = new Set([
   'draft-create',
   'edit-route',
 ]);
+const AMBIGUOUS_PUBLICATION_FAILURE_CATEGORIES = new Set([
+  'isolated-setup',
+  'single-publication-execution',
+  'ambiguous-ui',
+  'interception-release',
+  'detail-navigation',
+  'fresh-rls-read',
+  'postcondition',
+  'sign-out',
+  'cleanup',
+]);
 const CANONICAL_VALUE_FIELDS = new Set([
   'status',
   'category',
@@ -177,6 +189,20 @@ async function markCanonicalValuePass(field) {
   await test.step(`canonical-values:${field}-pass`, async () => {});
 }
 
+async function withAmbiguousPublicationFailureCategory(category, operation) {
+  if (!AMBIGUOUS_PUBLICATION_FAILURE_CATEGORIES.has(category)) {
+    throw new Error('ambiguous-publication-failure-category-invalid');
+  }
+  try {
+    return await operation();
+  } catch {
+    await test.step(`ambiguous-publication-failure:${category}`, async () => {
+      throw new Error('privacy-safe-ambiguous-publication-boundary-failure');
+    });
+    return undefined;
+  }
+}
+
 test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({ browser }) => {
   test.setTimeout(180_000);
   const customerA = syntheticAccount('customer-rls-a');
@@ -216,6 +242,7 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
     await expect(pageA.getByText('Synthetic home maintenance')).toHaveCount(0);
     await expect(pageA.getByText('Draft', { exact: true })).toHaveCount(0);
     await expect(pageA.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+    await expect(pageA.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
     await pageA.goto('/app/customer/requests/detail/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
     await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
@@ -228,7 +255,9 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
 
     expect(policyA.getRpcCount('customer_update_draft_request')).toBe(0);
     expect(policyA.getRpcCount('customer_cancel_draft_request')).toBe(0);
+    expect(policyA.getRpcCount('customer_publish_draft_request')).toBe(0);
     expect(policyB.getRpcCount('customer_create_draft_request')).toBe(1);
+    expect(policyB.getRpcCount('customer_publish_draft_request')).toBe(0);
     await assertBrowserPrivacy(pageA, { markers: privacyMarkers(customerA, bDraft), expectAuthSession: true });
     await assertBrowserPrivacy(pageB, { markers: privacyMarkers(customerB, bDraft), expectAuthSession: true });
     policyA.assertClean();
@@ -341,6 +370,7 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
             'customer_create_draft_request',
             'customer_update_draft_request',
             'customer_cancel_draft_request',
+            'customer_publish_draft_request',
           ].map((functionName) => [functionName, policy.getRpcCount(functionName)]),
         );
 
@@ -349,10 +379,11 @@ test('restricted suspended closed missing-profile and wrong-role actors fail clo
             scenario.label,
             'route-guard-verification',
             async () => {
-              await page.goto('/app/customer');
+              await page.goto('/app/customer/requests/detail/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
               await expect(page.getByText(scenario.message)).toBeVisible();
               await expect(page.locator(`[data-state="${scenario.uiState}"]`)).toBeVisible();
               await expect(page.getByRole('link', { name: 'Create request draft' })).toHaveCount(0);
+              await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
 
               if (scenario.removeProfile) {
                 await assertSyntheticProfileAbsent(account.email);
@@ -666,6 +697,193 @@ test('an executed update with an aborted response is not retried and requires a 
       });
     } else {
       await markAmbiguousUpdateProgress('cleanup');
+    }
+  }
+});
+
+test('an executed publication with an aborted response is not retried and requires a fresh read', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const account = syntheticAccount('publish-ambiguous');
+  const created = mainDraftValues();
+  const markers = privacyMarkers(account, created);
+  let context;
+  let page;
+  let policy;
+  let emissions;
+  let requestId;
+  let cdpSession;
+  let pausedPublicationHandler;
+  let primaryFailure;
+  try {
+    await withAmbiguousPublicationFailureCategory('isolated-setup', async () => {
+      context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+      page = await context.newPage();
+      policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+      emissions = attachSensitiveEmissionAudit(page, markers);
+      await prepareSyntheticCustomerAccount(account.email, account.password);
+      await signInCustomer(page, account);
+      requestId = await createDraftThroughUi(page, created);
+      await openDraftDetail(page, requestId);
+      await expect(page.getByRole('button', { name: 'Publish request' })).toBeVisible();
+    });
+
+    let interceptedPublicationCount = 0;
+    let interceptedResponseCount = 0;
+    let publicationExecuted = false;
+    let responseAborted = false;
+    let interceptionFailure = false;
+    let firstPublicationRequestId;
+    cdpSession = await context.newCDPSession(page);
+    pausedPublicationHandler = async (event) => {
+      const isResponseStage = Object.hasOwn(event, 'responseStatusCode')
+        || Object.hasOwn(event, 'responseErrorReason');
+      try {
+        if (isResponseStage) {
+          interceptedResponseCount += 1;
+          if (event.request.method !== 'POST' || event.requestId !== firstPublicationRequestId) {
+            interceptionFailure = true;
+          }
+          publicationExecuted = Number.isInteger(event.responseStatusCode)
+            && event.responseStatusCode >= 200
+            && event.responseStatusCode < 300;
+          await cdpSession.send('Fetch.failRequest', {
+            requestId: event.requestId,
+            errorReason: 'Aborted',
+          });
+          responseAborted = true;
+          return;
+        }
+
+        if (event.request.method !== 'POST') {
+          await cdpSession.send('Fetch.continueRequest', { requestId: event.requestId });
+          return;
+        }
+
+        interceptedPublicationCount += 1;
+        if (interceptedPublicationCount === 1) {
+          firstPublicationRequestId = event.requestId;
+          await cdpSession.send('Fetch.continueRequest', {
+            requestId: event.requestId,
+            interceptResponse: true,
+          });
+          return;
+        }
+        await cdpSession.send('Fetch.failRequest', {
+          requestId: event.requestId,
+          errorReason: 'Aborted',
+        });
+      } catch {
+        interceptionFailure = true;
+        try {
+          await cdpSession.send('Fetch.failRequest', {
+            requestId: event.requestId,
+            errorReason: 'Aborted',
+          });
+        } catch {
+          // The fixed test-step category retains privacy-safe failure output.
+        }
+      }
+    };
+    cdpSession.on('Fetch.requestPaused', pausedPublicationHandler);
+    await cdpSession.send('Fetch.enable', {
+      patterns: [{
+        urlPattern: '*customer_publish_draft_request*',
+        requestStage: 'Request',
+      }],
+    });
+
+    await withAmbiguousPublicationFailureCategory('single-publication-execution', async () => {
+      await page.getByRole('button', { name: 'Publish request' }).click();
+      await expect(page.getByRole('heading', { name: 'Publish this request?' })).toBeVisible();
+      await expect(page.getByText('Draft', { exact: true })).toBeVisible();
+      await expect(page.getByText('Request published.', { exact: true })).toHaveCount(0);
+      await page.locator('[data-publish-draft-form]').getByRole('button', { name: 'Publish request' }).click();
+      await expect(page.getByText(
+        'Publication could not be confirmed. Refresh the request before making another change.',
+        { exact: true },
+      )).toBeVisible();
+      expect(interceptedPublicationCount).toBe(1);
+      expect(interceptedResponseCount).toBe(1);
+      expect(publicationExecuted).toBe(true);
+      expect(responseAborted).toBe(true);
+      expect(interceptionFailure).toBe(false);
+      expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+    });
+
+    await withAmbiguousPublicationFailureCategory('ambiguous-ui', async () => {
+      await expect(page.getByText('Request published.', { exact: true })).toHaveCount(0);
+      await expect(page.getByText('Draft', { exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Edit draft' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
+      expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+    });
+
+    await withAmbiguousPublicationFailureCategory('interception-release', async () => {
+      await cdpSession.send('Fetch.disable');
+      cdpSession.off('Fetch.requestPaused', pausedPublicationHandler);
+      expect(cdpSession.listenerCount('Fetch.requestPaused')).toBe(0);
+      pausedPublicationHandler = undefined;
+      await cdpSession.detach();
+      cdpSession = undefined;
+      expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+    });
+
+    let readBaseline;
+    await withAmbiguousPublicationFailureCategory('detail-navigation', async () => {
+      expect(cdpSession).toBeUndefined();
+      expect(pausedPublicationHandler).toBeUndefined();
+      readBaseline = policy.getTableReadCount('service_requests');
+      await openDraftDetail(page, requestId);
+    });
+
+    await withAmbiguousPublicationFailureCategory('fresh-rls-read', async () => {
+      await expect.poll(() => policy.getTableReadCount('service_requests')).toBe(readBaseline + 1);
+      await expect(page.getByText('Open', { exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Edit draft' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
+      await expect(page.getByText('Request published.', { exact: true })).toHaveCount(0);
+      expect(policy.getRpcCount('customer_publish_draft_request')).toBe(1);
+    });
+
+    await withAmbiguousPublicationFailureCategory('postcondition', async () => {
+      await assertCustomerPublicationPostconditions(account.email, requestId);
+      await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
+      policy.assertClean();
+      emissions.assertClean();
+    });
+
+    await withAmbiguousPublicationFailureCategory('sign-out', async () => {
+      await signOutCustomer(page);
+      await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+    });
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    let cleanupFailed = false;
+    if (cdpSession) {
+      if (pausedPublicationHandler) {
+        cdpSession.off('Fetch.requestPaused', pausedPublicationHandler);
+        pausedPublicationHandler = undefined;
+      }
+      try {
+        await cdpSession.send('Fetch.disable');
+        await cdpSession.detach();
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    try {
+      await context?.close();
+    } catch {
+      cleanupFailed = true;
+    }
+    if (cleanupFailed && !primaryFailure) {
+      await test.step('ambiguous-publication-failure:cleanup', async () => {
+        throw new Error('privacy-safe-ambiguous-publication-boundary-failure');
+      });
     }
   }
 });

@@ -4,6 +4,7 @@ export const ALLOWED_MARKETPLACE_RPCS = Object.freeze([
   'customer_create_draft_request',
   'customer_update_draft_request',
   'customer_cancel_draft_request',
+  'customer_publish_draft_request',
 ]);
 
 const ALLOWED_READ_TABLES = new Set([
@@ -37,6 +38,7 @@ const EXPECTED_RPC_KEYS = Object.freeze({
     'p_request_id', 'p_requested_start', 'p_suburb', 'p_title',
   ],
   customer_cancel_draft_request: ['p_request_id'],
+  customer_publish_draft_request: ['p_request_id'],
 });
 
 function decodeJwtRole(value) {

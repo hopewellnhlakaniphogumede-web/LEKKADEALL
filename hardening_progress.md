@@ -3978,3 +3978,32 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - Playwright discovery/runtime is unavailable in this checkout because ignored pnpm links target a historical workspace; Docker and Supabase CLI are also unavailable. No local Playwright result is claimed.
 - GitHub Actions must rerun all four fixed scopes and the complete eight-scenario boundary against fresh disposable stacks.
 - No production application code, migration, RLS policy, grant, database function, Auth/Supabase configuration, payment, webhook, or workflow file changed. Exact-one update RPC, no retry, no optimistic success, POST-only interception, listener/CDP release, fresh authenticated RLS verification, one worker, zero retries, and privacy-safe artifact controls remain intact.
+
+### Ticket 9A-11 Phase 3 - customer publication E2E boundary - 2026-08-10
+
+**Status:** Phase 3 E2E/static coverage implemented locally; real disposable-stack verification is pending GitHub Actions.
+
+#### Runtime coverage design
+
+- The existing registered-customer lifecycle now verifies the authorized Publish control on a fresh owned draft, fixed explicit confirmation, one `customer_publish_draft_request` call, a fresh authenticated `service_requests` read, authoritative `Open` rendering, and removal of Edit, Cancel, and Publish controls.
+- The same actor creates a separate second draft for the existing one-update/one-cancel lifecycle, preserving Ticket 9A-9 coverage instead of weakening or replacing it.
+- A repeated visit to the published request remains non-actionable and does not increment the publication count.
+- Cross-customer, signed-out, restricted, suspended, closed, missing-profile, and wrong-role paths require no Publish action and zero publication RPCs.
+- The network policy adds only `customer_publish_draft_request` with the exact `p_request_id` payload. Direct `service_requests` DML, broad reads, non-loopback traffic, and service-role browser authorization remain violations.
+- A fixture postcondition returns no row data and proves the open-state timing invariants, ownership, exact-address absence, no bid/booking creation, and one fixed privacy-safe publication audit event.
+
+#### Ambiguous-response protection
+
+- A separate isolated scenario intercepts the original publication boundary with Chromium Fetch. CORS preflight/non-POST traffic is continued untouched; only the first POST is counted and tied to its response-stage request ID.
+- The executed response is aborted without reading its body. The UI must show only the fixed unconfirmed-publication state, retain no actionable draft mutation control, and never show optimistic success.
+- Fetch interception is disabled, the response listener is explicitly removed, and CDP is detached before normal detail navigation.
+- A fresh authenticated RLS-backed read must then render `Open`; the publication RPC count remains exactly one throughout. No retry, sleep, duplicate mutation, reconciliation mutation, or direct table update was introduced.
+- Fixed `ambiguous-publication-failure:<stage>` categories provide privacy-safe attribution without emitting credentials, identifiers, request/response bodies, URLs, customer values, database rows, or raw exceptions.
+
+#### Local verification and unchanged production boundaries
+
+- Syntax checks passed for all seven changed E2E/static JavaScript modules.
+- The focused E2E boundary suite passed **15/15**.
+- The complete frontend Node suite passed **77/77**.
+- Docker and Supabase CLI are unavailable locally. The ignored pnpm installation also retains historical workspace links, so Playwright discovery/runtime is not claimed. GitHub Actions must verify the real disposable Supabase/RLS/RPC journey.
+- No production frontend module, migration, RLS policy, grant, database function, authentication configuration, exact-address boundary, payment, booking, provider capability, GitHub Actions workflow, worker count, retry policy, or artifact policy changed.
