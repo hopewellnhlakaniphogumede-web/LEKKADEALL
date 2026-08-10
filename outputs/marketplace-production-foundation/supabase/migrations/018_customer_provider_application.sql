@@ -105,7 +105,7 @@ declare
   v_existing_service_radius_km pg_catalog.numeric;
   v_existing_verification_status public.verification_status;
   v_existing_verification_reference pg_catalog.text;
-  v_existing_bank_name_match pg_catalog.boolean;
+  v_existing_bank_name_match pg_catalog.bool;
   v_existing_review_status pg_catalog.text;
   v_existing_reviewed_by pg_catalog.uuid;
   v_existing_reviewed_at pg_catalog.timestamptz;
