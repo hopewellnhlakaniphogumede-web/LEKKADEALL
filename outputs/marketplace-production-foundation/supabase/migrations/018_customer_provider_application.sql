@@ -3,9 +3,84 @@
 -- audited RPC may convert an eligible pristine customer into a pending,
 -- unverified provider applicant with inactive category proposals.
 
+-- Application and approval fields must not remain directly browser-editable,
+-- and approved-provider discovery must not expose verification references,
+-- bank-match state, or reviewer metadata.
+revoke update (business_name, bio, service_radius_km)
+  on public.provider_profiles from anon, authenticated;
+
+revoke select on public.provider_profiles from anon, authenticated;
+grant select (
+  user_id,
+  business_name,
+  bio,
+  service_radius_km,
+  verification_status,
+  review_status,
+  created_at,
+  updated_at
+) on public.provider_profiles to authenticated;
+
+-- The general consent table previously allowed owner-controlled mutation.
+-- Ticket 10A reserves one fixed provider-terms shape, prevents browser DML,
+-- makes the record immutable, and enforces one accepted version per actor.
+revoke insert, update, delete on public.consents from anon, authenticated;
+
+alter table public.consents
+  drop constraint if exists provider_application_terms_shape;
+
+alter table public.consents
+  add constraint provider_application_terms_shape
+  check (
+    purpose <> 'provider_application_terms'
+    or (
+      policy_version = 'provider-application-v1'
+      and granted = true
+      and source = 'customer_provider_application_rpc'
+      and withdrawn_at is null
+    )
+  );
+
+drop index if exists public.provider_application_terms_one_per_user_uidx;
+create unique index provider_application_terms_one_per_user_uidx
+on public.consents(user_id)
+where purpose = 'provider_application_terms';
+
+create or replace function private.prevent_provider_application_terms_mutation()
+returns pg_catalog.trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if old.purpose = 'provider_application_terms'
+     or (
+       tg_op = 'UPDATE'
+       and new.purpose = 'provider_application_terms'
+     ) then
+    raise exception 'Provider application terms are append-only'
+      using errcode = '42501';
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_provider_application_terms
+  on public.consents;
+create trigger protect_provider_application_terms
+before update or delete on public.consents
+for each row execute function private.prevent_provider_application_terms_mutation();
+
+revoke all on function private.prevent_provider_application_terms_mutation()
+  from public, anon, authenticated, service_role;
+
 create or replace function public.customer_submit_provider_application(
   p_business_name pg_catalog.text,
-  p_bio pg_catalog.text,
   p_service_radius_km pg_catalog.numeric,
   p_category_ids pg_catalog.uuid[],
   p_terms_version pg_catalog.text
@@ -21,14 +96,12 @@ declare
   v_actor_role public.user_role;
   v_account_status pg_catalog.text;
   v_business_name pg_catalog.text;
-  v_bio pg_catalog.text;
   v_category_id pg_catalog.uuid;
   v_category_count pg_catalog.int4;
   v_active_category_count pg_catalog.int4 := 0;
   v_changed_rows pg_catalog.int4;
   v_changed_at pg_catalog.timestamptz;
   v_existing_business_name pg_catalog.text;
-  v_existing_bio pg_catalog.text;
   v_existing_service_radius_km pg_catalog.numeric;
   v_existing_verification_status public.verification_status;
   v_existing_verification_reference pg_catalog.text;
@@ -52,26 +125,11 @@ begin
     'title',
     p_business_name
   );
-  v_bio := pg_catalog.nullif(
-    private.canonicalize_service_request_public_field(
-      'description',
-      pg_catalog.coalesce(p_bio, '')
-    ),
-    ''
-  );
 
   if private.service_request_public_field_violation(
        'title',
        v_business_name
      ) is not null
-     or (
-       v_bio is not null
-       and private.service_request_public_field_violation(
-         'description',
-         v_bio
-       ) is not null
-     )
-     or (v_bio is not null and pg_catalog.char_length(v_bio) > 1000)
      or p_service_radius_km is null
      or p_service_radius_km < 1
      or p_service_radius_km > 250
@@ -112,7 +170,6 @@ begin
      and v_account_status = 'active' then
     select
       pp.business_name,
-      pp.bio,
       pp.service_radius_km,
       pp.verification_status,
       pp.verification_reference,
@@ -122,7 +179,6 @@ begin
       pp.reviewed_at
       into
         v_existing_business_name,
-        v_existing_bio,
         v_existing_service_radius_km,
         v_existing_verification_status,
         v_existing_verification_reference,
@@ -136,7 +192,6 @@ begin
 
     if found
        and v_existing_business_name = v_business_name
-       and v_existing_bio is not distinct from v_bio
        and v_existing_service_radius_km = p_service_radius_km
        and v_existing_verification_status = 'not_started'::public.verification_status
        and v_existing_verification_reference is null
@@ -164,6 +219,16 @@ begin
              and ps.description is null
              and ps.base_price_minor is null
          )
+       )
+       and exists (
+         select 1
+         from public.consents as c
+         where c.user_id = v_actor_id
+           and c.purpose = 'provider_application_terms'
+           and c.policy_version = 'provider-application-v1'
+           and c.granted = true
+           and c.source = 'customer_provider_application_rpc'
+           and c.withdrawn_at is null
        )
        and exists (
          select 1
@@ -218,6 +283,22 @@ begin
        select 1
        from public.identity_verifications as iv
        where iv.user_id = v_actor_id
+     )
+     or exists (
+       select 1
+       from public.payment_events as pe
+       where pe.actor_id = v_actor_id
+     )
+     or exists (
+       select 1
+       from public.refund_requests as rr
+       where rr.requested_by = v_actor_id
+          or rr.admin_decision_by = v_actor_id
+     )
+     or exists (
+       select 1
+       from public.refund_events as re
+       where re.actor_id = v_actor_id
      )
      or exists (
        select 1
@@ -309,7 +390,7 @@ begin
   ) values (
     v_actor_id,
     v_business_name,
-    v_bio,
+    null,
     p_service_radius_km,
     'not_started'::public.verification_status,
     null,
@@ -336,6 +417,24 @@ begin
     false
   from pg_catalog.unnest(p_category_ids) as requested(category_id);
 
+  insert into public.consents (
+    user_id,
+    purpose,
+    policy_version,
+    granted,
+    source,
+    recorded_at,
+    withdrawn_at
+  ) values (
+    v_actor_id,
+    'provider_application_terms',
+    'provider-application-v1',
+    true,
+    'customer_provider_application_rpc',
+    v_changed_at,
+    null
+  );
+
   perform private.append_audit_event(
     v_actor_id,
     'customer.provider_application_submitted',
@@ -361,15 +460,13 @@ $$;
 
 comment on function public.customer_submit_provider_application(
   pg_catalog.text,
-  pg_catalog.text,
   pg_catalog.numeric,
   pg_catalog.uuid[],
   pg_catalog.text
 ) is
-  'Ticket 10A authenticated closed-pilot boundary: converts one active pristine customer into a pending, unverified provider applicant, records inactive category proposals, and appends one fixed audit event with the accepted terms version atomically.';
+  'Ticket 10A authenticated closed-pilot boundary: converts one active pristine customer into a pending, unverified provider applicant and atomically records inactive category proposals, one immutable terms record, and one fixed audit event.';
 
 revoke all on function public.customer_submit_provider_application(
-  pg_catalog.text,
   pg_catalog.text,
   pg_catalog.numeric,
   pg_catalog.uuid[],
@@ -377,7 +474,6 @@ revoke all on function public.customer_submit_provider_application(
 ) from public, anon, authenticated, service_role;
 
 grant execute on function public.customer_submit_provider_application(
-  pg_catalog.text,
   pg_catalog.text,
   pg_catalog.numeric,
   pg_catalog.uuid[],

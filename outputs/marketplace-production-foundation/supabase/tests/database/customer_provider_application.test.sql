@@ -1,9 +1,218 @@
+create extension if not exists pgtap with schema extensions;
+
+-- Commit only the concurrency fixture before starting two genuine sessions.
 begin;
 
-create extension if not exists pgtap with schema extensions;
+insert into auth.users (id, email, raw_user_meta_data) values (
+  '00000000-0000-0000-0000-000000010211',
+  'ticket10a-concurrent@lekkadeall.test',
+  '{}'::jsonb
+);
+
+insert into public.service_categories (id, slug, name, active) values (
+  '00000000-0000-0000-0000-000000010293',
+  'ticket10a-concurrent',
+  'Ticket 10A Concurrent',
+  true
+);
+
+do $$
+declare
+  v_password text := pg_catalog.replace(pg_catalog.gen_random_uuid()::pg_catalog.text, '-', '');
+begin
+  execute pg_catalog.format(
+    'create role ticket10a_concurrency_login login password %L',
+    v_password
+  );
+  perform pg_catalog.set_config(
+    'lekkadeall.ticket10a_concurrency_password',
+    v_password,
+    false
+  );
+end;
+$$;
+
+grant authenticated to ticket10a_concurrency_login;
+
+commit;
+
+begin;
+
+create extension if not exists dblink with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(58);
+select plan(85);
+
+create temporary table ticket10a_concurrency_results (
+  connection_name text primary key,
+  result_status text,
+  error_message text
+) on commit drop;
+
+insert into ticket10a_concurrency_results (connection_name) values ('a'), ('b');
+
+select is(
+  extensions.dblink_connect(
+    'ticket10a_a',
+    pg_catalog.format(
+      'hostaddr=%s port=%s dbname=%L user=%L password=%L',
+      pg_catalog.inet_server_addr(),
+      pg_catalog.current_setting('port'),
+      pg_catalog.current_database(),
+      'ticket10a_concurrency_login',
+      pg_catalog.current_setting('lekkadeall.ticket10a_concurrency_password')
+    )
+  ),
+  'OK',
+  'first independent provider-application session connects'
+);
+
+select is(
+  extensions.dblink_connect(
+    'ticket10a_b',
+    pg_catalog.format(
+      'hostaddr=%s port=%s dbname=%L user=%L password=%L',
+      pg_catalog.inet_server_addr(),
+      pg_catalog.current_setting('port'),
+      pg_catalog.current_database(),
+      'ticket10a_concurrency_login',
+      pg_catalog.current_setting('lekkadeall.ticket10a_concurrency_password')
+    )
+  ),
+  'OK',
+  'second independent provider-application session connects'
+);
+
+do $$
+begin
+  perform pg_catalog.set_config(
+    'lekkadeall.ticket10a_concurrency_password',
+    '',
+    false
+  );
+  perform extensions.dblink_exec('ticket10a_a', 'set role authenticated');
+  perform extensions.dblink_exec('ticket10a_b', 'set role authenticated');
+  perform extensions.dblink_exec(
+    'ticket10a_a',
+    'set request.jwt.claim.sub = ''00000000-0000-0000-0000-000000010211'''
+  );
+  perform extensions.dblink_exec(
+    'ticket10a_b',
+    'set request.jwt.claim.sub = ''00000000-0000-0000-0000-000000010211'''
+  );
+  perform extensions.dblink_exec('ticket10a_a', 'begin');
+end;
+$$;
+
+select is(
+  extensions.dblink_send_query(
+    'ticket10a_a',
+    $query$
+      select public.customer_submit_provider_application(
+        'Concurrent Services',
+        20,
+        array['00000000-0000-0000-0000-000000010293'::pg_catalog.uuid],
+        'provider-application-v1'
+      )
+    $query$
+  ),
+  1,
+  'first provider application starts asynchronously'
+);
+
+update ticket10a_concurrency_results as result
+set result_status = remote.result_status
+from extensions.dblink_get_result('ticket10a_a', false) as remote(result_status text)
+where result.connection_name = 'a';
+
+update ticket10a_concurrency_results
+set error_message = extensions.dblink_error_message('ticket10a_a')
+where connection_name = 'a';
+
+select is(
+  extensions.dblink_send_query(
+    'ticket10a_b',
+    $query$
+      select public.customer_submit_provider_application(
+        'Concurrent Services',
+        20,
+        array['00000000-0000-0000-0000-000000010293'::pg_catalog.uuid],
+        'provider-application-v1'
+      )
+    $query$
+  ),
+  1,
+  'second provider application starts while the first role transition is uncommitted'
+);
+
+do $$
+begin
+  perform extensions.dblink_exec('ticket10a_a', 'commit');
+end;
+$$;
+
+update ticket10a_concurrency_results as result
+set result_status = remote.result_status
+from extensions.dblink_get_result('ticket10a_b', false) as remote(result_status text)
+where result.connection_name = 'b';
+
+update ticket10a_concurrency_results
+set error_message = extensions.dblink_error_message('ticket10a_b')
+where connection_name = 'b';
+
+select is(
+  (select result_status from ticket10a_concurrency_results where connection_name = 'a'),
+  'pending',
+  'first concurrent application returns pending'
+);
+
+select is(
+  (select result_status from ticket10a_concurrency_results where connection_name = 'b'),
+  'pending',
+  'second concurrent application is an idempotent pending replay'
+);
+
+select is(
+  extensions.dblink_disconnect('ticket10a_a'),
+  'OK',
+  'first provider-application session disconnects'
+);
+
+select is(
+  extensions.dblink_disconnect('ticket10a_b'),
+  'OK',
+  'second provider-application session disconnects'
+);
+
+select is(
+  (select role::text from public.profiles where id = '00000000-0000-0000-0000-000000010211'),
+  'provider',
+  'concurrent applications perform exactly one role transition'
+);
+
+select is(
+  (select count(*) from public.provider_profiles where user_id = '00000000-0000-0000-0000-000000010211'),
+  1::bigint,
+  'concurrent applications create exactly one provider profile'
+);
+
+select is(
+  (select count(*) from public.provider_services where provider_id = '00000000-0000-0000-0000-000000010211' and active = false),
+  1::bigint,
+  'concurrent applications create exactly one inactive category proposal'
+);
+
+select is(
+  (select count(*) from public.consents where user_id = '00000000-0000-0000-0000-000000010211' and purpose = 'provider_application_terms'),
+  1::bigint,
+  'concurrent applications create exactly one terms record'
+);
+
+select is(
+  (select count(*) from public.audit_events where actor_id = '00000000-0000-0000-0000-000000010211' and action = 'customer.provider_application_submitted'),
+  1::bigint,
+  'concurrent applications create exactly one audit event'
+);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-0000-0000-000000010201', 'ticket10a-owner@lekkadeall.test', '{}'::jsonb),
@@ -125,6 +334,47 @@ exception
 end;
 $$;
 
+create function pg_temp.try_delete_provider_terms(p_actor_id uuid)
+returns boolean
+language plpgsql
+as $$
+declare
+  v_rows integer;
+begin
+  delete from public.consents
+  where user_id = p_actor_id
+    and purpose = 'provider_application_terms';
+
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+exception
+  when others then return false;
+end;
+$$;
+
+create function pg_temp.try_duplicate_provider_terms(p_actor_id uuid)
+returns boolean
+language plpgsql
+as $$
+begin
+  insert into public.consents (
+    user_id, purpose, policy_version, granted, source, recorded_at, withdrawn_at
+  ) values (
+    p_actor_id,
+    'provider_application_terms',
+    'provider-application-v1',
+    true,
+    'customer_provider_application_rpc',
+    pg_catalog.now(),
+    null
+  );
+
+  return true;
+exception
+  when others then return false;
+end;
+$$;
+
 create function pg_temp.fail_ticket10a_audit()
 returns trigger
 language plpgsql
@@ -143,14 +393,14 @@ $$;
 select has_function(
   'public',
   'customer_submit_provider_application',
-  array['text', 'text', 'numeric', 'uuid[]', 'text'],
+  array['text', 'numeric', 'uuid[]', 'text'],
   'trusted provider application function exists'
 );
 
 select function_returns(
   'public',
   'customer_submit_provider_application',
-  array['text', 'text', 'numeric', 'uuid[]', 'text'],
+  array['text', 'numeric', 'uuid[]', 'text'],
   'text',
   'provider application returns only the fixed pending category'
 );
@@ -194,7 +444,7 @@ select is(
 select is(
   pg_catalog.strpos(
     pg_catalog.lower(pg_catalog.pg_get_functiondef(
-      'public.customer_submit_provider_application(text,text,numeric,uuid[],text)'::regprocedure
+      'public.customer_submit_provider_application(text,numeric,uuid[],text)'::regprocedure
     )),
     'select *'
   ),
@@ -205,7 +455,7 @@ select is(
 select is(
   pg_catalog.strpos(
     pg_catalog.lower(pg_catalog.pg_get_functiondef(
-      'public.customer_submit_provider_application(text,text,numeric,uuid[],text)'::regprocedure
+      'public.customer_submit_provider_application(text,numeric,uuid[],text)'::regprocedure
     )),
     'service_request_addresses'
   ),
@@ -216,7 +466,7 @@ select is(
 select ok(
   pg_catalog.strpos(
     pg_catalog.lower(pg_catalog.pg_get_functiondef(
-      'public.customer_submit_provider_application(text,text,numeric,uuid[],text)'::regprocedure
+      'public.customer_submit_provider_application(text,numeric,uuid[],text)'::regprocedure
     )),
     'private.service_request_public_field_violation'
   ) > 0,
@@ -226,7 +476,7 @@ select ok(
 select is(
   has_function_privilege(
     'public',
-    'public.customer_submit_provider_application(text,text,numeric,uuid[],text)',
+    'public.customer_submit_provider_application(text,numeric,uuid[],text)',
     'EXECUTE'
   ),
   false,
@@ -236,7 +486,7 @@ select is(
 select is(
   has_function_privilege(
     'anon',
-    'public.customer_submit_provider_application(text,text,numeric,uuid[],text)',
+    'public.customer_submit_provider_application(text,numeric,uuid[],text)',
     'EXECUTE'
   ),
   false,
@@ -246,7 +496,7 @@ select is(
 select is(
   has_function_privilege(
     'authenticated',
-    'public.customer_submit_provider_application(text,text,numeric,uuid[],text)',
+    'public.customer_submit_provider_application(text,numeric,uuid[],text)',
     'EXECUTE'
   ),
   true,
@@ -256,11 +506,83 @@ select is(
 select is(
   has_function_privilege(
     'service_role',
-    'public.customer_submit_provider_application(text,text,numeric,uuid[],text)',
+    'public.customer_submit_provider_application(text,numeric,uuid[],text)',
     'EXECUTE'
   ),
   false,
   'service_role is not granted the actor-derived browser boundary'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.provider_profiles', 'business_name', 'UPDATE')
+  or has_column_privilege('authenticated', 'public.provider_profiles', 'bio', 'UPDATE')
+  or has_column_privilege('authenticated', 'public.provider_profiles', 'service_radius_km', 'UPDATE'),
+  false,
+  'authenticated cannot directly edit provider application fields'
+);
+
+select is(
+  has_table_privilege('authenticated', 'public.provider_profiles', 'SELECT'),
+  false,
+  'authenticated has no broad provider_profiles SELECT grant'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.provider_profiles', 'business_name', 'SELECT'),
+  true,
+  'authenticated retains the reviewed narrow provider-profile projection'
+);
+
+select is(
+  has_column_privilege('authenticated', 'public.provider_profiles', 'verification_reference', 'SELECT')
+  or has_column_privilege('authenticated', 'public.provider_profiles', 'bank_name_match', 'SELECT')
+  or has_column_privilege('authenticated', 'public.provider_profiles', 'reviewed_by', 'SELECT')
+  or has_column_privilege('authenticated', 'public.provider_profiles', 'reviewed_at', 'SELECT'),
+  false,
+  'browser roles cannot select provider verification or review internals'
+);
+
+select is(
+  has_table_privilege('authenticated', 'public.consents', 'INSERT'),
+  false,
+  'authenticated cannot forge provider terms records'
+);
+
+select is(
+  has_table_privilege('authenticated', 'public.consents', 'UPDATE'),
+  false,
+  'authenticated cannot rewrite provider terms records'
+);
+
+select is(
+  has_table_privilege('authenticated', 'public.consents', 'DELETE'),
+  false,
+  'authenticated cannot delete provider terms records'
+);
+
+select is(
+  (
+    select i.indisunique
+    from pg_catalog.pg_index as i
+    join pg_catalog.pg_class as c on c.oid = i.indexrelid
+    join pg_catalog.pg_namespace as n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'provider_application_terms_one_per_user_uidx'
+  ),
+  true,
+  'provider terms have a replay-uniqueness index'
+);
+
+select is(
+  (
+    select t.tgenabled
+    from pg_catalog.pg_trigger as t
+    where t.tgrelid = 'public.consents'::regclass
+      and t.tgname = 'protect_provider_application_terms'
+      and not t.tgisinternal
+  ),
+  'O'::"char",
+  'provider terms immutability trigger is enabled'
 );
 
 -- Authentication, input, actor-state, and marketplace-history failures.
@@ -269,7 +591,7 @@ set local request.jwt.claim.sub = '';
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 20,
+    'Safe Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -282,7 +604,7 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010208';
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    ' ', null, 20,
+    ' ', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -293,7 +615,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 0,
+    'Safe Services', 0,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -304,7 +626,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 20,
+    'Safe Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'unsupported-version'
   )$$,
@@ -315,7 +637,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 20,
+    'Safe Services', 20,
     array[]::uuid[],
     'provider-application-v1'
   )$$,
@@ -326,7 +648,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 20,
+    'Safe Services', 20,
     array[
       '00000000-0000-0000-0000-000000010290'::uuid,
       '00000000-0000-0000-0000-000000010290'::uuid
@@ -340,7 +662,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services', null, 20,
+    'Safe Services', 20,
     array['00000000-0000-0000-0000-000000010292'::uuid],
     'provider-application-v1'
   )$$,
@@ -351,8 +673,7 @@ select throws_ok(
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Safe Services',
-    'See https://example.test for private contact details.',
+    'See https://example.test',
     20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
@@ -365,7 +686,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010202';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Restricted Services', null, 20,
+    'Restricted Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -377,7 +698,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010203';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Suspended Services', null, 20,
+    'Suspended Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -389,7 +710,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010204';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Closed Services', null, 20,
+    'Closed Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -401,7 +722,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010205';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Wrong Role Services', null, 20,
+    'Wrong Role Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -413,7 +734,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010206';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'History Services', null, 20,
+    'History Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -425,7 +746,7 @@ select throws_ok(
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010210';
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Missing Profile Services', null, 20,
+    'Missing Profile Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -460,7 +781,6 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010201';
 select is(
   public.customer_submit_provider_application(
     '  Owner Services  ',
-    '  Safe public provider biography.  ',
     25,
     array[
       '00000000-0000-0000-0000-000000010290'::uuid,
@@ -483,19 +803,20 @@ select is(
 select is(
   (
     select pg_catalog.concat_ws(
-      '|', business_name, bio, service_radius_km::text,
+      '|', business_name, service_radius_km::text,
       verification_status::text, review_status
     )
     from public.provider_profiles
     where user_id = '00000000-0000-0000-0000-000000010201'
   ),
-  'Owner Services|Safe public provider biography.|25|not_started|pending',
+  'Owner Services|25|not_started|pending',
   'provider profile contains only normalized application fields and safe pending statuses'
 );
 
 select ok(
   (
-    select verification_reference is null
+    select bio is null
+       and verification_reference is null
        and bank_name_match is null
        and reviewed_by is null
        and reviewed_at is null
@@ -522,6 +843,22 @@ select is(
   ),
   2::bigint,
   'all category proposals remain inactive and contain no active-service details'
+);
+
+select is(
+  (
+    select count(*)
+    from public.consents
+    where user_id = '00000000-0000-0000-0000-000000010201'
+      and purpose = 'provider_application_terms'
+      and policy_version = 'provider-application-v1'
+      and granted = true
+      and source = 'customer_provider_application_rpc'
+      and recorded_at is not null
+      and withdrawn_at is null
+  ),
+  1::bigint,
+  'application writes exactly one fixed server-timestamped terms record'
 );
 
 select is(
@@ -583,6 +920,23 @@ select is(
   'pending applicant cannot self-approve'
 );
 
+reset role;
+
+select is(
+  pg_temp.try_delete_provider_terms('00000000-0000-0000-0000-000000010201'),
+  false,
+  'provider application terms remain immutable even to direct table-owner mutation'
+);
+
+select is(
+  pg_temp.try_duplicate_provider_terms('00000000-0000-0000-0000-000000010201'),
+  false,
+  'provider application terms reject a duplicate record'
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010201';
+
 select throws_ok(
   $$select public.provider_submit_bid(
     '00000000-0000-0000-0000-000000010299'::uuid,
@@ -610,7 +964,6 @@ select is(
 select is(
   public.customer_submit_provider_application(
     'Owner Services',
-    'Safe public provider biography.',
     25,
     array[
       '00000000-0000-0000-0000-000000010290'::uuid,
@@ -625,7 +978,6 @@ select is(
 select throws_ok(
   $$select public.customer_submit_provider_application(
     'Changed Services',
-    'Safe public provider biography.',
     25,
     array[
       '00000000-0000-0000-0000-000000010290'::uuid,
@@ -653,6 +1005,12 @@ select is(
 );
 
 select is(
+  (select count(*) from public.consents where user_id = '00000000-0000-0000-0000-000000010201' and purpose = 'provider_application_terms'),
+  1::bigint,
+  'replay creates no duplicate terms record'
+);
+
+select is(
   (select count(*) from public.provider_services where provider_id = '00000000-0000-0000-0000-000000010201'),
   2::bigint,
   'replay creates no duplicate category proposal'
@@ -666,7 +1024,6 @@ set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000010207","r
 select is(
   public.customer_submit_provider_application(
     'Metadata Safe Services',
-    null,
     15,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
@@ -697,7 +1054,7 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010209';
 
 select throws_ok(
   $$select public.customer_submit_provider_application(
-    'Rollback Services', null, 20,
+    'Rollback Services', 20,
     array['00000000-0000-0000-0000-000000010290'::uuid],
     'provider-application-v1'
   )$$,
@@ -735,6 +1092,12 @@ select is(
 );
 
 select is(
+  (select count(*) from public.consents where user_id = '00000000-0000-0000-0000-000000010209' and purpose = 'provider_application_terms'),
+  0::bigint,
+  'audit failure rolls back the provider terms record'
+);
+
+select is(
   coalesce(current_setting('lekkadeall.allow_privileged_profile_update', true), 'off'),
   'off',
   'privileged role-transition guard is disabled after success and failure'
@@ -767,3 +1130,25 @@ select is(
 select * from finish();
 
 rollback;
+
+-- Remove the committed concurrency-only fixture without retaining synthetic
+-- rows or weakening production triggers outside this cleanup transaction.
+begin;
+
+alter table public.audit_events disable trigger audit_events_append_only;
+delete from public.audit_events
+where actor_id = '00000000-0000-0000-0000-000000010211'
+  and action = 'customer.provider_application_submitted';
+alter table public.audit_events enable trigger audit_events_append_only;
+
+alter table public.consents disable trigger protect_provider_application_terms;
+delete from auth.users
+where id = '00000000-0000-0000-0000-000000010211';
+alter table public.consents enable trigger protect_provider_application_terms;
+
+delete from public.service_categories
+where id = '00000000-0000-0000-0000-000000010293';
+
+commit;
+
+drop role ticket10a_concurrency_login;

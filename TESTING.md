@@ -508,7 +508,7 @@ supabase test db supabase/tests/database/customer_provider_application.test.sql
 supabase stop --no-backup
 ```
 
-The focused 58-assertion suite verifies the fixed-search-path `SECURITY DEFINER` contract, explicit source boundary, least-privilege grants, signed-out, missing-profile, and ineligible actor rejection, hostile Auth-metadata non-authority, pristine-customer conversion, public-field privacy validation, pending/unverified provider state, inactive category proposals, the append-only fixed terms/audit record, replay safety, audit rollback, transaction-local guard reset, discovery/bidding/activation/approval denial, and unchanged RLS.
+The focused 85-assertion suite verifies genuine two-session concurrency, the fixed-search-path `SECURITY DEFINER` contract, explicit source boundary, least-privilege grants, narrowed provider-profile reads, revoked direct application-field edits, immutable/replay-unique terms, signed-out, missing-profile, and ineligible actor rejection, hostile Auth-metadata non-authority, pristine-customer conversion, business-name privacy validation, pending/unverified provider state, inactive category proposals, the separate fixed terms and audit records, replay safety, audit rollback, transaction-local guard reset, discovery/bidding/activation/approval denial, and unchanged RLS.
 
 The main database workflow runs this suite after profile provisioning and before the exact-address, public-field, marketplace-state, publication, cancellation/update, and financial suites. A successful Phase 1 CI result requires the clean migration reset, focused Ticket 10A suite, all pre-existing pgTAP suites, the complete 77-test frontend Node suite, the Deno webhook suite, and the dependent Ticket 9A-9 Playwright job to remain green.
 
