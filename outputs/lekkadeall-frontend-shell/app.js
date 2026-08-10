@@ -30,6 +30,12 @@ import {
   cancelCustomerDraft,
 } from './request-cancellation.js';
 import {
+  DRAFT_PUBLICATION_AMBIGUOUS_MESSAGE,
+  DRAFT_PUBLICATION_SUCCESS_MESSAGE,
+  DRAFT_PUBLICATION_UNAVAILABLE_MESSAGE,
+  publishCustomerDraft,
+} from './request-publication.js';
+import {
   DRAFT_EDIT_AMBIGUOUS_MESSAGE,
   DRAFT_EDIT_SUCCESS_MESSAGE,
   DRAFT_EDIT_UNAVAILABLE_MESSAGE,
@@ -58,6 +64,9 @@ const state = {
   customerDraftCancellation: {
     requestId: null, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
   },
+  customerDraftPublication: {
+    requestId: null, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
+  },
   customerDraftEdit: null,
   providerStatus: null,
   settingsProfile: null,
@@ -70,6 +79,8 @@ let authSubmissionInFlight = false;
 let draftSubmissionInFlight = false;
 let draftCancellationInFlight = false;
 let draftCancellationSequence = 0;
+let draftPublicationInFlight = false;
+let draftPublicationSequence = 0;
 let draftEditInFlight = false;
 let draftEditSequence = 0;
 
@@ -110,6 +121,7 @@ function view() {
     customerRequestList: state.customerRequestList,
     customerRequestDetail: state.customerRequestDetail,
     customerDraftCancellation: state.customerDraftCancellation,
+    customerDraftPublication: state.customerDraftPublication,
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
     settingsProfile: state.settingsProfile,
@@ -132,6 +144,7 @@ function clearPersonalState() {
   state.providerStatus = null;
   state.settingsProfile = null;
   resetCustomerDraftCancellation();
+  resetCustomerDraftPublication();
   resetCustomerDraftEdit();
 }
 
@@ -139,6 +152,14 @@ function resetCustomerDraftCancellation(requestId = null) {
   draftCancellationSequence += 1;
   draftCancellationInFlight = false;
   state.customerDraftCancellation = {
+    requestId, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
+  };
+}
+
+function resetCustomerDraftPublication(requestId = null) {
+  draftPublicationSequence += 1;
+  draftPublicationInFlight = false;
+  state.customerDraftPublication = {
     requestId, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
   };
 }
@@ -252,6 +273,7 @@ async function refreshRoute() {
       render();
       const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
       resetCustomerDraftCancellation(requestId);
+      resetCustomerDraftPublication(requestId);
       const [request] = await Promise.all([
         readOwnCustomerRequestDetail(state.client, requestId),
         loadRequestCategories(sequence),
@@ -584,6 +606,10 @@ async function submitCustomerDraftCancellation() {
       || state.routeProfile?.account_status !== 'active' || !detail?.ok
       || detail.data?.id !== requestId || detail.data?.status !== 'draft'
       || state.customerDraftCancellation.requestId !== requestId
+      || state.customerDraftPublication.requestId !== requestId
+      || state.customerDraftPublication.blocked
+      || state.customerDraftPublication.confirming
+      || state.customerDraftPublication.submitting
       || !state.customerDraftCancellation.confirming) {
     resetCustomerDraftCancellation(requestId);
     state.customerDraftCancellation.message = DRAFT_CANCELLATION_UNAVAILABLE_MESSAGE;
@@ -648,6 +674,89 @@ async function submitCustomerDraftCancellation() {
     state.customerDraftCancellation.confirmed = false;
     state.customerDraftCancellation.blocked = true;
     state.customerDraftCancellation.message = DRAFT_CANCELLATION_AMBIGUOUS_MESSAGE;
+  }
+  render();
+}
+
+async function submitCustomerDraftPublication() {
+  const path = currentPath();
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  const detail = state.customerRequestDetail;
+  const publication = state.customerDraftPublication;
+  if (draftPublicationInFlight || path !== '/app/customer/requests/detail') return;
+  if (!state.client || !state.session?.user?.id || !isCustomerRequestId(requestId)
+      || state.access?.kind !== 'allowed' || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active' || !detail?.ok
+      || detail.data?.id !== requestId || detail.data?.status !== 'draft'
+      || publication.requestId !== requestId || publication.blocked
+      || !publication.confirming || state.customerDraftCancellation.confirming
+      || state.customerDraftCancellation.submitting || state.customerDraftCancellation.blocked) {
+    resetCustomerDraftPublication(requestId);
+    state.customerDraftPublication.blocked = true;
+    state.customerDraftPublication.message = DRAFT_PUBLICATION_UNAVAILABLE_MESSAGE;
+    render();
+    return;
+  }
+
+  const actorId = state.session.user.id;
+  const publicationSequence = ++draftPublicationSequence;
+  draftPublicationInFlight = true;
+  state.customerDraftPublication.submitting = true;
+  state.customerDraftPublication.message = '';
+  render();
+
+  const result = await publishCustomerDraft(state.client, requestId);
+
+  if (publicationSequence !== draftPublicationSequence) return;
+
+  if (currentPath() !== '/app/customer/requests/detail'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed'
+      || state.routeProfile?.role !== 'customer'
+      || state.routeProfile?.account_status !== 'active') {
+    resetCustomerDraftPublication();
+    return;
+  }
+
+  if (!result.ok) {
+    draftPublicationInFlight = false;
+    state.customerDraftPublication.confirming = false;
+    state.customerDraftPublication.submitting = false;
+    state.customerDraftPublication.confirmed = false;
+    state.customerDraftPublication.blocked = true;
+    state.customerDraftPublication.message = result.message;
+    render();
+    return;
+  }
+
+  let freshDetail;
+  try {
+    freshDetail = await readOwnCustomerRequestDetail(state.client, requestId);
+  } catch {
+    freshDetail = { ok: false, data: null };
+  }
+  if (publicationSequence !== draftPublicationSequence) return;
+  draftPublicationInFlight = false;
+
+  if (currentPath() !== '/app/customer/requests/detail'
+      || new URLSearchParams(window.location.search).get('requestId') !== requestId
+      || state.session?.user?.id !== actorId || state.access?.kind !== 'allowed') {
+    resetCustomerDraftPublication();
+    return;
+  }
+
+  state.customerDraftPublication.confirming = false;
+  state.customerDraftPublication.submitting = false;
+  if (freshDetail.ok && freshDetail.data?.id === requestId
+      && freshDetail.data?.status === 'open') {
+    state.customerRequestDetail = freshDetail;
+    state.customerDraftPublication.confirmed = true;
+    state.customerDraftPublication.blocked = false;
+    state.customerDraftPublication.message = DRAFT_PUBLICATION_SUCCESS_MESSAGE;
+  } else {
+    state.customerDraftPublication.confirmed = false;
+    state.customerDraftPublication.blocked = true;
+    state.customerDraftPublication.message = DRAFT_PUBLICATION_AMBIGUOUS_MESSAGE;
   }
   render();
 }
@@ -717,13 +826,42 @@ document.addEventListener('click', async (event) => {
     if (action === 'open' && state.customerRequestDetail?.ok
         && state.customerRequestDetail.data?.id === requestId
         && state.customerRequestDetail.data?.status === 'draft'
-        && state.access?.kind === 'allowed' && state.access?.role === 'customer') {
+        && state.access?.kind === 'allowed' && state.access?.role === 'customer'
+        && state.routeProfile?.account_status === 'active'
+        && !state.customerDraftPublication.blocked
+        && !state.customerDraftPublication.confirming
+        && !state.customerDraftPublication.submitting) {
       state.customerDraftCancellation = {
         requestId, confirming: true, submitting: false, confirmed: false, blocked: false, message: '',
       };
       render();
     } else if (action === 'keep') {
       resetCustomerDraftCancellation(requestId);
+      render();
+    }
+    return;
+  }
+
+  const publicationAction = event.target.closest('[data-publish-draft-action]');
+  if (publicationAction) {
+    const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+    const action = publicationAction.dataset.publishDraftAction;
+    if (action === 'open' && state.customerRequestDetail?.ok
+        && state.customerRequestDetail.data?.id === requestId
+        && state.customerRequestDetail.data?.status === 'draft'
+        && state.access?.kind === 'allowed' && state.access?.role === 'customer'
+        && state.routeProfile?.account_status === 'active'
+        && state.customerDraftPublication.requestId === requestId
+        && !state.customerDraftPublication.blocked
+        && !state.customerDraftCancellation.blocked
+        && !state.customerDraftCancellation.confirming
+        && !state.customerDraftCancellation.submitting) {
+      state.customerDraftPublication = {
+        requestId, confirming: true, submitting: false, confirmed: false, blocked: false, message: '',
+      };
+      render();
+    } else if (action === 'keep') {
+      resetCustomerDraftPublication(requestId);
       render();
     }
     return;
@@ -739,6 +877,12 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const publicationForm = event.target.closest('[data-publish-draft-form]');
+  if (publicationForm) {
+    event.preventDefault();
+    await submitCustomerDraftPublication();
+    return;
+  }
   const cancellationForm = event.target.closest('[data-cancel-draft-form]');
   if (cancellationForm) {
     event.preventDefault();

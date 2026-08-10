@@ -205,7 +205,8 @@ test('list and detail render database values as escaped text with safe fallbacks
   assert.match(detail, /&lt;b&gt;Woodstock&lt;\/b&gt;/);
   assert.match(detail, /Cape Town &amp; surrounds/);
   assert.match(detail, /Category unavailable/);
-  assert.doesNotMatch(detail, />\s*(?:Publish|Pay)\s*</i);
+  assert.match(detail, />Publish request</);
+  assert.doesNotMatch(detail, />\s*Pay\s*</i);
 });
 
 test('frontend source adds no writes, blocked RPCs, broad selects or request persistence', async () => {
