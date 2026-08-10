@@ -74,6 +74,9 @@ jobs:
       - name: Run secure profile provisioning pgTAP tests
         run: supabase test db supabase/tests/database/profile_provisioning.test.sql
 
+      - name: Run customer provider application pgTAP tests
+        run: supabase test db supabase/tests/database/customer_provider_application.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 

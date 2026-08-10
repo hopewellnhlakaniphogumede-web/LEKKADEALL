@@ -4007,3 +4007,26 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - The complete frontend Node suite passed **77/77**.
 - Docker and Supabase CLI are unavailable locally. The ignored pnpm installation also retains historical workspace links, so Playwright discovery/runtime is not claimed. GitHub Actions must verify the real disposable Supabase/RLS/RPC journey.
 - No production frontend module, migration, RLS policy, grant, database function, authentication configuration, exact-address boundary, payment, booking, provider capability, GitHub Actions workflow, worker count, retry policy, or artifact policy changed.
+
+### Ticket 10A Phase 1 - trusted customer-to-provider application boundary - 2026-08-10
+
+**Status:** Database/RPC implementation and focused pgTAP coverage are complete locally; migration reset and runtime pgTAP verification remain pending GitHub Actions.
+
+#### Implemented boundary
+
+- Added `public.customer_submit_provider_application(text, text, numeric, uuid[], text)`, a volatile `SECURITY DEFINER` RPC with `search_path = pg_catalog`, fully schema-qualified object references, explicit projections, and no `SELECT *`.
+- The RPC derives the actor only from `auth.uid()` plus the locked protected profile. It accepts only an active customer with no provider state or marketplace participation history, preventing unsafe conversion of an established customer account in the current single-role model.
+- The guarded role change is transaction-local and resets its privileged-profile flag on success and exception paths. The provider profile is created as `verification_status = not_started` and `review_status = pending`, with no verification reference, banking match, reviewer, approval, identity record, or payout state.
+- Selected active categories are locked and recorded only as inactive `provider_services` proposals with no description or price. Existing `is_approved_provider(...)` checks therefore continue to block discovery, bidding, active service management, address reveal, and payout eligibility.
+- Business name and optional biography reuse the authoritative public-field canonicalization/privacy classifier, preventing exact-location, contact, URL/social, credential, unsupported-format, and unsafe-markup content from entering the eventual public provider surface.
+- The existing append-only `audit_events` schema safely records the fixed `provider-application-v1` terms version and server-owned acceptance timestamp without inventing provider fields or relying on the user-controlled consent table. Any profile, proposal, or audit failure rolls back the complete application.
+- An identical replay returns the existing fixed `pending` result without another mutation, proposal, or audit event. A changed or inconsistent replay fails closed.
+- Execution is revoked from `PUBLIC`, `anon`, and `service_role` and granted only to `authenticated`.
+
+#### Phase boundary and verification
+
+- Added a focused 58-assertion pgTAP suite covering function metadata/grants, signed-out and invalid/unsafe input rejection, missing-profile/restricted/suspended/closed/wrong-role/history rejection, metadata non-authority, pristine-owner success, inactive proposals, append-only terms/audit atomicity, replay, self-approval/service-activation/bidding denial, approved-provider gating, audit rollback, guard reset, and RLS preservation.
+- Added the focused suite to the existing database GitHub Actions job before address, state-machine, publication, and financial regressions.
+- The complete frontend Node suite passed **77/77**, confirming the existing Ticket 9A-11 application and static boundaries remain green.
+- `supabase`, Docker, and `psql` are unavailable on this host. No local migration-reset or pgTAP result is claimed; GitHub Actions remains authoritative.
+- No frontend, E2E, existing RLS policy, table DML grant, provider approval function, address, identity, payment, booking, payout, webhook, Auth configuration, enum, or Ticket 9A-11 behavior changed. Phase 2 frontend work has not started.

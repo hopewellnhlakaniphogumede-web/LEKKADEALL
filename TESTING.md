@@ -495,3 +495,27 @@ Local verification on 2026-08-10:
 - Playwright discovery is also unavailable because the ignored local pnpm links still reference a historical workspace and cannot resolve the pinned runtime. GitHub Actions remains authoritative for the independent and full real-stack runs.
 
 No worker, retry, artifact, timeout-policy, production application, migration, RLS, grant, Auth, address, payment, booking, provider, or workflow behavior was changed. Phase 3 adds no retry, sleep, direct browser DML, optimistic publication success, exact-address access, or sensitive output.
+
+## Ticket 10A Phase 1 provider application database boundary
+
+Run the focused provider application suite after a clean local reset:
+
+```powershell
+cd outputs/marketplace-production-foundation
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/customer_provider_application.test.sql
+supabase stop --no-backup
+```
+
+The focused 58-assertion suite verifies the fixed-search-path `SECURITY DEFINER` contract, explicit source boundary, least-privilege grants, signed-out, missing-profile, and ineligible actor rejection, hostile Auth-metadata non-authority, pristine-customer conversion, public-field privacy validation, pending/unverified provider state, inactive category proposals, the append-only fixed terms/audit record, replay safety, audit rollback, transaction-local guard reset, discovery/bidding/activation/approval denial, and unchanged RLS.
+
+The main database workflow runs this suite after profile provisioning and before the exact-address, public-field, marketplace-state, publication, cancellation/update, and financial suites. A successful Phase 1 CI result requires the clean migration reset, focused Ticket 10A suite, all pre-existing pgTAP suites, the complete 77-test frontend Node suite, the Deno webhook suite, and the dependent Ticket 9A-9 Playwright job to remain green.
+
+Local verification on 2026-08-10:
+
+- The complete frontend Node suite passed **77/77**.
+- Static assertion-count, migration-boundary, credential/privacy, prohibited-scope, and `git diff --check` checks passed.
+- Docker, Supabase CLI, and `psql` are unavailable, so no local migration reset or pgTAP execution is claimed. GitHub Actions must perform those runtime checks.
+
+Phase 1 adds no frontend or E2E implementation. It creates no identity-verification, exact-address, bank, payment, booking, bidding, payout, discovery, admin, or production-deployment capability. Phase 2 must not start until the database boundary and CI receive explicit review authorization.
