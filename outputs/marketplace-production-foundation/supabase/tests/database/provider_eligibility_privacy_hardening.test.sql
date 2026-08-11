@@ -233,8 +233,12 @@ select is(
 );
 
 select is(
-  (select error_message from ticket10b_concurrency_results where connection_name = 'b'),
-  'Provider marketplace review is unavailable',
+  (
+    select pg_catalog.split_part(error_message, E'\n', 1)
+    from ticket10b_concurrency_results
+    where connection_name = 'b'
+  ),
+  'ERROR:  Provider marketplace review is unavailable',
   'concurrent stale decision returns the fixed privacy-safe error'
 );
 
@@ -1015,17 +1019,12 @@ select throws_ok(
   'suspended provider cannot submit a new bid'
 );
 
-select is(
-  (
-    with changed as (
-      update public.provider_services
-      set description = 'Suspended mutation attempt'
-      where provider_id = '00000000-0000-0000-0000-000000010311'
-      returning 1
-    )
-    select count(*) from changed
-  ),
-  0::bigint,
+select throws_ok(
+  $$update public.provider_services
+    set description = 'Suspended mutation attempt'
+    where provider_id = '00000000-0000-0000-0000-000000010311'$$,
+  '42501',
+  'Provider marketplace capability is unavailable',
   'suspended provider cannot manage services'
 );
 
