@@ -381,6 +381,7 @@ test('push and pull-request contexts retain valid distinct run-scoped actor prop
 
 test('browser mutation and fixture boundaries are narrowly allowlisted', async () => {
   assert.deepEqual(ALLOWED_MARKETPLACE_RPCS, [
+    'customer_submit_provider_application',
     'customer_create_draft_request',
     'customer_update_draft_request',
     'customer_cancel_draft_request',
@@ -394,6 +395,10 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     'non-loopback-request',
     'service-role-authorization',
   ]) assert.match(networkSource, new RegExp(token));
+  assert.match(
+    networkSource,
+    /customer_submit_provider_application:\s*\[\s*'p_business_name', 'p_category_ids', 'p_service_radius_km', 'p_terms_version'/u,
+  );
 
   const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
   assert.match(fixtureSource, /supabase_db_lekkadeall-local/);

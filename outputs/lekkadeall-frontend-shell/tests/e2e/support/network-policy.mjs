@@ -1,6 +1,7 @@
 import { assertLoopbackUrl } from './local-environment.mjs';
 
 export const ALLOWED_MARKETPLACE_RPCS = Object.freeze([
+  'customer_submit_provider_application',
   'customer_create_draft_request',
   'customer_update_draft_request',
   'customer_cancel_draft_request',
@@ -29,6 +30,9 @@ const AUTHORITY_KEYS = new Set([
   'precise_address_ciphertext',
 ]);
 const EXPECTED_RPC_KEYS = Object.freeze({
+  customer_submit_provider_application: [
+    'p_business_name', 'p_category_ids', 'p_service_radius_km', 'p_terms_version',
+  ],
   customer_create_draft_request: [
     'p_budget_minor', 'p_category_id', 'p_city', 'p_description',
     'p_precise_address_ciphertext', 'p_requested_start', 'p_suburb', 'p_title',

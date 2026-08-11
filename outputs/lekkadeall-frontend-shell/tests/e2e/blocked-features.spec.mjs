@@ -52,6 +52,7 @@ test('blocked marketplace and privileged controls remain absent from the custome
   expect(policy.getRpcCount('customer_update_draft_request')).toBe(0);
   expect(policy.getRpcCount('customer_cancel_draft_request')).toBe(0);
   expect(policy.getRpcCount('customer_publish_draft_request')).toBe(0);
+  expect(policy.getRpcCount('customer_submit_provider_application')).toBe(0);
   await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
   policy.assertClean();
   emissions.assertClean();

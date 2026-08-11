@@ -263,11 +263,12 @@ test('app orchestration is single-flight and confirms success through a fresh dr
   assert.doesNotMatch(source, /setTimeout|setInterval|\bretry\b/i);
 });
 
-test('only four reviewed RPC modules exist and blocked browser capabilities remain absent', async () => {
+test('only five reviewed RPC modules exist and blocked browser capabilities remain absent', async () => {
   const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config'));
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
   const rpcModules = entries.filter(([, source]) => source.includes('.rpc(')).map(([name]) => name).sort();
   assert.deepEqual(rpcModules, [
+    'provider-application.js',
     'request-cancellation.js',
     'request-draft.js',
     'request-publication.js',
