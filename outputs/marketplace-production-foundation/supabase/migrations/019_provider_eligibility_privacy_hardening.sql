@@ -175,7 +175,7 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select pg_catalog.coalesce((
+  select case when (
     select
       p.role = 'provider'::public.user_role
       and p.account_status = 'active'
@@ -197,7 +197,7 @@ as $$
     join private.provider_marketplace_eligibility as eligibility
       on eligibility.provider_id = pp.user_id
     where p.id = p_provider_id
-  ), false)
+  ) is true then true else false end
 $$;
 
 create or replace function private.require_provider_marketplace_eligibility(
@@ -389,16 +389,19 @@ begin
   end if;
 
   begin
-    v_claims := pg_catalog.nullif(
-      pg_catalog.current_setting('request.jwt.claims', true),
-      ''
-    )::pg_catalog.jsonb;
+    v_claims := case
+      when pg_catalog.current_setting('request.jwt.claims', true) = '' then null
+      else pg_catalog.current_setting('request.jwt.claims', true)::pg_catalog.jsonb
+    end;
   exception
     when others then
       v_claims := null;
   end;
 
-  if pg_catalog.coalesce(v_claims ->> 'aal', '') <> 'aal2' then
+  if case
+       when v_claims ->> 'aal' is null then ''
+       else v_claims ->> 'aal'
+     end <> 'aal2' then
     raise exception 'Provider marketplace review is unavailable'
       using errcode = '42501';
   end if;
