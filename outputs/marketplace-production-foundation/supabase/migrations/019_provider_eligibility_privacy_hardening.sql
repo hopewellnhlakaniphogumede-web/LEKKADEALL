@@ -317,6 +317,10 @@ as $$
 declare
   v_provider_id pg_catalog.uuid;
 begin
+  if session_user = 'postgres' and auth.uid() is null then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
   if tg_op = 'INSERT'
      and new.active = false
      and new.description is null
