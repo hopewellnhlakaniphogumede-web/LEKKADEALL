@@ -36,6 +36,56 @@ insert into public.provider_profiles (
   ('00000000-0000-0000-0000-000000000011', 'Provider A Services', 'pending', 'test-verification-provider-a', false, 'pending'),
   ('00000000-0000-0000-0000-000000000012', 'Provider B Services', 'pending', 'test-verification-provider-b', false, 'pending');
 
+-- Ticket 10B gives the reusable historical provider fixtures an explicit,
+-- test-only manual-pilot decision. Their provider-profile review state remains
+-- pending until each suite deliberately activates the actor under test.
+insert into private.provider_eligibility_decisions (
+  id, provider_id, reviewer_id, action, previous_status, new_status, basis,
+  policy_version, expires_at, reason_code, idempotency_key,
+  intent_fingerprint, decided_at
+) values
+  (
+    '00000000-0000-0000-0000-000000000611',
+    '00000000-0000-0000-0000-000000000011',
+    '00000000-0000-0000-0000-000000000099',
+    'approve_manual_pilot', 'pending', 'approved', 'manual_pilot',
+    'provider-eligibility-v1', now() + interval '365 days',
+    'manual_pilot_approved',
+    '00000000-0000-0000-0000-000000000621',
+    'ticket-fixture-provider-a', now()
+  ),
+  (
+    '00000000-0000-0000-0000-000000000612',
+    '00000000-0000-0000-0000-000000000012',
+    '00000000-0000-0000-0000-000000000099',
+    'approve_manual_pilot', 'pending', 'approved', 'manual_pilot',
+    'provider-eligibility-v1', now() + interval '365 days',
+    'manual_pilot_approved',
+    '00000000-0000-0000-0000-000000000622',
+    'ticket-fixture-provider-b', now()
+  );
+
+update private.provider_marketplace_eligibility as eligibility
+set status = 'approved',
+    basis = 'manual_pilot',
+    policy_version = 'provider-eligibility-v1',
+    expires_at = now() + interval '365 days',
+    current_decision_id = fixture.decision_id,
+    reviewer_id = '00000000-0000-0000-0000-000000000099',
+    reason_code = 'manual_pilot_approved',
+    updated_at = now()
+from (values
+  (
+    '00000000-0000-0000-0000-000000000011'::uuid,
+    '00000000-0000-0000-0000-000000000611'::uuid
+  ),
+  (
+    '00000000-0000-0000-0000-000000000012'::uuid,
+    '00000000-0000-0000-0000-000000000612'::uuid
+  )
+) as fixture(provider_id, decision_id)
+where eligibility.provider_id = fixture.provider_id;
+
 insert into public.identity_verifications (
   id, user_id, provider_name, provider_reference, status,
   assurance_level, consent_version, consent_recorded_at

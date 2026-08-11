@@ -473,11 +473,13 @@ select is(
   'admin account_status change is audited'
 );
 
--- The authorised admin functions can update provider verification/review status and audit both changes.
+-- Ticket 10B removes the legacy provider verification/review authorities even
+-- for an otherwise authorised admin. The new AAL2 marketplace-review boundary
+-- cannot be bypassed through these functions.
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
 
-select lives_ok(
+select throws_ok(
   $$select public.admin_set_provider_verification_status(
       '00000000-0000-0000-0000-000000000011',
       'verified'::public.verification_status,
@@ -485,16 +487,20 @@ select lives_ok(
       true,
       'Identity verification approved during role-escalation hardening test'
     )$$,
-  'admin_set_provider_verification_status works for authorised admin'
+  '42501',
+  'permission denied for function admin_set_provider_verification_status',
+  'legacy provider verification function is revoked from authorised admins'
 );
 
-select lives_ok(
+select throws_ok(
   $$select public.admin_set_provider_review_status(
       '00000000-0000-0000-0000-000000000011',
       'approved',
       'Provider application approved during role-escalation hardening test'
     )$$,
-  'admin_set_provider_review_status works for authorised admin'
+  '42501',
+  'permission denied for function admin_set_provider_review_status',
+  'legacy provider review function is revoked from authorised admins'
 );
 
 reset role;
@@ -502,28 +508,29 @@ reset role;
 select is(
   (select verification_status::text from public.provider_profiles
    where user_id = '00000000-0000-0000-0000-000000000011'),
-  'verified',
-  'authorised admin function can change verification_status'
+  'pending',
+  'revoked legacy function leaves verification_status unchanged'
 );
 
 select is(
   (select review_status from public.provider_profiles
    where user_id = '00000000-0000-0000-0000-000000000011'),
-  'approved',
-  'authorised admin function can change provider_status/review_status'
+  'pending',
+  'revoked legacy function leaves review_status unchanged'
 );
 
 select is(
   (select reviewed_by from public.provider_profiles
    where user_id = '00000000-0000-0000-0000-000000000011'),
-  '00000000-0000-0000-0000-000000000099'::uuid,
-  'authorised provider status change records reviewed_by'
+  null::uuid,
+  'revoked legacy function records no reviewer'
 );
 
-select ok(
-  (select reviewed_at is not null from public.provider_profiles
+select is(
+  (select reviewed_at from public.provider_profiles
    where user_id = '00000000-0000-0000-0000-000000000011'),
-  'authorised provider status change records reviewed_at'
+  null::timestamptz,
+  'revoked legacy function records no review timestamp'
 );
 
 select is(
@@ -534,8 +541,8 @@ select is(
        'admin.provider_review_status_changed'
      )
      and object_id = '00000000-0000-0000-0000-000000000011'),
-  2::bigint,
-  'provider verification/review status changes are audited'
+  0::bigint,
+  'revoked legacy functions create no provider-status audit events'
 );
 
 select * from finish();
