@@ -495,3 +495,52 @@ Local verification on 2026-08-10:
 - Playwright discovery is also unavailable because the ignored local pnpm links still reference a historical workspace and cannot resolve the pinned runtime. GitHub Actions remains authoritative for the independent and full real-stack runs.
 
 No worker, retry, artifact, timeout-policy, production application, migration, RLS, grant, Auth, address, payment, booking, provider, or workflow behavior was changed. Phase 3 adds no retry, sleep, direct browser DML, optimistic publication success, exact-address access, or sensitive output.
+
+## Ticket 10A Phase 1 provider application database boundary
+
+Run the focused provider application suite after a clean local reset:
+
+```powershell
+cd outputs/marketplace-production-foundation
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/customer_provider_application.test.sql
+supabase stop --no-backup
+```
+
+The focused 85-assertion suite verifies genuine two-session concurrency, the fixed-search-path `SECURITY DEFINER` contract, explicit source boundary, least-privilege grants, narrowed provider-profile reads, revoked direct application-field edits, immutable/replay-unique terms, signed-out, missing-profile, and ineligible actor rejection, hostile Auth-metadata non-authority, pristine-customer conversion, business-name privacy validation, pending/unverified provider state, inactive category proposals, the separate fixed terms and audit records, replay safety, audit rollback, transaction-local guard reset, discovery/bidding/activation/approval denial, and unchanged RLS.
+
+The main database workflow runs this suite after profile provisioning and before the exact-address, public-field, marketplace-state, publication, cancellation/update, and financial suites. A successful Phase 1 CI result requires the clean migration reset, focused Ticket 10A suite, all pre-existing pgTAP suites, the complete 77-test frontend Node suite, the Deno webhook suite, and the dependent Ticket 9A-9 Playwright job to remain green.
+
+Local verification on 2026-08-10:
+
+- The complete frontend Node suite passed **77/77**.
+- Static assertion-count, migration-boundary, credential/privacy, prohibited-scope, and `git diff --check` checks passed.
+- Docker, Supabase CLI, and `psql` are unavailable, so no local migration reset or pgTAP execution is claimed. GitHub Actions must perform those runtime checks.
+
+Phase 1 adds no frontend or E2E implementation. It creates no identity-verification, exact-address, bank, payment, booking, bidding, payout, discovery, admin, or production-deployment capability. Phase 2 must not start until the database boundary and CI receive explicit review authorization.
+
+## Ticket 10A Phase 2 provider application frontend boundary
+
+Run the focused browser-native frontend contract tests:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/provider-application.test.mjs
+```
+
+The focused suite verifies minimal canonical input, active-category allowlisting, explicit fixed-version terms acceptance, exactly one `customer_submit_provider_application(...)` call, the four-key RPC payload, generic unavailable/ambiguous outcomes, no retry, active-pristine-customer visibility, signed-out/wrong-role/restricted/history fail-closed behavior, explicit confirmation, fresh protected profile plus narrow provider-status verification, pending/unverified rendering, and absence of direct DML, private provider fields, or approved-provider capabilities.
+
+Run the complete frontend/static regression suite:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+Local verification on 2026-08-11:
+
+- Syntax checks passed for `provider-application.js`, `app.js`, `safe-reads.js`, `shell.js`, and `provider-application.test.mjs`.
+- The focused Ticket 10A Phase 2 suite passed **11/11**.
+- The complete frontend Node suite passed **88/88**.
+- The browser performs no `provider_profiles`, `provider_services`, or `consents` DML. It calls the trusted RPC once per confirmed submission and requires fresh authenticated profile and provider-status reads before showing the fixed pending/unverified result.
+- The existing Ticket 9A network policy allowlists the new RPC only with `p_business_name`, `p_category_ids`, `p_service_radius_km`, and `p_terms_version`; blocked-feature navigation requires zero application calls. No new Playwright scenario was added in Phase 2.
+- Docker and Supabase CLI remain unavailable locally, so no new real-stack Playwright result is claimed. Phase 2 adds no E2E scenario; existing Ticket 9A-9 real-stack regression remains the GitHub Actions gate.

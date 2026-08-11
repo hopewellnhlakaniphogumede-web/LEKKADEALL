@@ -239,14 +239,15 @@ select is(
   'safe display_name remains unchanged after failed mixed safe/privileged update'
 );
 
--- Safe provider profile edits are still allowed, but verification/review fields are not exposed.
+-- Ticket 10A removes direct browser edits for provider application fields;
+-- future changes require a separately reviewed audited boundary.
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000011';
 
 select is(
   pg_temp.try_provider_safe_profile_update(),
-  true,
-  'provider can update safe provider profile fields'
+  false,
+  'provider cannot directly update provider application fields'
 );
 
 reset role;
@@ -254,8 +255,8 @@ reset role;
 select is(
   (select business_name from public.provider_profiles
    where user_id = '00000000-0000-0000-0000-000000000011'),
-  'Provider A Updated Services',
-  'safe provider profile update persists'
+  'Provider A Services',
+  'rejected direct provider profile update leaves the application unchanged'
 );
 
 -- A customer cannot make themselves a provider.

@@ -18,6 +18,11 @@ import {
   DRAFT_PUBLICATION_CONFIRM_TEXT,
   DRAFT_PUBLICATION_CONFIRM_TITLE,
 } from './request-publication.js';
+import {
+  PROVIDER_APPLICATION_CONFIRM_TEXT,
+  PROVIDER_APPLICATION_CONFIRM_TITLE,
+  PROVIDER_APPLICATION_TERMS_VERSION,
+} from './provider-application.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -264,6 +269,52 @@ function dataList(items, renderItem, emptyTitle, emptyMessage) {
   return `<div class="data-list">${items.map(renderItem).join('')}</div>`;
 }
 
+function providerApplicationFieldError(name, errors = {}) {
+  return errors[name]
+    ? `<small id="provider-${escapeHtml(name)}-error" class="field-error">${escapeHtml(errors[name])}</small>`
+    : '';
+}
+
+function providerApplicationPanel(view) {
+  if (view.access?.role !== 'customer' || view.accountStatus !== 'active') return '';
+  const application = view.providerApplication ?? {};
+  let content;
+  if (application.loadStatus === 'loading' || application.loadStatus === 'idle') {
+    content = pageState('loading', 'Checking application eligibility', 'Fresh protected account and provider-status reads are required.');
+  } else if (application.loadStatus !== 'eligible') {
+    content = pageState('empty', 'Provider application unavailable', 'This account is not eligible for the controlled provider application flow.');
+  } else if (application.blocked) {
+    content = `<p class="form-message" role="status">${escapeHtml(application.message)}</p>`;
+  } else if (application.confirming) {
+    content = `<section class="draft-cancellation-confirmation provider-application-confirmation" role="alertdialog" aria-labelledby="provider-application-confirm-title" aria-describedby="provider-application-confirm-description">
+      <h3 id="provider-application-confirm-title">${escapeHtml(PROVIDER_APPLICATION_CONFIRM_TITLE)}</h3>
+      <p id="provider-application-confirm-description">${escapeHtml(PROVIDER_APPLICATION_CONFIRM_TEXT)}</p>
+      <form data-provider-application-confirm-form>
+        <button class="button button-secondary" type="button" data-provider-application-action="edit" ${application.submitting ? 'disabled' : ''}>Review details</button>
+        <button class="button button-primary" type="submit" ${application.submitting ? 'disabled' : ''}>${application.submitting ? 'Submitting application...' : 'Submit provider application'}</button>
+      </form>
+    </section>`;
+  } else {
+    const values = application.values ?? {};
+    const errors = application.errors ?? {};
+    const categoryIds = new Set(values.categoryIds ?? []);
+    const categoryOptions = (view.categories ?? []).map((category) => `<label><input name="category" type="checkbox" value="${escapeHtml(category.id)}" ${categoryIds.has(category.id) ? 'checked' : ''}>${escapeHtml(category.name)}</label>`).join('');
+    content = `<form class="request-form provider-application-form" data-provider-application-form autocomplete="off" novalidate>
+      <div class="form-field-grid">
+        <label class="full-field">Business name<input name="business-name" type="text" minlength="3" maxlength="120" value="${escapeHtml(values.businessName ?? '')}" required>${providerApplicationFieldError('businessName', errors)}</label>
+        <label>Service radius in kilometres<input name="service-radius-km" type="number" min="1" max="250" step="1" value="${escapeHtml(values.serviceRadiusKm ?? '')}" required>${providerApplicationFieldError('serviceRadiusKm', errors)}</label>
+      </div>
+      <fieldset><legend>Proposed service categories</legend><div class="category-choice-grid">${categoryOptions}</div>${providerApplicationFieldError('categoryIds', errors)}</fieldset>
+      <label class="full-field"><input name="accept-terms" type="checkbox" value="accepted" ${values.acceptedTerms ? 'checked' : ''}>I accept provider application terms ${escapeHtml(PROVIDER_APPLICATION_TERMS_VERSION)}.</label>
+      ${providerApplicationFieldError('acceptedTerms', errors)}
+      <p class="form-message" role="status">${escapeHtml(application.message ?? '')}</p>
+      <button class="button button-primary" type="submit">Review provider application</button>
+    </form>`;
+  }
+
+  return `<section class="panel provider-application-panel"><div class="panel-heading"><div><span>PROVIDER APPLICATION</span><h2>Apply to provide services</h2></div><span class="status-chip">Controlled review</span></div><p>Applications remain pending and unverified until separately reviewed. No provider marketplace capability is granted here.</p>${content}</section>`;
+}
+
 function customerDashboard(view) {
   if (view.access?.kind !== 'allowed') {
     return appPage('Customer workspace', `<section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER WORKSPACE</p><h1>Your next job starts here.</h1></div></section>${accessState(view.access)}${mockPaymentBanner()}`);
@@ -283,6 +334,7 @@ function customerDashboard(view) {
     <section class="metrics-grid" aria-label="Customer summary"><div>${metricCard('Requests', String(requests.length), 'Own rows only')}</div><div>${metricCard('Bookings', String(bookings.length), 'Booking-party rows only')}</div><div>${metricCard('Payments', String(payments.length), 'Read-only sandbox statuses')}</div></section>
     ${mockPaymentBanner()}
     <section class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><span>REQUESTS</span><h2>Your requests</h2></div><span class="status-chip">Read-only</span></div>${requestContent}</article><article class="panel"><div class="panel-heading"><div><span>BOOKINGS</span><h2>Your timeline</h2></div><span class="status-chip">Read-only</span></div>${bookingContent}</article></section>
+    ${providerApplicationPanel(view)}
   `);
 }
 
@@ -508,6 +560,9 @@ function providerDashboard(view) {
     return appPage('Provider workspace', `<section class="dashboard-heading"><div><p class="eyebrow">PROVIDER WORKSPACE</p><h1>A clear view of readiness.</h1></div></section>${accessState(view.access)}${mockPaymentBanner()}`);
   }
   const status = view.providerStatus;
+  const applicationMessage = view.providerApplication?.confirmed
+    ? `<p class="form-message is-success" data-provider-application-message role="status">${escapeHtml(view.providerApplication.message)}</p>`
+    : '';
   const statusContent = status?.ok === false
     ? pageState('error', 'Provider status unavailable', 'No broader provider query was attempted.')
     : status?.data
@@ -516,6 +571,7 @@ function providerDashboard(view) {
 
   return appPage('Provider workspace', `
     <section class="dashboard-heading"><div><p class="eyebrow">PROVIDER WORKSPACE</p><h1>Your provider status.</h1><p>This view does not imply approval, verification or payout readiness.</p></div><span class="button button-disabled" aria-disabled="true">Open-request feed — later</span></section>
+    ${applicationMessage}
     <section class="panel"><div class="panel-heading"><div><span>PROVIDER STATUS</span><h2>Readiness</h2></div><span class="status-chip">Read-only</span></div>${statusContent}</section>
     ${mockPaymentBanner()}
     <section class="inline-warning"><strong>Sensitive workflows remain blocked</strong><p>No bids, bookings, earnings, releases or payouts are queried here.</p></section>

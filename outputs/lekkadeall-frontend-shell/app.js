@@ -42,6 +42,15 @@ import {
   customerDraftToEditValues,
   updateCustomerDraft,
 } from './request-update.js';
+import {
+  PROVIDER_APPLICATION_AMBIGUOUS_MESSAGE,
+  PROVIDER_APPLICATION_SUCCESS_MESSAGE,
+  PROVIDER_APPLICATION_UNAVAILABLE_MESSAGE,
+  isConfirmedPendingProviderApplication,
+  isEligibleCustomerProviderApplication,
+  submitCustomerProviderApplication,
+  validateProviderApplication,
+} from './provider-application.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -69,6 +78,10 @@ const state = {
   },
   customerDraftEdit: null,
   providerStatus: null,
+  providerApplication: {
+    loadStatus: 'idle', values: {}, errors: {}, confirming: false, submitting: false,
+    confirmed: false, blocked: false, message: '', validatedValues: null,
+  },
   settingsProfile: null,
   requestDraft: {
     values: {}, errors: {}, message: '', submitting: false, requestId: null,
@@ -83,6 +96,8 @@ let draftPublicationInFlight = false;
 let draftPublicationSequence = 0;
 let draftEditInFlight = false;
 let draftEditSequence = 0;
+let providerApplicationInFlight = false;
+let providerApplicationSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -124,6 +139,7 @@ function view() {
     customerDraftPublication: state.customerDraftPublication,
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
+    providerApplication: state.providerApplication,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
   };
@@ -143,6 +159,7 @@ function clearPersonalState() {
   state.customerRequestDetail = null;
   state.providerStatus = null;
   state.settingsProfile = null;
+  resetProviderApplication();
   resetCustomerDraftCancellation();
   resetCustomerDraftPublication();
   resetCustomerDraftEdit();
@@ -167,6 +184,22 @@ function resetCustomerDraftPublication(requestId = null) {
 function resetRequestDraft() {
   state.requestDraft = {
     values: {}, errors: {}, message: '', submitting: false, requestId: null,
+  };
+}
+
+function resetProviderApplication(loadStatus = 'idle') {
+  providerApplicationSequence += 1;
+  providerApplicationInFlight = false;
+  state.providerApplication = {
+    loadStatus,
+    values: {},
+    errors: {},
+    confirming: false,
+    submitting: false,
+    confirmed: false,
+    blocked: false,
+    message: '',
+    validatedValues: null,
   };
 }
 
@@ -254,7 +287,30 @@ async function refreshRoute() {
     }
 
     if (path === '/app/customer') {
-      await loadCustomerData(sequence);
+      resetProviderApplication('loading');
+      state.categoriesStatus = 'loading';
+      state.categories = [];
+      render();
+      const [providerStatus] = await Promise.all([
+        readOwnProviderStatus(state.client, state.session.user.id),
+        loadCustomerData(sequence),
+        loadRequestCategories(sequence),
+      ]);
+      if (sequence !== refreshSequence) return;
+      state.providerStatus = providerStatus;
+      const customerReadsReady = state.customer?.requests?.ok === true
+        && state.customer?.bookings?.ok === true;
+      if (!providerStatus.ok || !customerReadsReady || state.categoriesStatus === 'error') {
+        state.providerApplication.loadStatus = 'unavailable';
+      } else {
+        state.providerApplication.loadStatus = isEligibleCustomerProviderApplication(
+          profile,
+          providerStatus,
+          state.customer.requests,
+          state.customer.bookings,
+          state.categories,
+        ) ? 'eligible' : 'ineligible';
+      }
     } else if (path === '/app/customer/requests') {
       state.customerRequestList = null;
       state.categoriesStatus = 'loading';
@@ -424,6 +480,131 @@ async function submitAuthFormOnce(form) {
   }
   form.reset();
   render();
+}
+
+function providerApplicationIsEligible() {
+  return currentPath() === '/app/customer'
+    && Boolean(state.client && state.session?.user?.id)
+    && state.access?.kind === 'allowed'
+    && state.access?.role === 'customer'
+    && state.routeProfile?.role === 'customer'
+    && state.routeProfile?.account_status === 'active'
+    && state.providerApplication.loadStatus === 'eligible'
+    && !state.providerApplication.blocked
+    && state.providerStatus?.ok === true
+    && state.providerStatus.data === null
+    && state.customer?.requests?.ok === true
+    && state.customer.requests.data.length === 0
+    && state.customer?.bookings?.ok === true
+    && state.customer.bookings.data.length === 0
+    && state.categoriesStatus === 'ready'
+    && state.categories.length > 0;
+}
+
+function reviewProviderApplication(form) {
+  if (!providerApplicationIsEligible() || providerApplicationInFlight) {
+    resetProviderApplication('ineligible');
+    state.providerApplication.blocked = true;
+    state.providerApplication.message = PROVIDER_APPLICATION_UNAVAILABLE_MESSAGE;
+    render();
+    return;
+  }
+
+  const formData = new FormData(form);
+  const values = {
+    businessName: String(formData.get('business-name') ?? ''),
+    serviceRadiusKm: String(formData.get('service-radius-km') ?? ''),
+    categoryIds: formData.getAll('category').map((value) => String(value)),
+    acceptedTerms: formData.get('accept-terms') === 'accepted',
+  };
+  const validation = validateProviderApplication(values, state.categories);
+  state.providerApplication.values = values;
+  state.providerApplication.errors = validation.errors;
+  state.providerApplication.message = validation.ok
+    ? ''
+    : 'Review the highlighted application fields before continuing.';
+  state.providerApplication.confirming = validation.ok;
+  state.providerApplication.validatedValues = validation.ok ? validation.values : null;
+  render();
+}
+
+async function submitProviderApplicationConfirmation() {
+  if (providerApplicationInFlight || !providerApplicationIsEligible()
+      || !state.providerApplication.confirming
+      || !state.providerApplication.validatedValues) return;
+
+  const actorId = state.session.user.id;
+  const applicationSequence = ++providerApplicationSequence;
+  providerApplicationInFlight = true;
+  state.providerApplication.submitting = true;
+  state.providerApplication.message = '';
+  render();
+
+  const result = await submitCustomerProviderApplication(
+    state.client,
+    state.providerApplication.validatedValues,
+  );
+  if (applicationSequence !== providerApplicationSequence) return;
+
+  if (currentPath() !== '/app/customer' || state.session?.user?.id !== actorId) {
+    resetProviderApplication();
+    return;
+  }
+
+  if (!result.ok) {
+    providerApplicationInFlight = false;
+    state.providerApplication.confirming = false;
+    state.providerApplication.submitting = false;
+    state.providerApplication.blocked = true;
+    state.providerApplication.message = result.message;
+    render();
+    return;
+  }
+
+  let freshProfile;
+  let freshProviderStatus;
+  try {
+    [freshProfile, freshProviderStatus] = await Promise.all([
+      readOwnRouteProfile(state.client, actorId),
+      readOwnProviderStatus(state.client, actorId),
+    ]);
+  } catch {
+    freshProfile = { ok: false, data: null };
+    freshProviderStatus = { ok: false, data: null };
+  }
+  if (applicationSequence !== providerApplicationSequence) return;
+  providerApplicationInFlight = false;
+
+  if (currentPath() !== '/app/customer' || state.session?.user?.id !== actorId) {
+    resetProviderApplication();
+    return;
+  }
+
+  if (!isConfirmedPendingProviderApplication(actorId, freshProfile, freshProviderStatus)) {
+    state.providerApplication.confirming = false;
+    state.providerApplication.submitting = false;
+    state.providerApplication.blocked = true;
+    state.providerApplication.message = PROVIDER_APPLICATION_AMBIGUOUS_MESSAGE;
+    render();
+    return;
+  }
+
+  state.routeProfile = freshProfile.data;
+  state.providerStatus = freshProviderStatus;
+  state.access = resolveRouteAccess('/app/provider', state.session, freshProfile.data);
+  state.providerApplication = {
+    loadStatus: 'confirmed',
+    values: {},
+    errors: {},
+    confirming: false,
+    submitting: false,
+    confirmed: true,
+    blocked: false,
+    message: PROVIDER_APPLICATION_SUCCESS_MESSAGE,
+    validatedValues: null,
+  };
+  window.history.replaceState({}, '', '/app/provider');
+  render({ scroll: true });
 }
 
 async function submitCustomerDraftForm(form) {
@@ -819,6 +1000,18 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  const providerApplicationAction = event.target.closest('[data-provider-application-action]');
+  if (providerApplicationAction) {
+    if (providerApplicationAction.dataset.providerApplicationAction === 'edit'
+        && !state.providerApplication.submitting && providerApplicationIsEligible()) {
+      state.providerApplication.confirming = false;
+      state.providerApplication.message = '';
+      state.providerApplication.validatedValues = null;
+      render();
+    }
+    return;
+  }
+
   const cancellationAction = event.target.closest('[data-cancel-draft-action]');
   if (cancellationAction) {
     const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
@@ -877,6 +1070,18 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const providerApplicationConfirmation = event.target.closest('[data-provider-application-confirm-form]');
+  if (providerApplicationConfirmation) {
+    event.preventDefault();
+    await submitProviderApplicationConfirmation();
+    return;
+  }
+  const providerApplicationForm = event.target.closest('[data-provider-application-form]');
+  if (providerApplicationForm) {
+    event.preventDefault();
+    reviewProviderApplication(providerApplicationForm);
+    return;
+  }
   const publicationForm = event.target.closest('[data-publish-draft-form]');
   if (publicationForm) {
     event.preventDefault();
