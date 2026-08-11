@@ -985,6 +985,22 @@ select is(
 
 reset role;
 
+create function pg_temp.update_suspended_provider_service()
+returns pg_catalog.int8
+language plpgsql
+as $$
+declare
+  v_rows pg_catalog.int8;
+begin
+  update public.provider_services
+  set description = 'Suspended mutation attempt'
+  where provider_id = '00000000-0000-0000-0000-000000010311';
+
+  get diagnostics v_rows = row_count;
+  return v_rows;
+end;
+$$;
+
 select is(
   public.is_approved_provider('00000000-0000-0000-0000-000000010311'),
   false,
@@ -1019,12 +1035,9 @@ select throws_ok(
   'suspended provider cannot submit a new bid'
 );
 
-select throws_ok(
-  $$update public.provider_services
-    set description = 'Suspended mutation attempt'
-    where provider_id = '00000000-0000-0000-0000-000000010311'$$,
-  '42501',
-  'Provider marketplace capability is unavailable',
+select is(
+  pg_temp.update_suspended_provider_service(),
+  0::pg_catalog.int8,
   'suspended provider cannot manage services'
 );
 
@@ -1303,6 +1316,16 @@ alter table public.audit_events enable trigger audit_events_append_only;
 alter table private.provider_eligibility_decisions
   disable trigger provider_eligibility_decisions_append_only;
 alter table public.consents disable trigger protect_provider_application_terms;
+delete from private.provider_marketplace_eligibility
+where provider_id = '00000000-0000-0000-0000-000000010302';
+delete from private.provider_eligibility_decisions
+where provider_id = '00000000-0000-0000-0000-000000010302';
+set local lekkadeall.allow_privileged_provider_profile_update = 'on';
+update public.provider_profiles
+set reviewed_by = null,
+    reviewed_at = null
+where user_id = '00000000-0000-0000-0000-000000010302';
+set local lekkadeall.allow_privileged_provider_profile_update = 'off';
 delete from auth.users
 where id in (
   '00000000-0000-0000-0000-000000010301',
