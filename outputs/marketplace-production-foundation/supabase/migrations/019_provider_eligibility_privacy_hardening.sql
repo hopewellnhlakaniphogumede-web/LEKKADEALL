@@ -389,19 +389,16 @@ begin
   end if;
 
   begin
-    v_claims := case
-      when pg_catalog.current_setting('request.jwt.claims', true) = '' then null
-      else pg_catalog.current_setting('request.jwt.claims', true)::pg_catalog.jsonb
-    end;
+    v_claims := pg_catalog.current_setting(
+      'request.jwt.claims',
+      true
+    )::pg_catalog.jsonb;
   exception
     when others then
       v_claims := null;
   end;
 
-  if case
-       when v_claims ->> 'aal' is null then ''
-       else v_claims ->> 'aal'
-     end <> 'aal2' then
+  if (v_claims ->> 'aal') is distinct from 'aal2' then
     raise exception 'Provider marketplace review is unavailable'
       using errcode = '42501';
   end if;
