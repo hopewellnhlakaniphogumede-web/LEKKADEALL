@@ -353,6 +353,8 @@ insert into public.service_requests (
 alter table public.service_requests enable trigger prevent_service_request_precise_address_write;
 
 alter table public.service_requests disable trigger enforce_service_request_public_fields;
+alter table public.service_requests
+  disable trigger prevent_public_request_description_exact_address_material;
 insert into public.service_requests (
   id, customer_id, category_id, title, description, suburb, city,
   requested_start, budget_minor, status, closes_at, published_at
@@ -365,6 +367,8 @@ insert into public.service_requests (
   'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 27000,
   'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '2 hours'
 );
+alter table public.service_requests
+  enable trigger prevent_public_request_description_exact_address_material;
 alter table public.service_requests enable trigger enforce_service_request_public_fields;
 
 set local lekkadeall.allow_marketplace_state_transition = 'off';
