@@ -751,6 +751,12 @@ alter table private.provider_eligibility_decisions disable trigger provider_elig
 alter table public.consents disable trigger protect_provider_application_terms;
 delete from private.provider_marketplace_eligibility where provider_id = '00000000-0000-0000-0000-000000010402';
 delete from private.provider_eligibility_decisions where provider_id = '00000000-0000-0000-0000-000000010402';
+set local lekkadeall.allow_privileged_provider_profile_update = 'on';
+update public.provider_profiles
+set reviewed_by = null,
+    reviewed_at = null
+where user_id = '00000000-0000-0000-0000-000000010402';
+set local lekkadeall.allow_privileged_provider_profile_update = 'off';
 delete from auth.users where id in (
   '00000000-0000-0000-0000-000000010401',
   '00000000-0000-0000-0000-000000010402',
