@@ -95,7 +95,7 @@ begin;
 create extension if not exists dblink with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(76);
+select plan(91);
 
 select is(
   extensions.dblink_connect(
@@ -283,7 +283,10 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-0000-0000-000000010312', 'ticket10b-provider-b@lekkadeall.test', '{}'),
   ('00000000-0000-0000-0000-000000010313', 'ticket10b-restricted@lekkadeall.test', '{}'),
   ('00000000-0000-0000-0000-000000010314', 'ticket10b-missing-app@lekkadeall.test', '{}'),
-  ('00000000-0000-0000-0000-000000010315', 'ticket10b-inactive-admin@lekkadeall.test', '{}');
+  ('00000000-0000-0000-0000-000000010315', 'ticket10b-inactive-admin@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010316', 'ticket10b-legacy-approved@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010317', 'ticket10b-legacy-rejected@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010318', 'ticket10b-legacy-suspended@lekkadeall.test', '{}');
 
 set local lekkadeall.allow_privileged_profile_update = 'on';
 
@@ -304,7 +307,10 @@ where id in (
   '00000000-0000-0000-0000-000000010312',
   '00000000-0000-0000-0000-000000010313',
   '00000000-0000-0000-0000-000000010314',
-  '00000000-0000-0000-0000-000000010315'
+  '00000000-0000-0000-0000-000000010315',
+  '00000000-0000-0000-0000-000000010316',
+  '00000000-0000-0000-0000-000000010317',
+  '00000000-0000-0000-0000-000000010318'
 );
 
 set local lekkadeall.allow_privileged_profile_update = 'off';
@@ -315,14 +321,20 @@ insert into public.provider_profiles (
   ('00000000-0000-0000-0000-000000010311', 'Ticket 10B Provider A', 20, 'not_started', 'pending'),
   ('00000000-0000-0000-0000-000000010312', 'Ticket 10B Provider B', 20, 'manual_review', 'pending'),
   ('00000000-0000-0000-0000-000000010313', 'Ticket 10B Restricted', 20, 'not_started', 'pending'),
-  ('00000000-0000-0000-0000-000000010314', 'Ticket 10B Missing App', 20, 'not_started', 'pending');
+  ('00000000-0000-0000-0000-000000010314', 'Ticket 10B Missing App', 20, 'not_started', 'pending'),
+  ('00000000-0000-0000-0000-000000010316', 'Ticket 10B Legacy Approved', 20, 'not_started', 'approved'),
+  ('00000000-0000-0000-0000-000000010317', 'Ticket 10B Legacy Rejected', 20, 'not_started', 'rejected'),
+  ('00000000-0000-0000-0000-000000010318', 'Ticket 10B Legacy Suspended', 20, 'not_started', 'suspended');
 
 insert into public.provider_services (
   provider_id, category_id, description, base_price_minor, active
 ) values
   ('00000000-0000-0000-0000-000000010311', '00000000-0000-0000-0000-000000000100', null, null, false),
   ('00000000-0000-0000-0000-000000010312', '00000000-0000-0000-0000-000000000100', null, null, false),
-  ('00000000-0000-0000-0000-000000010313', '00000000-0000-0000-0000-000000000100', null, null, false);
+  ('00000000-0000-0000-0000-000000010313', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010316', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010317', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010318', '00000000-0000-0000-0000-000000000100', null, null, false);
 
 insert into public.consents (
   user_id, purpose, policy_version, granted, source, withdrawn_at
@@ -337,7 +349,9 @@ select
 from (values
   ('00000000-0000-0000-0000-000000010311'::uuid),
   ('00000000-0000-0000-0000-000000010312'::uuid),
-  ('00000000-0000-0000-0000-000000010313'::uuid)
+  ('00000000-0000-0000-0000-000000010313'::uuid),
+  ('00000000-0000-0000-0000-000000010317'::uuid),
+  ('00000000-0000-0000-0000-000000010318'::uuid)
 ) as applicant(actor_id);
 
 insert into public.audit_events (
@@ -353,8 +367,19 @@ select
 from (values
   ('00000000-0000-0000-0000-000000010311'::uuid),
   ('00000000-0000-0000-0000-000000010312'::uuid),
-  ('00000000-0000-0000-0000-000000010313'::uuid)
+  ('00000000-0000-0000-0000-000000010313'::uuid),
+  ('00000000-0000-0000-0000-000000010317'::uuid),
+  ('00000000-0000-0000-0000-000000010318'::uuid)
 ) as applicant(actor_id);
+
+update private.provider_marketplace_eligibility as eligibility
+set status = private.map_legacy_provider_review_status(pp.review_status)
+from public.provider_profiles as pp
+where pp.user_id = eligibility.provider_id
+  and pp.user_id in (
+    '00000000-0000-0000-0000-000000010317',
+    '00000000-0000-0000-0000-000000010318'
+  );
 
 select has_function(
   'public',
@@ -531,6 +556,60 @@ select ok(
 );
 
 select is(
+  private.map_legacy_provider_review_status('pending'),
+  'pending',
+  'legacy pending review backfills as protected pending'
+);
+
+select is(
+  private.map_legacy_provider_review_status('approved'),
+  'approved',
+  'legacy approved review backfills as protected approved without invented evidence'
+);
+
+select is(
+  private.map_legacy_provider_review_status('rejected'),
+  'rejected',
+  'legacy rejected review backfills as protected rejected'
+);
+
+select is(
+  private.map_legacy_provider_review_status('suspended'),
+  'suspended',
+  'legacy suspended review backfills as protected suspended'
+);
+
+select is(
+  private.map_legacy_provider_review_status('unknown'),
+  'pending',
+  'unknown legacy review state maps to fail-closed pending'
+);
+
+select is(
+  (
+    select pg_catalog.string_agg(
+      pp.review_status || ':' || eligibility.status,
+      ',' order by pp.user_id
+    )
+    from public.provider_profiles as pp
+    join private.provider_marketplace_eligibility as eligibility
+      on eligibility.provider_id = pp.user_id
+    where pp.user_id in (
+      '00000000-0000-0000-0000-000000010317',
+      '00000000-0000-0000-0000-000000010318'
+    )
+  ),
+  'rejected:rejected,suspended:suspended',
+  'legacy rejected and suspended fixtures preserve coarse authority in protected state'
+);
+
+select is(
+  public.is_approved_provider('00000000-0000-0000-0000-000000010316'),
+  false,
+  'legacy approved provider without protected basis and decision evidence remains ineligible'
+);
+
+select is(
   (
     select status
     from private.provider_marketplace_eligibility
@@ -629,6 +708,106 @@ reset role;
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000099","role":"authenticated","aal":"aal2"}';
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010316',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010370'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'inconsistent coarse approved and protected pending state fails closed'
+);
+
+reset role;
+
+update private.provider_marketplace_eligibility
+set status = 'approved'
+where provider_id = '00000000-0000-0000-0000-000000010316';
+
+select is(
+  public.is_approved_provider('00000000-0000-0000-0000-000000010316'),
+  false,
+  'legacy approved state without a truthful basis remains fail closed'
+);
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000099","role":"authenticated","aal":"aal2"}';
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010317',
+    'approve_manual_pilot',
+    'rejected',
+    '00000000-0000-0000-0000-000000010371'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'legacy rejected provider cannot approve directly'
+);
+
+select is(
+  public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010317',
+    'reopen',
+    'rejected',
+    '00000000-0000-0000-0000-000000010372'
+  ),
+  'pending',
+  'legacy rejected provider requires explicit reopen'
+);
+
+select is(
+  public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010317',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010373'
+  ),
+  'approved',
+  'reopened legacy rejected provider can receive a fresh reviewed decision'
+);
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010318',
+    'approve_manual_pilot',
+    'suspended',
+    '00000000-0000-0000-0000-000000010374'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'legacy suspended provider cannot approve directly'
+);
+
+select is(
+  public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010318',
+    'reinstate_manual_pilot',
+    'suspended',
+    '00000000-0000-0000-0000-000000010375'
+  ),
+  'approved',
+  'legacy suspended provider requires explicit reinstate'
+);
+
+select ok(
+  (
+    select eligibility.status = 'approved'
+       and eligibility.basis = 'manual_pilot'
+       and eligibility.expires_at > pg_catalog.statement_timestamp()
+       and eligibility.current_decision_id is not null
+       and pp.review_status = 'approved'
+    from private.provider_marketplace_eligibility as eligibility
+    join public.provider_profiles as pp
+      on pp.user_id = eligibility.provider_id
+    where eligibility.provider_id = '00000000-0000-0000-0000-000000010318'
+  ),
+  'legacy suspension reinstate creates fresh basis decision expiry and matching coarse state'
+);
 
 select throws_ok(
   $$select public.admin_transition_provider_marketplace_review(

@@ -19,7 +19,16 @@ create table private.provider_marketplace_eligibility (
   check (
     (status in ('pending', 'rejected') and basis is null and expires_at is null)
     or
-    (status in ('approved', 'suspended', 'expired') and basis is not null and expires_at is not null)
+    (
+      status in ('approved', 'suspended')
+      and (
+        (basis is null and expires_at is null)
+        or
+        (basis is not null and expires_at is not null)
+      )
+    )
+    or
+    (status = 'expired' and basis is not null and expires_at is not null)
   ),
   check (
     (current_decision_id is null and reviewer_id is null and reason_code is null)
@@ -137,9 +146,30 @@ for each row execute function private.initialize_provider_marketplace_eligibilit
 revoke all on function private.initialize_provider_marketplace_eligibility()
   from public, anon, authenticated, service_role;
 
--- Existing rows are deliberately reintroduced as pending. No historical
--- review or verification value is silently converted into Ticket 10B
--- marketplace eligibility.
+create or replace function private.map_legacy_provider_review_status(
+  p_review_status pg_catalog.text
+)
+returns pg_catalog.text
+language sql
+immutable
+set search_path = pg_catalog
+as $$
+  select case p_review_status
+    when 'pending' then 'pending'
+    when 'approved' then 'approved'
+    when 'rejected' then 'rejected'
+    when 'suspended' then 'suspended'
+    else 'pending'
+  end
+$$;
+
+revoke all on function private.map_legacy_provider_review_status(pg_catalog.text)
+  from public, anon, authenticated, service_role;
+
+-- Preserve the existing coarse review authority without inventing a trusted
+-- eligibility basis, reviewer, decision or expiry. Legacy approved and
+-- suspended rows therefore remain fail-closed until an explicit reviewed
+-- transition creates current Ticket 10B decision evidence.
 insert into private.provider_marketplace_eligibility (
   provider_id,
   status,
@@ -154,7 +184,7 @@ insert into private.provider_marketplace_eligibility (
 )
 select
   pp.user_id,
-  'pending',
+  private.map_legacy_provider_review_status(pp.review_status),
   null,
   'provider-eligibility-v1',
   null,
@@ -478,7 +508,11 @@ begin
   where eligibility.provider_id = p_provider_id
   for update;
 
-  if not found or v_policy_version <> 'provider-eligibility-v1' then
+  if not found
+     or v_policy_version <> 'provider-eligibility-v1'
+     or v_provider_review_status not in (
+       'pending', 'approved', 'rejected', 'suspended', 'expired'
+     ) then
     raise exception 'Provider marketplace review is unavailable'
       using errcode = '42501';
   end if;
@@ -489,6 +523,11 @@ begin
       then 'expired'
     else v_status
   end;
+
+  if v_provider_review_status <> v_status then
+    raise exception 'Provider marketplace review is unavailable'
+      using errcode = '42501';
+  end if;
 
   v_intent_fingerprint := pg_catalog.md5(
     p_provider_id::pg_catalog.text || '|' ||
