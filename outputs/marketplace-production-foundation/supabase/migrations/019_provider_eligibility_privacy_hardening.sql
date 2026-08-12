@@ -395,6 +395,7 @@ declare
   v_target_role public.user_role;
   v_target_account_status pg_catalog.text;
   v_provider_review_status pg_catalog.text;
+  v_provider_verification_status public.verification_status;
   v_status pg_catalog.text;
   v_effective_status pg_catalog.text;
   v_basis pg_catalog.text;
@@ -481,8 +482,8 @@ begin
       using errcode = '42501';
   end if;
 
-  select pp.review_status
-    into v_provider_review_status
+  select pp.review_status, pp.verification_status
+    into v_provider_review_status, v_provider_verification_status
   from public.provider_profiles as pp
   where pp.user_id = p_provider_id
   for update;
@@ -536,6 +537,7 @@ begin
   );
 
   select
+    decision.id,
     decision.provider_id,
     decision.action,
     decision.previous_status,
@@ -550,8 +552,31 @@ begin
     if v_replay.provider_id = p_provider_id
        and v_replay.action = p_action
        and v_replay.previous_status = p_expected_status
-       and v_replay.intent_fingerprint = v_intent_fingerprint then
+       and v_replay.intent_fingerprint = v_intent_fingerprint
+       and v_replay.id = v_current_decision_id
+       and v_replay.new_status = v_effective_status
+       and (
+         v_replay.new_status <> 'approved'
+         or (
+           v_target_account_status = 'active'
+           and v_provider_verification_status not in (
+             'rejected'::public.verification_status,
+             'expired'::public.verification_status
+           )
+           and v_basis = 'manual_pilot'
+           and v_policy_version = 'provider-eligibility-v1'
+           and v_expires_at > v_decided_at
+         )
+       ) then
       return v_replay.new_status;
+    end if;
+
+    if v_replay.provider_id = p_provider_id
+       and v_replay.action = p_action
+       and v_replay.previous_status = p_expected_status
+       and v_replay.intent_fingerprint = v_intent_fingerprint then
+      raise exception 'Provider marketplace review is unavailable'
+        using errcode = '40001';
     end if;
 
     raise exception 'Provider marketplace review is unavailable'
@@ -599,6 +624,19 @@ begin
        'renew_manual_pilot'
      )
      and v_target_account_status <> 'active' then
+    raise exception 'Provider marketplace review is unavailable'
+      using errcode = '42501';
+  end if;
+
+  if p_action in (
+       'approve_manual_pilot',
+       'reinstate_manual_pilot',
+       'renew_manual_pilot'
+     )
+     and v_provider_verification_status in (
+       'rejected'::public.verification_status,
+       'expired'::public.verification_status
+     ) then
     raise exception 'Provider marketplace review is unavailable'
       using errcode = '42501';
   end if;
@@ -975,7 +1013,7 @@ create or replace function private.payout_release_blockers(
 )
 returns pg_catalog.text[]
 language plpgsql
-stable
+volatile
 security definer
 set search_path = pg_catalog
 as $$
@@ -1026,9 +1064,18 @@ begin
       v_blockers := pg_catalog.array_append(v_blockers, 'booking_not_completed');
     end if;
 
-    if not private.is_provider_marketplace_eligible(v_provider_id) then
-      v_blockers := pg_catalog.array_append(v_blockers, 'provider_not_eligible');
-    end if;
+    -- Payout transitions lock payment first, then use the same profile,
+    -- provider-profile and protected-eligibility order as review transitions.
+    -- Review transitions never lock booking/payment rows, so this order has no
+    -- reverse edge. A successful requirement check retains all three shared
+    -- locks until the payout transaction commits and prevents stale release
+    -- authority from surviving a concurrent suspension.
+    begin
+      perform private.require_provider_marketplace_eligibility(v_provider_id);
+    exception
+      when sqlstate '42501' then
+        v_blockers := pg_catalog.array_append(v_blockers, 'provider_not_eligible');
+    end;
   end if;
 
   if v_payment_status not in ('paid', 'partially_refunded') then

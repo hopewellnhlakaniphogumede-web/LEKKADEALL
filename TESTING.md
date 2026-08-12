@@ -544,3 +544,42 @@ Local verification on 2026-08-11:
 - The browser performs no `provider_profiles`, `provider_services`, or `consents` DML. It calls the trusted RPC once per confirmed submission and requires fresh authenticated profile and provider-status reads before showing the fixed pending/unverified result.
 - The existing Ticket 9A network policy allowlists the new RPC only with `p_business_name`, `p_category_ids`, `p_service_radius_km`, and `p_terms_version`; blocked-feature navigation requires zero application calls. No new Playwright scenario was added in Phase 2.
 - Docker and Supabase CLI remain unavailable locally, so no new real-stack Playwright result is claimed. Phase 2 adds no E2E scenario; existing Ticket 9A-9 real-stack regression remains the GitHub Actions gate.
+## Ticket 10B second corrective database gate
+
+Run the focused provider-eligibility suite after a clean local reset:
+
+```powershell
+cd outputs/marketplace-production-foundation
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/provider_eligibility_privacy_hardening.test.sql
+supabase test db supabase/tests/database/baseline_rls.test.sql
+supabase test db supabase/tests/database/payout_release_controls.test.sql
+supabase stop --no-backup
+```
+
+The focused Ticket 10B suite rejects a historically matching idempotency key
+unless that decision is still the current authoritative decision and its
+effective status remains current. It covers approval replay after suspension,
+expiry, renewal, and an equivalent later approval decision. Approval also
+fails closed for closed providers and for identity status `rejected` or
+`expired`.
+
+The suite includes a genuine two-session suspension-versus-final-payout test.
+The release path holds the payment-row lock and then acquires shared profile,
+provider-profile, and protected-eligibility locks before accepting eligibility.
+It recomputes blockers after a concurrent suspension commits, so no stale
+release event or released payment state is accepted. Review transitions never
+lock booking or payment rows, avoiding a reverse lock edge.
+
+The baseline identity-row helper treats only PostgreSQL
+`insufficient_privilege` as the expected denial; unrelated exceptions abort
+the test instead of being mistaken for a passing RLS result.
+
+Local verification on 2026-08-12:
+
+- Static SQL boundary, assertion-count, credential/privacy, prohibited-scope,
+  and `git diff --check` checks were run for this correction.
+- Docker and the Supabase CLI are unavailable on this host. No local migration
+  reset, pgTAP, or two-session runtime pass is claimed; exact-head GitHub
+  Actions remains authoritative.

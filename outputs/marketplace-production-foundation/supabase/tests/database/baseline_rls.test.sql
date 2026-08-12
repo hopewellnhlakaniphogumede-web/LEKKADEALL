@@ -444,7 +444,8 @@ begin
   from public.identity_verifications;
   return true;
 exception
-  when others then return false;
+  when insufficient_privilege then return false;
+  when others then raise;
 end;
 $$;
 

@@ -5,7 +5,8 @@ begin;
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-0000-0000-000000010301', 'ticket10b-concurrent-admin@lekkadeall.test', '{}'::jsonb),
-  ('00000000-0000-0000-0000-000000010302', 'ticket10b-concurrent-provider@lekkadeall.test', '{}'::jsonb);
+  ('00000000-0000-0000-0000-000000010302', 'ticket10b-concurrent-provider@lekkadeall.test', '{}'::jsonb),
+  ('00000000-0000-0000-0000-000000010303', 'ticket10b-concurrent-customer@lekkadeall.test', '{}'::jsonb);
 
 set local lekkadeall.allow_privileged_profile_update = 'on';
 
@@ -70,6 +71,59 @@ insert into public.audit_events (
   '{}'::jsonb
 );
 
+set local lekkadeall.allow_marketplace_state_transition = 'on';
+
+insert into public.service_requests (
+  id, customer_id, category_id, title, description, suburb, city,
+  requested_start, budget_minor, status, closes_at
+) values (
+  '00000000-0000-0000-0000-000000010391',
+  '00000000-0000-0000-0000-000000010303',
+  '00000000-0000-0000-0000-000000010390',
+  'Ticket 10B concurrent payout',
+  'Safe request for the provider suspension and payout serialization test.',
+  'Die Bult', 'Potchefstroom', now() + interval '4 days', 15000,
+  'awarded', now() + interval '2 days'
+);
+
+insert into public.bids (
+  id, request_id, provider_id, amount_minor, proposed_start, status, expires_at
+) values (
+  '00000000-0000-0000-0000-000000010392',
+  '00000000-0000-0000-0000-000000010391',
+  '00000000-0000-0000-0000-000000010302',
+  15000, now() + interval '4 days', 'accepted', now() + interval '2 days'
+);
+
+insert into public.bookings (
+  id, public_reference, request_id, bid_id, customer_id, provider_id,
+  service_amount_minor, platform_fee_minor, scheduled_start, status,
+  completion_confirmed_at
+) values (
+  '00000000-0000-0000-0000-000000010393', 'TICKET-10B-CONCURRENT-PAYOUT',
+  '00000000-0000-0000-0000-000000010391',
+  '00000000-0000-0000-0000-000000010392',
+  '00000000-0000-0000-0000-000000010303',
+  '00000000-0000-0000-0000-000000010302',
+  15000, 0, now() + interval '4 days', 'completed', now()
+);
+
+set local lekkadeall.allow_marketplace_state_transition = 'off';
+set local lekkadeall.allow_trusted_payment_update = 'on';
+
+insert into public.payments (
+  id, booking_id, provider_name, status, amount_minor, payment_method,
+  release_paused, funded_at, paid_at, refunded_minor, release_status,
+  release_eligible_at
+) values (
+  '00000000-0000-0000-0000-000000010394',
+  '00000000-0000-0000-0000-000000010393',
+  'mock', 'paid', 15000, 'sandbox_online', false, now(), now(), 0,
+  'eligible', now()
+);
+
+set local lekkadeall.allow_trusted_payment_update = 'off';
+
 do $$
 declare
   v_password text := pg_catalog.replace(pg_catalog.gen_random_uuid()::pg_catalog.text, '-', '');
@@ -95,7 +149,7 @@ begin;
 create extension if not exists dblink with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(91);
+select plan(107);
 
 select is(
   extensions.dblink_connect(
@@ -243,18 +297,6 @@ select is(
 );
 
 select is(
-  extensions.dblink_disconnect('ticket10b_a'),
-  'OK',
-  'first eligibility-review session disconnects'
-);
-
-select is(
-  extensions.dblink_disconnect('ticket10b_b'),
-  'OK',
-  'second eligibility-review session disconnects'
-);
-
-select is(
   (
     select count(*)
     from private.provider_eligibility_decisions
@@ -275,6 +317,120 @@ select is(
   'concurrent decisions create exactly one audit event'
 );
 
+-- The suspension transaction holds the authoritative provider/profile/
+-- eligibility locks. Final payout release takes the payment lock, then waits
+-- on those authority locks and must recompute eligibility after suspension.
+update ticket10b_concurrency_results
+set result_status = null,
+    error_message = null;
+
+select is(
+  extensions.dblink_exec('ticket10b_a', 'begin'),
+  'BEGIN',
+  'suspension session begins an explicit transaction'
+);
+
+select is(
+  extensions.dblink_send_query(
+    'ticket10b_a',
+    $query$
+      select public.admin_transition_provider_marketplace_review(
+        '00000000-0000-0000-0000-000000010302',
+        'suspend',
+        'approved',
+        '00000000-0000-0000-0000-000000010383'
+      )
+    $query$
+  ),
+  1,
+  'provider suspension starts in the first session'
+);
+
+update ticket10b_concurrency_results as result
+set result_status = remote.result_status
+from extensions.dblink_get_result('ticket10b_a', false) as remote(result_status text)
+where result.connection_name = 'a';
+
+select is(
+  (select result_status from ticket10b_concurrency_results where connection_name = 'a'),
+  'suspended',
+  'suspension reaches its guarded result while retaining transaction locks'
+);
+
+select is(
+  extensions.dblink_send_query(
+    'ticket10b_b',
+    $query$
+      select public.admin_record_payout_release(
+        '00000000-0000-0000-0000-000000010394',
+        'ticket10b-concurrent-release',
+        15000,
+        'Ticket 10B concurrent suspension boundary.',
+        'ticket10b-concurrent-release'
+      )
+    $query$
+  ),
+  1,
+  'final payout release starts concurrently with uncommitted suspension'
+);
+
+select is(
+  extensions.dblink_exec('ticket10b_a', 'commit'),
+  'COMMIT',
+  'suspension commits before the waiting payout eligibility check resumes'
+);
+
+update ticket10b_concurrency_results as result
+set result_status = remote.result_status
+from extensions.dblink_get_result('ticket10b_b', false) as remote(result_status uuid)
+where result.connection_name = 'b';
+
+update ticket10b_concurrency_results
+set error_message = extensions.dblink_error_message('ticket10b_b')
+where connection_name = 'b';
+
+select is(
+  (
+    select pg_catalog.split_part(error_message, E'\n', 1)
+    from ticket10b_concurrency_results
+    where connection_name = 'b'
+  ),
+  'ERROR:  Payment cannot be released because blockers remain: provider_not_eligible',
+  'payout recomputes under the authority lock and fails closed after suspension'
+);
+
+select is(
+  (
+    select release_status
+    from public.payments
+    where id = '00000000-0000-0000-0000-000000010394'
+  ),
+  'eligible',
+  'concurrent suspension prevents a stale final payout transition'
+);
+
+select is(
+  (
+    select count(*)
+    from public.payment_events
+    where idempotency_key = 'ticket10b-concurrent-release'
+  ),
+  0::bigint,
+  'blocked concurrent payout creates no release event'
+);
+
+select is(
+  extensions.dblink_disconnect('ticket10b_a'),
+  'OK',
+  'first eligibility-review session disconnects'
+);
+
+select is(
+  extensions.dblink_disconnect('ticket10b_b'),
+  'OK',
+  'second eligibility-review session disconnects'
+);
+
 -- Transactional fixtures for authority, transition, privacy and capability tests.
 \ir rls_test_seed.inc
 
@@ -286,7 +442,10 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-0000-0000-000000010315', 'ticket10b-inactive-admin@lekkadeall.test', '{}'),
   ('00000000-0000-0000-0000-000000010316', 'ticket10b-legacy-approved@lekkadeall.test', '{}'),
   ('00000000-0000-0000-0000-000000010317', 'ticket10b-legacy-rejected@lekkadeall.test', '{}'),
-  ('00000000-0000-0000-0000-000000010318', 'ticket10b-legacy-suspended@lekkadeall.test', '{}');
+  ('00000000-0000-0000-0000-000000010318', 'ticket10b-legacy-suspended@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010319', 'ticket10b-closed@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010320', 'ticket10b-identity-rejected@lekkadeall.test', '{}'),
+  ('00000000-0000-0000-0000-000000010321', 'ticket10b-identity-expired@lekkadeall.test', '{}');
 
 set local lekkadeall.allow_privileged_profile_update = 'on';
 
@@ -300,6 +459,7 @@ set role = case
         '00000000-0000-0000-0000-000000010313',
         '00000000-0000-0000-0000-000000010315'
       ) then 'restricted'
+      when id = '00000000-0000-0000-0000-000000010319' then 'closed'
       else 'active'
     end
 where id in (
@@ -310,7 +470,10 @@ where id in (
   '00000000-0000-0000-0000-000000010315',
   '00000000-0000-0000-0000-000000010316',
   '00000000-0000-0000-0000-000000010317',
-  '00000000-0000-0000-0000-000000010318'
+  '00000000-0000-0000-0000-000000010318',
+  '00000000-0000-0000-0000-000000010319',
+  '00000000-0000-0000-0000-000000010320',
+  '00000000-0000-0000-0000-000000010321'
 );
 
 set local lekkadeall.allow_privileged_profile_update = 'off';
@@ -324,7 +487,10 @@ insert into public.provider_profiles (
   ('00000000-0000-0000-0000-000000010314', 'Ticket 10B Missing App', 20, 'not_started', 'pending'),
   ('00000000-0000-0000-0000-000000010316', 'Ticket 10B Legacy Approved', 20, 'not_started', 'approved'),
   ('00000000-0000-0000-0000-000000010317', 'Ticket 10B Legacy Rejected', 20, 'not_started', 'rejected'),
-  ('00000000-0000-0000-0000-000000010318', 'Ticket 10B Legacy Suspended', 20, 'not_started', 'suspended');
+  ('00000000-0000-0000-0000-000000010318', 'Ticket 10B Legacy Suspended', 20, 'not_started', 'suspended'),
+  ('00000000-0000-0000-0000-000000010319', 'Ticket 10B Closed', 20, 'not_started', 'pending'),
+  ('00000000-0000-0000-0000-000000010320', 'Ticket 10B Identity Rejected', 20, 'rejected', 'pending'),
+  ('00000000-0000-0000-0000-000000010321', 'Ticket 10B Identity Expired', 20, 'expired', 'pending');
 
 insert into public.provider_services (
   provider_id, category_id, description, base_price_minor, active
@@ -334,7 +500,10 @@ insert into public.provider_services (
   ('00000000-0000-0000-0000-000000010313', '00000000-0000-0000-0000-000000000100', null, null, false),
   ('00000000-0000-0000-0000-000000010316', '00000000-0000-0000-0000-000000000100', null, null, false),
   ('00000000-0000-0000-0000-000000010317', '00000000-0000-0000-0000-000000000100', null, null, false),
-  ('00000000-0000-0000-0000-000000010318', '00000000-0000-0000-0000-000000000100', null, null, false);
+  ('00000000-0000-0000-0000-000000010318', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010319', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010320', '00000000-0000-0000-0000-000000000100', null, null, false),
+  ('00000000-0000-0000-0000-000000010321', '00000000-0000-0000-0000-000000000100', null, null, false);
 
 insert into public.consents (
   user_id, purpose, policy_version, granted, source, withdrawn_at
@@ -351,7 +520,10 @@ from (values
   ('00000000-0000-0000-0000-000000010312'::uuid),
   ('00000000-0000-0000-0000-000000010313'::uuid),
   ('00000000-0000-0000-0000-000000010317'::uuid),
-  ('00000000-0000-0000-0000-000000010318'::uuid)
+  ('00000000-0000-0000-0000-000000010318'::uuid),
+  ('00000000-0000-0000-0000-000000010319'::uuid),
+  ('00000000-0000-0000-0000-000000010320'::uuid),
+  ('00000000-0000-0000-0000-000000010321'::uuid)
 ) as applicant(actor_id);
 
 insert into public.audit_events (
@@ -369,7 +541,10 @@ from (values
   ('00000000-0000-0000-0000-000000010312'::uuid),
   ('00000000-0000-0000-0000-000000010313'::uuid),
   ('00000000-0000-0000-0000-000000010317'::uuid),
-  ('00000000-0000-0000-0000-000000010318'::uuid)
+  ('00000000-0000-0000-0000-000000010318'::uuid),
+  ('00000000-0000-0000-0000-000000010319'::uuid),
+  ('00000000-0000-0000-0000-000000010320'::uuid),
+  ('00000000-0000-0000-0000-000000010321'::uuid)
 ) as applicant(actor_id);
 
 update private.provider_marketplace_eligibility as eligibility
@@ -887,6 +1062,42 @@ select throws_ok(
   'restricted provider cannot receive manual-pilot eligibility'
 );
 
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010319',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010376'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'closed provider cannot receive manual-pilot eligibility'
+);
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010320',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010377'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'identity-rejected provider cannot receive manual-pilot eligibility'
+);
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010321',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010378'
+  )$$,
+  '42501',
+  'Provider marketplace review is unavailable',
+  'identity-expired provider cannot receive manual-pilot eligibility'
+);
+
 select is(
   public.admin_transition_provider_marketplace_review(
     '00000000-0000-0000-0000-000000010311',
@@ -1168,6 +1379,18 @@ select is(
   'active approval can be suspended'
 );
 
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010311',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010360'
+  )$$,
+  '40001',
+  'Provider marketplace review is unavailable',
+  'old approval replay after suspension fails as stale'
+);
+
 reset role;
 
 create function pg_temp.update_suspended_provider_service()
@@ -1311,6 +1534,18 @@ select is(
   'approved provider can be explicitly expired'
 );
 
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010311',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010360'
+  )$$,
+  '40001',
+  'Provider marketplace review is unavailable',
+  'old approval replay after expiry fails as stale'
+);
+
 reset role;
 
 select is(
@@ -1332,6 +1567,45 @@ select is(
   ),
   'approved',
   'expired approval requires a fresh renewal decision'
+);
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010311',
+    'approve_manual_pilot',
+    'pending',
+    '00000000-0000-0000-0000-000000010360'
+  )$$,
+  '40001',
+  'Provider marketplace review is unavailable',
+  'old approval replay after expiry and renewal fails as stale'
+);
+
+update private.provider_marketplace_eligibility
+set expires_at = pg_catalog.statement_timestamp() - interval '1 second'
+where provider_id = '00000000-0000-0000-0000-000000010318';
+
+select is(
+  public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010318',
+    'renew_manual_pilot',
+    'expired',
+    '00000000-0000-0000-0000-000000010380'
+  ),
+  'approved',
+  'equivalent later approval is recorded as a new authoritative decision'
+);
+
+select throws_ok(
+  $$select public.admin_transition_provider_marketplace_review(
+    '00000000-0000-0000-0000-000000010318',
+    'reinstate_manual_pilot',
+    'suspended',
+    '00000000-0000-0000-0000-000000010375'
+  )$$,
+  '40001',
+  'Provider marketplace review is unavailable',
+  'equivalent later approval decision makes the earlier replay stale'
 );
 
 select is(
@@ -1498,6 +1772,19 @@ where actor_id in (
 or metadata ->> 'provider_id' = '00000000-0000-0000-0000-000000010302';
 alter table public.audit_events enable trigger audit_events_append_only;
 
+set local lekkadeall.allow_trusted_payment_update = 'on';
+delete from public.payments
+where id = '00000000-0000-0000-0000-000000010394';
+set local lekkadeall.allow_trusted_payment_update = 'off';
+set local lekkadeall.allow_marketplace_state_transition = 'on';
+delete from public.bookings
+where id = '00000000-0000-0000-0000-000000010393';
+delete from public.bids
+where id = '00000000-0000-0000-0000-000000010392';
+delete from public.service_requests
+where id = '00000000-0000-0000-0000-000000010391';
+set local lekkadeall.allow_marketplace_state_transition = 'off';
+
 alter table private.provider_eligibility_decisions
   disable trigger provider_eligibility_decisions_append_only;
 alter table public.consents disable trigger protect_provider_application_terms;
@@ -1514,7 +1801,8 @@ set local lekkadeall.allow_privileged_provider_profile_update = 'off';
 delete from auth.users
 where id in (
   '00000000-0000-0000-0000-000000010301',
-  '00000000-0000-0000-0000-000000010302'
+  '00000000-0000-0000-0000-000000010302',
+  '00000000-0000-0000-0000-000000010303'
 );
 alter table public.consents enable trigger protect_provider_application_terms;
 alter table private.provider_eligibility_decisions

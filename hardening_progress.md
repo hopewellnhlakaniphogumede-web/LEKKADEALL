@@ -4053,3 +4053,35 @@ This correction supersedes two narrow implementation details in the 2026-07-28 e
 - The complete frontend Node suite passed **88/88**, including all Ticket 9A create/edit/cancel/publication and E2E boundary regressions.
 - Credential/privacy, prohibited DML/RPC, narrow-projection, no-retry, and private-field scans are covered by the focused and complete suites; final `git diff --check` remains required before commit.
 - No migration, RLS policy, grant, database function, Auth configuration, exact-address boundary, payment, booking, bidding, payout, provider discovery, identity integration, admin control, E2E scenario, workflow, or production deployment behavior changed in Phase 2.
+### Ticket 10B second narrow corrective gate - 2026-08-12
+
+**Status:** Narrow database correction implemented; exact-head runtime CI is
+required before review.
+
+- Exact idempotency replay now succeeds only while its decision ID remains the
+  protected row's current authority and its stored result equals the effective
+  current state. A matching historical key after suspension, expiry, renewal,
+  or an equivalent later decision returns the fixed stale review error instead
+  of resurrecting `approved`.
+- Manual-pilot approval, reinstate, and renewal fail closed for closed provider
+  accounts and for provider identity status `rejected` or `expired`. Coarse and
+  protected state inconsistencies remain rejected.
+- Payout resume, release-eligibility, and final-release paths use the shared
+  payout blocker, which now acquires the authoritative profile,
+  provider-profile, and protected-eligibility locks before accepting provider
+  eligibility. It recomputes under those locks. Review transitions do not lock
+  booking/payment rows, so no reverse lock edge is introduced.
+- The focused suite adds a genuine two-session suspension-versus-final-release
+  proof: suspension commits while final release waits, the release then observes
+  `provider_not_eligible`, and neither a released state nor payout event is
+  written.
+- The baseline raw-identity read helper now accepts only
+  `insufficient_privilege` as its expected denial and propagates unrelated
+  exceptions.
+- No frontend, E2E, RLS policy, direct table grant, identity adapter, exact
+  address, booking, payment-provider integration, webhook, Auth configuration,
+  or deployment behavior changed.
+- Static SQL, scope, privacy/credential, assertion-count, and diff checks were
+  run locally. Docker and Supabase CLI are unavailable, so no local migration
+  reset, pgTAP, or two-session runtime pass is claimed; GitHub Actions remains
+  authoritative.
