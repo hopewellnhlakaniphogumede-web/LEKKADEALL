@@ -432,6 +432,23 @@ exception
 end;
 $$;
 
+create function pg_temp.try_read_identity_verifications()
+returns boolean
+language plpgsql
+as $$
+declare
+  v_rows bigint;
+begin
+  select count(*)
+    into v_rows
+  from public.identity_verifications;
+  return true;
+exception
+  when insufficient_privilege then return false;
+  when others then raise;
+end;
+$$;
+
 create function pg_temp.try_server_record_vendor_event()
 returns boolean
 language plpgsql
@@ -685,13 +702,9 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000012';
 
 select is(
-  (
-    select count(*)
-    from public.identity_verifications
-    where user_id = '00000000-0000-0000-0000-000000000011'
-  ),
-  0::bigint,
-  'provider cannot access another provider identity verification'
+  pg_temp.try_read_identity_verifications(),
+  false,
+  'provider cannot read raw identity-verification rows'
 );
 
 reset role;

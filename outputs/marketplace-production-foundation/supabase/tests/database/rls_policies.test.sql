@@ -25,6 +25,20 @@ exception
 end;
 $$;
 
+create function pg_temp.identity_rows_are_readable()
+returns boolean
+language plpgsql
+as $$
+declare
+  v_rows bigint;
+begin
+  select count(*) into v_rows from public.identity_verifications;
+  return true;
+exception
+  when insufficient_privilege then return false;
+end;
+$$;
+
 -- 1. A customer cannot view another customer's bookings.
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
@@ -115,10 +129,9 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000012';
 
 select is(
-  (select count(*) from public.identity_verifications
-   where user_id = '00000000-0000-0000-0000-000000000011'),
-  0::bigint,
-  'provider B cannot view provider A private identity data'
+  pg_temp.identity_rows_are_readable(),
+  false,
+  'provider B cannot read raw private identity data'
 );
 
 reset role;
