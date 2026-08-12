@@ -719,8 +719,8 @@ select is(
     from public.service_requests
     where id = '00000000-0000-0000-0000-000000000202'
   ),
-  1::bigint,
-  'approved provider can view eligible open requests'
+  0::bigint,
+  'provider cannot bypass discovery through raw service_requests reads'
 );
 
 select is(
@@ -729,8 +729,8 @@ select is(
     from public.service_requests
     where id = '00000000-0000-0000-0000-000000000202'
   ),
-  'Unconfirmed cleaning request',
-  'approved provider can read safe open request fields'
+  null,
+  'provider raw service_requests projection returns no open request data'
 );
 
 select is(
