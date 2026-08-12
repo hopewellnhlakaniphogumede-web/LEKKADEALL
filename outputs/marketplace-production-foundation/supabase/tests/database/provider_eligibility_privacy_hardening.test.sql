@@ -49,6 +49,11 @@ insert into public.provider_services (
   false
 );
 
+update public.provider_services
+set active = true
+where provider_id = '00000000-0000-0000-0000-000000010302'
+  and category_id = '00000000-0000-0000-0000-000000010390';
+
 insert into public.consents (
   user_id, purpose, policy_version, granted, source, withdrawn_at
 ) values (
@@ -149,7 +154,7 @@ begin;
 create extension if not exists dblink with schema extensions;
 set local search_path = public, extensions, auth;
 
-select plan(107);
+select plan(108);
 
 select is(
   extensions.dblink_connect(
@@ -417,6 +422,12 @@ select is(
   ),
   0::bigint,
   'blocked concurrent payout creates no release event'
+);
+
+select is(
+  extensions.dblink_exec('ticket10b_b', 'rollback'),
+  'ROLLBACK',
+  'failed concurrent payout transaction is reset before later fixture work'
 );
 
 select is(
@@ -1581,9 +1592,15 @@ select throws_ok(
   'old approval replay after expiry and renewal fails as stale'
 );
 
+reset role;
+
 update private.provider_marketplace_eligibility
 set expires_at = pg_catalog.statement_timestamp() - interval '1 second'
 where provider_id = '00000000-0000-0000-0000-000000010318';
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000099","role":"authenticated","aal":"aal2"}';
 
 select is(
   public.admin_transition_provider_marketplace_review(
