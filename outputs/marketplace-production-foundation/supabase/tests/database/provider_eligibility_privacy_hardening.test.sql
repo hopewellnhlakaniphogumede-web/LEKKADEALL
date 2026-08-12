@@ -794,6 +794,8 @@ select is(
   'legacy suspended provider requires explicit reinstate'
 );
 
+reset role;
+
 select ok(
   (
     select eligibility.status = 'approved'
@@ -808,6 +810,10 @@ select ok(
   ),
   'legacy suspension reinstate creates fresh basis decision expiry and matching coarse state'
 );
+
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000099';
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000099","role":"authenticated","aal":"aal2"}';
 
 select throws_ok(
   $$select public.admin_transition_provider_marketplace_review(
