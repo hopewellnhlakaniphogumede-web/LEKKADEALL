@@ -584,7 +584,11 @@ select results_eq(
 select results_eq(
   $$select request_id from public.provider_list_discoverable_requests(
       2,
-      (select published_at from public.service_requests where id = '00000000-0000-0000-0000-000000010510'),
+      (
+        select published_at
+        from public.provider_list_discoverable_requests()
+        where request_id = '00000000-0000-0000-0000-000000010510'
+      ),
       '00000000-0000-0000-0000-000000010510'
     )$$,
   $$values ('00000000-0000-0000-0000-000000000202'::pg_catalog.uuid)$$,
