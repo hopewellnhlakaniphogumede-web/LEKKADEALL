@@ -449,7 +449,7 @@ select is(
     from pg_catalog.pg_policies as policy
     where policy.schemaname = 'public'
       and policy.tablename = 'service_requests'
-      and policy.policyname = 'customer owns requests'
+      and policy.policyname = 'customer reads own service requests'
   ),
   1::pg_catalog.int8,
   'customer own-request RLS policy remains'
@@ -505,7 +505,10 @@ select is(
 -- Freeze the exact ten returned column names using information_schema routine metadata.
 select is(
   (
-    select pg_catalog.array_agg(parameter.parameter_name order by parameter.ordinal_position)
+    select pg_catalog.array_agg(
+      parameter.parameter_name::pg_catalog.text
+      order by parameter.ordinal_position
+    )
     from information_schema.parameters as parameter
     where parameter.specific_schema = 'public'
       and parameter.specific_name = (
