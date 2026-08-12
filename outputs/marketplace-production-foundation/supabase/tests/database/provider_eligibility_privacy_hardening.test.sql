@@ -304,6 +304,16 @@ select is(
 select is(
   (
     select count(*)
+    from extensions.dblink_get_result('ticket10b_b', false)
+      as remote(result_status text)
+  ),
+  0::bigint,
+  'failed asynchronous review result is fully drained before session reuse'
+);
+
+select is(
+  (
+    select count(*)
     from private.provider_eligibility_decisions
     where provider_id = '00000000-0000-0000-0000-000000010302'
   ),
@@ -422,12 +432,6 @@ select is(
   ),
   0::bigint,
   'blocked concurrent payout creates no release event'
-);
-
-select is(
-  extensions.dblink_exec('ticket10b_b', 'rollback'),
-  'ROLLBACK',
-  'failed concurrent payout transaction is reset before later fixture work'
 );
 
 select is(
@@ -1790,6 +1794,10 @@ or metadata ->> 'provider_id' = '00000000-0000-0000-0000-000000010302';
 alter table public.audit_events enable trigger audit_events_append_only;
 
 set local lekkadeall.allow_trusted_payment_update = 'on';
+alter table public.payment_events disable trigger payment_events_append_only;
+delete from public.payment_events
+where payment_id = '00000000-0000-0000-0000-000000010394';
+alter table public.payment_events enable trigger payment_events_append_only;
 delete from public.payments
 where id = '00000000-0000-0000-0000-000000010394';
 set local lekkadeall.allow_trusted_payment_update = 'off';
