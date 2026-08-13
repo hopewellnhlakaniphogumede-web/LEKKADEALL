@@ -51,6 +51,10 @@ import {
   submitCustomerProviderApplication,
   validateProviderApplication,
 } from './provider-application.js';
+import {
+  PROVIDER_DISCOVERY_PAGE_SIZE,
+  readProviderDiscoveryPage,
+} from './provider-discovery.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -78,6 +82,9 @@ const state = {
   },
   customerDraftEdit: null,
   providerStatus: null,
+  providerDiscovery: {
+    status: 'idle', items: [], cursor: null, hasMore: false, loadingMore: false,
+  },
   providerApplication: {
     loadStatus: 'idle', values: {}, errors: {}, confirming: false, submitting: false,
     confirmed: false, blocked: false, message: '', validatedValues: null,
@@ -98,6 +105,8 @@ let draftEditInFlight = false;
 let draftEditSequence = 0;
 let providerApplicationInFlight = false;
 let providerApplicationSequence = 0;
+let providerDiscoveryInFlight = false;
+let providerDiscoverySequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -139,6 +148,7 @@ function view() {
     customerDraftPublication: state.customerDraftPublication,
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
+    providerDiscovery: state.providerDiscovery,
     providerApplication: state.providerApplication,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
@@ -158,6 +168,7 @@ function clearPersonalState() {
   state.customerRequestList = null;
   state.customerRequestDetail = null;
   state.providerStatus = null;
+  resetProviderDiscovery();
   state.settingsProfile = null;
   resetProviderApplication();
   resetCustomerDraftCancellation();
@@ -201,6 +212,59 @@ function resetProviderApplication(loadStatus = 'idle') {
     message: '',
     validatedValues: null,
   };
+}
+
+function resetProviderDiscovery(status = 'idle') {
+  providerDiscoverySequence += 1;
+  providerDiscoveryInFlight = false;
+  state.providerDiscovery = {
+    status, items: [], cursor: null, hasMore: false, loadingMore: false,
+  };
+}
+
+async function loadProviderDiscovery({ append = false } = {}) {
+  if (providerDiscoveryInFlight || !state.client || currentPath() !== '/app/provider'
+      || state.access?.kind !== 'allowed' || state.access?.role !== 'provider') return;
+
+  const cursor = append ? state.providerDiscovery.cursor : null;
+  if (append && (!state.providerDiscovery.hasMore || !cursor)) return;
+  const sequence = ++providerDiscoverySequence;
+  providerDiscoveryInFlight = true;
+  state.providerDiscovery = append
+    ? { ...state.providerDiscovery, loadingMore: true }
+    : { status: 'loading', items: [], cursor: null, hasMore: false, loadingMore: false };
+  render();
+
+  let result;
+  try {
+    result = await readProviderDiscoveryPage(state.client, {
+      pageSize: PROVIDER_DISCOVERY_PAGE_SIZE,
+      cursor,
+    });
+  } catch {
+    result = { ok: false, data: [], cursor: null, hasMore: false };
+  }
+  if (sequence !== providerDiscoverySequence) return;
+  providerDiscoveryInFlight = false;
+  if (currentPath() !== '/app/provider' || state.access?.kind !== 'allowed'
+      || state.access?.role !== 'provider') {
+    resetProviderDiscovery();
+    return;
+  }
+  if (!result.ok) {
+    resetProviderDiscovery('unavailable');
+    render();
+    return;
+  }
+  const items = append ? [...state.providerDiscovery.items, ...result.data] : result.data;
+  state.providerDiscovery = {
+    status: items.length ? 'ready' : 'empty',
+    items,
+    cursor: result.cursor,
+    hasMore: result.hasMore,
+    loadingMore: false,
+  };
+  render();
 }
 
 function resetCustomerDraftEdit(requestId = null, loadStatus = 'loading') {
@@ -372,7 +436,12 @@ async function refreshRoute() {
     } else if (path === '/app/customer/requests/new') {
       // Categories were loaded above. Draft state remains in memory only while this route is active.
     } else if (path === '/app/provider') {
-      state.providerStatus = await readOwnProviderStatus(state.client, state.session.user.id);
+      const [providerStatus] = await Promise.all([
+        readOwnProviderStatus(state.client, state.session.user.id),
+        loadProviderDiscovery(),
+      ]);
+      if (sequence !== refreshSequence) return;
+      state.providerStatus = providerStatus;
     } else if (path === '/app/settings') {
       const reads = [readOwnSettingsProfile(state.client, state.session.user.id)];
       if (profile.role === 'provider') reads.push(readOwnProviderStatus(state.client, state.session.user.id));
@@ -1057,6 +1126,14 @@ document.addEventListener('click', async (event) => {
       resetCustomerDraftPublication(requestId);
       render();
     }
+    return;
+  }
+
+  const providerDiscoveryAction = event.target.closest('[data-provider-discovery-action]');
+  if (providerDiscoveryAction) {
+    const action = providerDiscoveryAction.dataset.providerDiscoveryAction;
+    if (action === 'refresh') await loadProviderDiscovery();
+    if (action === 'load-more') await loadProviderDiscovery({ append: true });
     return;
   }
 

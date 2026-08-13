@@ -80,6 +80,9 @@ jobs:
       - name: Run provider eligibility and privacy hardening pgTAP tests
         run: supabase test db supabase/tests/database/provider_eligibility_privacy_hardening.test.sql
 
+      - name: Run provider request discovery pgTAP tests
+        run: supabase test db supabase/tests/database/provider_request_discovery.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 
@@ -150,6 +153,13 @@ jobs:
         with:
           version: 2.110.0
           github-token: ${{ github.token }}
+
+      - name: Run provider discovery scenario independently
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: discovery
+        run: pnpm run test:e2e:local
 
       - name: Run lifecycle signup scenario independently
         working-directory: outputs/lekkadeall-frontend-shell

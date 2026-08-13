@@ -23,6 +23,7 @@ import {
   PROVIDER_APPLICATION_CONFIRM_TITLE,
   PROVIDER_APPLICATION_TERMS_VERSION,
 } from './provider-application.js';
+import { PROVIDER_DISCOVERY_UNAVAILABLE_MESSAGE } from './provider-discovery.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -568,13 +569,46 @@ function providerDashboard(view) {
     : status?.data
       ? `<div class="read-grid"><div class="read-field"><span>Business</span><strong>${escapeHtml(status.data.business_name)}</strong><small>Read-only</small></div><div class="read-field"><span>Verification</span><strong>${escapeHtml(status.data.verification_status)}</strong><small>Server-owned</small></div><div class="read-field"><span>Review</span><strong>${escapeHtml(status.data.review_status)}</strong><small>Admin-owned</small></div><div class="read-field"><span>Service radius</span><strong>${escapeHtml(status.data.service_radius_km ?? 'Not set')}</strong><small>Read-only</small></div></div>`
       : pageState('empty', 'Provider setup unavailable', 'No provider profile was created or inferred by the browser.');
+  const discovery = view.providerDiscovery ?? {};
+  let discoveryContent;
+  if (discovery.status === 'loading' || discovery.status === 'idle') {
+    discoveryContent = pageState('loading', 'Loading discoverable requests', 'The server is checking current provider eligibility and active service matches.');
+  } else if (discovery.status === 'unavailable') {
+    discoveryContent = pageState('error', 'Request discovery unavailable', PROVIDER_DISCOVERY_UNAVAILABLE_MESSAGE);
+  } else if (discovery.status === 'empty') {
+    discoveryContent = pageState('empty', 'No requests to show', 'No currently discoverable request matched the server-authorized service set.');
+  } else {
+    const requests = Array.isArray(discovery.items) ? discovery.items : [];
+    discoveryContent = requests.length
+      ? `<section class="request-list" aria-label="Discoverable requests">${requests.map((request) => `
+          <article class="request-summary-card provider-discovery-card">
+            <div class="request-summary-top"><span class="status-chip">Open request</span><time>${escapeHtml(formatSastDateTime(request.published_at))}</time></div>
+            <h2>${escapeHtml(request.title)}</h2>
+            <p>${escapeHtml(request.description)}</p>
+            <dl class="request-summary-meta">
+              <div><dt>Suburb</dt><dd>${escapeHtml(request.suburb)}</dd></div>
+              <div><dt>City</dt><dd>${escapeHtml(request.city)}</dd></div>
+              <div><dt>Requested start</dt><dd>${escapeHtml(formatSastDateTime(request.requested_start))}</dd></div>
+              <div><dt>Budget</dt><dd>${escapeHtml(formatZarBudgetMinor(request.budget_minor))}</dd></div>
+              <div><dt>Closes</dt><dd>${escapeHtml(formatSastDateTime(request.closes_at))}</dd></div>
+              <div><dt>Published</dt><dd>${escapeHtml(formatSastDateTime(request.published_at))}</dd></div>
+              <div><dt>Category reference</dt><dd>${escapeHtml(request.category_id)}</dd></div>
+              <div><dt>Request reference</dt><dd>${escapeHtml(request.request_id)}</dd></div>
+            </dl>
+          </article>`).join('')}</section>`
+      : pageState('empty', 'No requests to show', 'No currently discoverable request matched the server-authorized service set.');
+    if (discovery.hasMore) {
+      discoveryContent += `<div class="dashboard-actions"><button class="button button-secondary" type="button" data-provider-discovery-action="load-more" ${discovery.loadingMore ? 'disabled' : ''}>${discovery.loadingMore ? 'Loading requests…' : 'Load more'}</button></div>`;
+    }
+  }
 
   return appPage('Provider workspace', `
-    <section class="dashboard-heading"><div><p class="eyebrow">PROVIDER WORKSPACE</p><h1>Your provider status.</h1><p>This view does not imply approval, verification or payout readiness.</p></div><span class="button button-disabled" aria-disabled="true">Open-request feed — later</span></section>
+    <section class="dashboard-heading"><div><p class="eyebrow">PROVIDER WORKSPACE</p><h1>Your provider status.</h1><p>This view does not imply approval, verification or payout readiness.</p></div><button class="button button-secondary" type="button" data-provider-discovery-action="refresh" ${discovery.status === 'loading' || discovery.loadingMore ? 'disabled' : ''}>Refresh requests</button></section>
     ${applicationMessage}
     <section class="panel"><div class="panel-heading"><div><span>PROVIDER STATUS</span><h2>Readiness</h2></div><span class="status-chip">Read-only</span></div>${statusContent}</section>
+    <section class="panel" data-provider-discovery><div class="panel-heading"><div><span>PROVIDER DISCOVERY</span><h2>Matching open requests</h2></div><span class="status-chip">Server-authorized</span></div>${discoveryContent}</section>
     ${mockPaymentBanner()}
-    <section class="inline-warning"><strong>Sensitive workflows remain blocked</strong><p>No bids, bookings, earnings, releases or payouts are queried here.</p></section>
+    <section class="inline-warning"><strong>Discovery remains read-only</strong><p>No customer contact, exact address, bid, booking, message, payment or payout action is queried or available here.</p></section>
   `);
 }
 

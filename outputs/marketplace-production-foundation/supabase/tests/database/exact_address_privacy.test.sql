@@ -23,23 +23,6 @@ where user_id = '00000000-0000-0000-0000-000000000011';
 
 set local lekkadeall.allow_privileged_provider_profile_update = 'off';
 
-create function pg_temp.provider_open_request_summary_count()
-returns integer
-language plpgsql
-as $$
-declare
-  v_count integer;
-begin
-  select count(*)
-    into v_count
-  from public.list_provider_open_request_summaries(null, null, 50);
-
-  return v_count;
-exception
-  when others then return -1;
-end;
-$$;
-
 create function pg_temp.try_select_open_request_precise_address()
 returns boolean
 language plpgsql
@@ -363,19 +346,15 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000011';
 
 select is(
-  pg_temp.provider_open_request_summary_count(),
-  1,
-  'approved provider can view one open request summary'
+  (select count(*) from public.service_requests),
+  0::bigint,
+  'provider cannot bypass the discovery boundary through raw request reads'
 );
 
 select is(
-  (
-    select title
-    from public.list_provider_open_request_summaries(null, null, 50)
-    where request_id = '00000000-0000-0000-0000-000000000202'
-  ),
-  'Unconfirmed cleaning request',
-  'approved provider can read safe open request summary fields'
+  to_regprocedure('public.list_provider_open_request_summaries(text,uuid,integer)') is null,
+  true,
+  'legacy provider request summary RPC is removed'
 );
 
 select is(
@@ -436,8 +415,8 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000012';
 
 select is(
-  pg_temp.provider_open_request_summary_count(),
-  0,
+  (select count(*) from public.service_requests),
+  0::bigint,
   'unapproved provider cannot view open request summaries'
 );
 
@@ -554,8 +533,8 @@ set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000012';
 
 select is(
-  pg_temp.provider_open_request_summary_count(),
-  0,
+  (select count(*) from public.service_requests),
+  0::bigint,
   'suspended provider cannot view open request summaries'
 );
 

@@ -4085,3 +4085,43 @@ required before review.
   run locally. Docker and Supabase CLI are unavailable, so no local migration
   reset, pgTAP, or two-session runtime pass is claimed; GitHub Actions remains
   authoritative.
+
+### Ticket 10C Phase 2 - provider request discovery frontend and focused E2E - 2026-08-13
+
+**Status:** The minimal read-only provider discovery UI and independent
+real-stack Playwright coverage are implemented locally. Exact-head GitHub
+Actions remains required for the disposable-stack runtime result.
+
+- The provider workspace calls only
+  `provider_list_discoverable_requests(p_page_size, p_cursor_published_at,
+  p_cursor_request_id)`. The browser derives no provider, role, category,
+  status, or eligibility authority and performs no direct
+  `service_requests` read or mutation.
+- Initial discovery is a fresh route read. Refresh and keyset `Load more` are
+  deliberate user actions protected by one dedicated single-flight guard. No
+  polling, prefetch, timer, automatic retry, offset pagination, or persisted
+  feed state was added.
+- Each accepted row is reduced to the exact ten reviewed fields before
+  rendering. Database text is escaped. No customer identifier or contact,
+  exact address, coordinate, bid, booking, message, payment, payout, audit, or
+  moderation field or action is requested or rendered.
+- A denied, malformed, stale, or failed fresh read clears all prior discovery
+  rows and renders one fixed generic unavailable state without eligibility or
+  record-existence disclosure.
+- The independent Playwright scenario uses disposable synthetic provider and
+  customer actors. It proves active-service category matching, excludes an
+  inactive provider-service category, records exactly one initial RPC, records
+  zero direct table reads, then applies a server-side suspension and requires a
+  deliberate fresh RPC to clear the stale card. Its DOM, network, Auth-storage,
+  and output checks remain privacy-safe.
+- The workflow runs this scenario independently before the existing lifecycle,
+  aborted-response, affected-pair, and full Ticket 9A-9 scopes. One worker,
+  zero retries, loopback-only services, and disabled screenshots, traces,
+  video, HAR, and storage-state artifacts remain unchanged.
+- Local syntax checks passed. The focused discovery suite passed **8/8**, the
+  E2E boundary suite passed **16/16**, and the complete frontend Node suite
+  passed **97/97**. Docker and Supabase CLI are unavailable locally, so no
+  runtime Playwright pass is claimed. GitHub Actions is authoritative.
+- Migration 020, RLS, grants, eligibility functions, exact-address boundaries,
+  Auth configuration, bidding, booking, payment, payout, identity, admin, and
+  deployment behavior were not changed in Phase 2.

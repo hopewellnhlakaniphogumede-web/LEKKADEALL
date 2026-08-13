@@ -1264,13 +1264,14 @@ select lives_ok(
   'eligible provider can activate an owned service'
 );
 
-select ok(
+select is(
   (
     select count(*)
     from public.service_requests
     where status = 'open'
-  ) > 0,
-  'eligible provider can discover open requests'
+  ),
+  0::bigint,
+  'eligible provider cannot bypass discovery through raw service_requests reads'
 );
 
 reset role;
