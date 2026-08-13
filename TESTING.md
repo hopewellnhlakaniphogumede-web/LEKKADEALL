@@ -583,3 +583,47 @@ Local verification on 2026-08-12:
 - Docker and the Supabase CLI are unavailable on this host. No local migration
   reset, pgTAP, or two-session runtime pass is claimed; exact-head GitHub
   Actions remains authoritative.
+
+## Ticket 10C Phase 2 provider request discovery frontend and E2E
+
+Run the focused browser-native discovery contract suite:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/provider-discovery.test.mjs
+```
+
+Run the focused E2E/static boundary suite:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs
+```
+
+The focused provider-discovery contract verifies the single reviewed
+`provider_list_discoverable_requests(...)` RPC, exact three-key pagination
+payload, ten-field response boundary, keyset cursor, single-flight refresh and
+load-more actions, escaped rendering, stale-feed clearing, generic fail-closed
+states, and absence of alternate table reads, retries, polling, storage, or
+provider capabilities.
+
+The independent Playwright scenario runs with `E2E_TEST_SCOPE=discovery`. It
+creates only disposable synthetic actors and fixtures, proves that an eligible
+provider sees the matching active-service request but not a request for an
+inactive provider service, and then suspends the provider before a deliberate
+fresh discovery read. The old card must be cleared and replaced with the fixed
+unavailable state. Network policy requires the exact discovery RPC payload and
+zero direct `service_requests` reads. One worker, zero retries, disabled
+sensitive artifacts, loopback-only network policy, and privacy-safe reporting
+remain unchanged.
+
+Local verification on 2026-08-13:
+
+- Syntax checks passed for all changed frontend and E2E JavaScript modules.
+- The focused provider-discovery suite passed **8/8**.
+- The focused E2E boundary suite passed **16/16**.
+- The complete frontend Node suite passed **97/97**.
+- `git diff --check` passed before documentation was updated and must be run
+  again as part of the final commit gate.
+- Docker and the Supabase CLI are unavailable on this host. No local disposable
+  stack or runtime Playwright result is claimed; GitHub Actions must verify the
+  independent discovery journey and all existing database and Ticket 9A-9 E2E
+  regressions on the exact commit.

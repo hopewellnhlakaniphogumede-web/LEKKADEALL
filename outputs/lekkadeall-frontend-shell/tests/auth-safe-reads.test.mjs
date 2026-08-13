@@ -140,7 +140,7 @@ test('all reads use a fixed table allowlist and explicit projections', async () 
 
 test('non-mutation browser modules contain no application DML, RPC, broad select or blocked source', async () => {
   const mutationModules = new Set([
-    'provider-application.js', 'request-draft.js', 'request-cancellation.js',
+    'provider-application.js', 'provider-discovery.js', 'request-draft.js', 'request-cancellation.js',
     'request-publication.js', 'request-update.js',
   ]);
   const moduleNames = (await readdir(root)).filter((name) => name.endsWith('.js') && !name.startsWith('runtime-config') && !mutationModules.has(name));

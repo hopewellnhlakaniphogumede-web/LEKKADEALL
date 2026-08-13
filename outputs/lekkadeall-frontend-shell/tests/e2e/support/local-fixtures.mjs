@@ -6,7 +6,11 @@ import {
 
 export const ACTIVE_CATEGORY_ID = '90000000-0000-4000-8000-000000000001';
 export const INACTIVE_CATEGORY_ID = '90000000-0000-4000-8000-000000000002';
+export const NONMATCHING_CATEGORY_ID = '90000000-0000-4000-8000-000000000003';
 export const ACTIVE_CATEGORY_NAME = 'Synthetic home maintenance';
+export const PROVIDER_DISCOVERY_MATCHING_TITLE = 'Repair synthetic indoor fixture';
+export const PROVIDER_DISCOVERY_NONMATCHING_TITLE = 'Service synthetic outdoor fixture';
+const PROVIDER_DISCOVERY_ADMIN_ID = '90000000-0000-4000-8000-000000000201';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SYNTHETIC_EMAIL_PATTERN = /^[a-z0-9][a-z0-9+._-]{0,100}@lekkadeall\.invalid$/iu;
@@ -77,7 +81,8 @@ export async function seedBaseFixtures() {
     insert into public.service_categories (id, slug, name, active, requires_manual_review)
     values
       ('${ACTIVE_CATEGORY_ID}'::uuid, 'e2e-synthetic-home-maintenance', '${ACTIVE_CATEGORY_NAME}', true, false),
-      ('${INACTIVE_CATEGORY_ID}'::uuid, 'e2e-inactive-category', 'Synthetic inactive category', false, false)
+      ('${INACTIVE_CATEGORY_ID}'::uuid, 'e2e-inactive-category', 'Synthetic inactive category', false, false),
+      ('${NONMATCHING_CATEGORY_ID}'::uuid, 'e2e-synthetic-outdoor-maintenance', 'Synthetic outdoor maintenance', true, false)
     on conflict (id) do update
       set slug = excluded.slug,
           name = excluded.name,
@@ -244,6 +249,150 @@ export async function prepareSyntheticCustomerAccount(emailValue, passwordValue)
   const email = requireSyntheticEmail(emailValue);
   await createSyntheticLocalAuthUser(email, passwordValue);
   await waitForProvisionedCustomerProfile(email);
+}
+
+export async function prepareSyntheticProviderDiscovery(
+  providerEmailValue,
+  providerPasswordValue,
+  customerEmailValue,
+  customerPasswordValue,
+) {
+  const providerEmail = requireSyntheticEmail(providerEmailValue);
+  const customerEmail = requireSyntheticEmail(customerEmailValue);
+  await prepareSyntheticCustomerAccount(providerEmail, providerPasswordValue);
+  await prepareSyntheticCustomerAccount(customerEmail, customerPasswordValue);
+  const providerId = await findSyntheticUserId(providerEmail);
+  const customerId = await findSyntheticUserId(customerEmail);
+  await runSql(`
+    begin;
+
+    insert into auth.users (id, email)
+    values ('${PROVIDER_DISCOVERY_ADMIN_ID}'::uuid, 'ticket10c-e2e-admin@lekkadeall.invalid')
+    on conflict (id) do nothing;
+
+    set local lekkadeall.allow_privileged_profile_update = 'on';
+    update public.profiles
+    set role = 'admin'::public.user_role
+    where id = '${PROVIDER_DISCOVERY_ADMIN_ID}'::uuid;
+    update public.profiles
+    set role = 'provider'::public.user_role
+    where id = '${providerId}'::uuid;
+    set local lekkadeall.allow_privileged_profile_update = 'off';
+
+    insert into public.provider_profiles (
+      user_id, business_name, service_radius_km, verification_status, review_status
+    ) values (
+      '${providerId}'::uuid,
+      'Synthetic discovery services',
+      20,
+      'not_started'::public.verification_status,
+      'pending'
+    );
+
+    insert into public.provider_services (
+      provider_id, category_id, description, base_price_minor, active
+    ) values
+      ('${providerId}'::uuid, '${ACTIVE_CATEGORY_ID}'::uuid, null, null, false),
+      ('${providerId}'::uuid, '${NONMATCHING_CATEGORY_ID}'::uuid, null, null, false);
+
+    insert into public.consents (
+      user_id, purpose, policy_version, granted, source, withdrawn_at
+    ) values (
+      '${providerId}'::uuid,
+      'provider_application_terms',
+      'provider-application-v1',
+      true,
+      'customer_provider_application_rpc',
+      null
+    );
+
+    insert into public.audit_events (
+      actor_id, action, object_type, object_id, reason, metadata
+    ) values (
+      '${providerId}'::uuid,
+      'customer.provider_application_submitted',
+      'provider_profile',
+      '${providerId}'::uuid,
+      'Customer submitted closed-pilot provider application',
+      '{}'::pg_catalog.jsonb
+    );
+
+    set local role authenticated;
+    set local request.jwt.claim.sub = '${PROVIDER_DISCOVERY_ADMIN_ID}';
+    set local request.jwt.claims = '{"sub":"${PROVIDER_DISCOVERY_ADMIN_ID}","role":"authenticated","aal":"aal2"}';
+    select public.admin_transition_provider_marketplace_review(
+      '${providerId}'::uuid,
+      'approve_manual_pilot',
+      'pending',
+      '90000000-0000-4000-8000-000000000211'::uuid
+    );
+    reset role;
+
+    set local role authenticated;
+    set local request.jwt.claim.sub = '${providerId}';
+    set local request.jwt.claims = '{"sub":"${providerId}","role":"authenticated","aal":"aal1"}';
+    update public.provider_services
+    set active = true
+    where provider_id = '${providerId}'::uuid
+      and category_id = '${ACTIVE_CATEGORY_ID}'::uuid;
+    reset role;
+
+    set local lekkadeall.allow_marketplace_state_transition = 'on';
+    insert into public.service_requests (
+      id, customer_id, category_id, title, description, suburb, city,
+      requested_start, budget_minor, status, closes_at, published_at
+    ) values
+      (
+        '90000000-0000-4000-8000-000000000221'::uuid,
+        '${customerId}'::uuid,
+        '${ACTIVE_CATEGORY_ID}'::uuid,
+        '${PROVIDER_DISCOVERY_MATCHING_TITLE}',
+        'Repair the reviewed synthetic indoor fixture using general service details only.',
+        'Woodstock',
+        'Cape Town',
+        pg_catalog.now() + interval '5 days',
+        125000,
+        'open'::public.request_status,
+        pg_catalog.now() + interval '2 days',
+        pg_catalog.now() - interval '1 hour'
+      ),
+      (
+        '90000000-0000-4000-8000-000000000222'::uuid,
+        '${customerId}'::uuid,
+        '${NONMATCHING_CATEGORY_ID}'::uuid,
+        '${PROVIDER_DISCOVERY_NONMATCHING_TITLE}',
+        'Service the reviewed synthetic outdoor fixture using general service details only.',
+        'Woodstock',
+        'Cape Town',
+        pg_catalog.now() + interval '6 days',
+        95000,
+        'open'::public.request_status,
+        pg_catalog.now() + interval '2 days',
+        pg_catalog.now() - interval '2 hours'
+      );
+    set local lekkadeall.allow_marketplace_state_transition = 'off';
+
+    commit;
+  `);
+}
+
+export async function suspendSyntheticProviderDiscovery(providerEmailValue) {
+  const providerEmail = requireSyntheticEmail(providerEmailValue);
+  const providerId = await findSyntheticUserId(providerEmail);
+  await runSql(`
+    begin;
+    set local role authenticated;
+    set local request.jwt.claim.sub = '${PROVIDER_DISCOVERY_ADMIN_ID}';
+    set local request.jwt.claims = '{"sub":"${PROVIDER_DISCOVERY_ADMIN_ID}","role":"authenticated","aal":"aal2"}';
+    select public.admin_transition_provider_marketplace_review(
+      '${providerId}'::uuid,
+      'suspend',
+      'approved',
+      '90000000-0000-4000-8000-000000000212'::uuid
+    );
+    reset role;
+    commit;
+  `);
 }
 
 export async function assertSyntheticRequestOwner(emailValue, requestIdValue) {

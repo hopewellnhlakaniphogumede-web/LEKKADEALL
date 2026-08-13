@@ -101,6 +101,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
     /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
   );
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|publish\|update\|cancel\|postcondition\|sign-out\)/);
+  assert.match(reporterSource, /provider-discovery-failure:\(fixture-setup\|browser-session\|initial-discovery\|revocation\|fresh-discovery\|privacy\|sign-out\)/);
   assert.match(reporterSource, /registration-phase:\(identity-precondition\|signup-request\|auth-session\|profile-ready\|dashboard\)/);
   assert.match(
     reporterSource,
@@ -386,6 +387,7 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     'customer_update_draft_request',
     'customer_cancel_draft_request',
     'customer_publish_draft_request',
+    'provider_list_discoverable_requests',
   ]);
   const networkSource = await readFile(join(here, 'e2e/support/network-policy.mjs'), 'utf8');
   for (const token of [
@@ -398,6 +400,10 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(
     networkSource,
     /customer_submit_provider_application:\s*\[\s*'p_business_name', 'p_category_ids', 'p_service_radius_km', 'p_terms_version'/u,
+  );
+  assert.match(
+    networkSource,
+    /provider_list_discoverable_requests:\s*\[\s*'p_cursor_published_at', 'p_cursor_request_id', 'p_page_size'/u,
   );
 
   const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
@@ -652,6 +658,35 @@ test('customer publication E2E is RPC-only, server-confirmed, non-retryable and 
   assert.doesNotMatch(`${lifecycleSource}\n${securitySource}`, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/u);
 });
 
+test('provider discovery E2E is isolated, RPC-only, revocable and privacy-safe', async () => {
+  const specSource = await readFile(join(here, 'e2e/provider-discovery.spec.mjs'), 'utf8');
+  const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
+  const networkSource = await readFile(join(here, 'e2e/support/network-policy.mjs'), 'utf8');
+  const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+
+  assert.match(specSource, /test\.setTimeout\(180_000\)/u);
+  assert.match(specSource, /prepareSyntheticProviderDiscovery/u);
+  assert.match(specSource, /signInProvider\(page, provider\)/u);
+  assert.match(specSource, /PROVIDER_DISCOVERY_MATCHING_TITLE[\s\S]*toBeVisible/u);
+  assert.match(specSource, /PROVIDER_DISCOVERY_NONMATCHING_TITLE[\s\S]*toHaveCount\(0\)/u);
+  assert.equal((
+    specSource.match(/getRpcCount\('provider_list_discoverable_requests'\)\)\.toBe\(/gu) ?? []
+  ).length, 2);
+  assert.match(specSource, /getTableReadCount\('service_requests'\)\)\.toBe\(0\)/u);
+  assert.match(specSource, /suspendSyntheticProviderDiscovery[\s\S]*Refresh requests[\s\S]*Request discovery unavailable[\s\S]*toHaveCount\(0\)/u);
+  assert.match(specSource, /data-provider-discovery[\s\S]*customer_id[\s\S]*precise_address[\s\S]*payment_id[\s\S]*created_at/u);
+  assert.doesNotMatch(specSource, /waitForTimeout|await new Promise|\bretry\b|service_role|response\.(?:body|json|text)/iu);
+
+  assert.match(fixtureSource, /NONMATCHING_CATEGORY_ID/u);
+  assert.match(fixtureSource, /provider_services[\s\S]*set active = true[\s\S]*ACTIVE_CATEGORY_ID/u);
+  assert.match(fixtureSource, /admin_transition_provider_marketplace_review[\s\S]*approve_manual_pilot/u);
+  assert.match(fixtureSource, /admin_transition_provider_marketplace_review[\s\S]*'suspend'[\s\S]*'approved'/u);
+  assert.match(fixtureSource, /allow_marketplace_state_transition[\s\S]*PROVIDER_DISCOVERY_MATCHING_TITLE[\s\S]*PROVIDER_DISCOVERY_NONMATCHING_TITLE/u);
+  assert.match(networkSource, /provider_list_discoverable_requests/u);
+  assert.match(runnerSource, /discovery:\s*\['--grep', 'eligible provider discovers one safe matching request and loses it after revocation'\]/u);
+  assert.match(runnerSource, /full:\s*\['--grep-invert', 'eligible provider discovers one safe matching request and loses it after revocation'\]/u);
+});
+
 test('CI E2E job is isolated behind the complete database security job', async () => {
   const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
   assert.match(
@@ -682,7 +717,7 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.match(workflow, /customer-draft-lifecycle-e2e:/);
   assert.match(workflow, /needs:\s*database-tests/);
   assert.match(workflow, /pnpm run test:e2e:local/);
-  for (const scope of ['lifecycle', 'aborted', 'affected', 'full']) {
+  for (const scope of ['discovery', 'lifecycle', 'aborted', 'affected', 'full']) {
     assert.match(workflow, new RegExp(`E2E_TEST_SCOPE:\\s*${scope}`));
   }
   assert.equal((workflow.match(/uses: supabase\/setup-cli@v2/gu) ?? []).length, 2);

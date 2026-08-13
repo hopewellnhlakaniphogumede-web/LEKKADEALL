@@ -276,6 +276,38 @@ export function futureSastInput(days = 3, minuteOffset = 0) {
   return new Date(target.getTime() + (2 * 60 * 60 * 1000)).toISOString().slice(0, 16);
 }
 
+export async function signInProvider(page, account) {
+  let response;
+  try {
+    await page.goto('/auth/sign-in');
+    const form = page.locator('form[data-auth-form="sign-in"]');
+    await form.locator('input[name="email"]').fill(account.email);
+    await form.locator('input[name="password"]').fill(account.password);
+    const signInResponse = page.waitForResponse((candidate) => {
+      const url = new URL(candidate.url());
+      return url.pathname === '/auth/v1/token'
+        && url.searchParams.get('grant_type') === 'password'
+        && candidate.request().method() === 'POST';
+    }, { timeout: 30_000 });
+    await form.getByRole('button', { name: 'Sign in' }).click();
+    response = await signInResponse;
+  } catch {
+    throw new Error('provider-sign-in-unavailable');
+  }
+  if (!response.ok()) throw new Error('provider-sign-in-unavailable');
+  try {
+    await expect.poll(
+      () => authStorageEntryCount(page),
+      { timeout: 30_000, message: 'local Auth session readiness failed' },
+    ).toBe(1);
+    await expect(page).toHaveURL(/\/app\/provider\/?$/u, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: 'Your provider status.' }))
+      .toBeVisible({ timeout: 30_000 });
+  } catch {
+    throw new Error('provider-sign-in-unavailable');
+  }
+}
+
 export async function fillDraftForm(page, values) {
   const form = page.locator('form.request-form');
   await form.locator('select[name="category"]').selectOption(values.categoryId ?? ACTIVE_CATEGORY_ID);
