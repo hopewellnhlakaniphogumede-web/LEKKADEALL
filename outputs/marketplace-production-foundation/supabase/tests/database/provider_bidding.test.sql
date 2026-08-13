@@ -594,24 +594,22 @@ select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket1
 select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012106'), 0::pg_catalog.int8, 'close race creates no bid');
 
 -- Acceptance and withdrawal both start with the bid lock and have one serial result.
-select is(
-  (
-    select result.bid_id is not null
-    from extensions.dblink(
-      'ticket10d_b',
-      $$select public.provider_submit_bid('00000000-0000-0000-0000-000000012104', 48000)$$
-    ) as result(bid_id pg_catalog.uuid)
-  ),
-  true,
-  'provider creates the submitted bid for the acceptance race'
-);
+update ticket10d_results as result
+set result_value = remote.bid_id
+from extensions.dblink(
+  'ticket10d_b',
+  $$select public.provider_submit_bid('00000000-0000-0000-0000-000000012104', 48000)::pg_catalog.text$$
+) as remote(bid_id pg_catalog.text)
+where result.name = 'withdraw';
+select isnt((select result_value from ticket10d_results where name = 'withdraw'), null, 'provider creates the submitted bid for the acceptance race');
 select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'customer acceptance session begins');
 select is(
   extensions.dblink_send_query(
     'ticket10d_a',
-    $$select public.customer_accept_bid(
-      (select id from public.bids where request_id = '00000000-0000-0000-0000-000000012104')
-    )::pg_catalog.text$$
+    pg_catalog.format(
+      'select public.customer_accept_bid(%L::pg_catalog.uuid)::pg_catalog.text',
+      (select result_value from ticket10d_results where name = 'withdraw')
+    )
   ),
   1,
   'customer acceptance starts before withdrawal'
@@ -619,15 +617,16 @@ select is(
 update ticket10d_results as result
 set result_value = remote.result_value
 from extensions.dblink_get_result('ticket10d_a', false) as remote(result_value pg_catalog.text)
-where result.name = 'withdraw';
-select isnt((select result_value from ticket10d_results where name = 'withdraw'), null, 'acceptance creates a canonical booking');
+where result.name = 'blocked';
+select isnt((select result_value from ticket10d_results where name = 'blocked'), null, 'acceptance creates a canonical booking');
 
 select is(
   extensions.dblink_send_query(
     'ticket10d_b',
-    $$select public.provider_withdraw_bid(
-      (select id from public.bids where request_id = '00000000-0000-0000-0000-000000012104')
-    )::pg_catalog.text$$
+    pg_catalog.format(
+      'select public.provider_withdraw_bid(%L::pg_catalog.uuid)::pg_catalog.text',
+      (select result_value from ticket10d_results where name = 'withdraw')
+    )
   ),
   1,
   'withdrawal starts while acceptance retains the bid lock'
@@ -891,14 +890,16 @@ update private.provider_marketplace_eligibility
 set status = 'approved', basis = 'manual_pilot',
     expires_at = pg_catalog.now() + interval '365 days',
     current_decision_id = null,
-    reviewer_id = '00000000-0000-0000-0000-000000000099',
-    reason_code = 'manual_pilot_approved'
+    reviewer_id = null,
+    reason_code = null
 where provider_id = '00000000-0000-0000-0000-000000000011';
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000011';
 select throws_ok($$select public.provider_submit_bid('00000000-0000-0000-0000-000000012201', 50000)$$, '42501', 'Provider bid is unavailable', 'incomplete current eligibility decision fails closed');
 set local request.jwt.claim.sub = '';
 update private.provider_marketplace_eligibility
-set current_decision_id = '00000000-0000-0000-0000-000000000611'
+set current_decision_id = '00000000-0000-0000-0000-000000000611',
+    reviewer_id = '00000000-0000-0000-0000-000000000099',
+    reason_code = 'manual_pilot_approved'
 where provider_id = '00000000-0000-0000-0000-000000000011';
 
 set local lekkadeall.allow_privileged_provider_profile_update = 'on';
@@ -982,7 +983,7 @@ select is((select status::pg_catalog.text from public.provider_read_own_bid('000
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_withdrawn' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'withdrawal appends one fixed audit event');
 select is(public.provider_withdraw_bid((select id from ticket10d_functional_ids where name = 'submitted'))::pg_catalog.text, 'withdrawn', 'repeated withdrawal returns stable terminal state');
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_withdrawn' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'repeated withdrawal creates no duplicate audit');
-select is(pg_catalog.coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'transition guard is disabled after submit and withdrawal paths');
+select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'transition guard is disabled after submit and withdrawal paths');
 reset role;
 
 -- Customer/wrong-role callers and other providers cannot gain bid access.
@@ -1019,7 +1020,7 @@ reset role;
 drop trigger fail_ticket10d_audit_insert on public.audit_events;
 select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012202'), 0::pg_catalog.int8, 'audit failure rolls back bid insertion');
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and metadata ->> 'request_id' = '00000000-0000-0000-0000-000000012202'), 0::pg_catalog.int8, 'audit failure leaves no partial event');
-select is(pg_catalog.coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'audit failure clears transition guard');
+select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'audit failure clears transition guard');
 
 select * from finish();
 rollback;

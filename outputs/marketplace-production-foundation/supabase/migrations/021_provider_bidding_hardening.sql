@@ -388,7 +388,7 @@ begin
        and v_existing_status = 'submitted'::public.bid_status
        and v_existing_expires_at = v_closes_at
        and v_existing_message is null
-       and pg_catalog.coalesce(pg_catalog.cardinality(v_existing_perks), 0) = 0 then
+       and coalesce(pg_catalog.cardinality(v_existing_perks), 0) = 0 then
       return v_bid_id;
     end if;
 
