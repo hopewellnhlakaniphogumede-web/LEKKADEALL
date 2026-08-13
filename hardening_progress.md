@@ -4125,3 +4125,38 @@ Actions remains required for the disposable-stack runtime result.
 - Migration 020, RLS, grants, eligibility functions, exact-address boundaries,
   Auth configuration, bidding, booking, payment, payout, identity, admin, and
   deployment behavior were not changed in Phase 2.
+
+### Ticket 10D Phase 1 - provider bidding database boundary - 2026-08-13
+
+**Status:** The database/security implementation and focused static gate are
+complete locally. Migration reset, pgTAP, two-session runtime behavior, and the
+complete database/security matrix require exact-head GitHub Actions.
+
+- Replaced the legacy free-form bid submit and withdrawal overloads with
+  authenticated-only fixed-`pg_catalog` boundaries. Submit accepts only a
+  request UUID and bounded positive ZAR minor-unit amount; provider identity,
+  currency, proposed start, submitted status, and expiry remain server-owned.
+- Ticket 10C discovery and Ticket 10D submission share one private canonical
+  predicate. Bid authority is recomputed with wall-clock time after the Ticket
+  10B eligibility locks and explicit request/category/service locks, including
+  publication, close/start ordering, award/cancellation, deprecated-address,
+  and public-field privacy invariants.
+- Removed authenticated raw `bids` table reads and all raw bid policies. One
+  actor-derived reconciliation function returns only bid/request IDs, amount,
+  currency, proposed start, status, and expiry for the caller's own bid.
+- Exact submission replay returns the existing canonical submitted bid without
+  another row or audit event; divergent and terminal replay fails closed.
+  Withdrawal remains risk-reducing after suspension, is stable on exact replay,
+  and rejects foreign, declined, expired, accepted, or booking-linked bids.
+- The focused 157-assertion pgTAP source covers metadata/grants, actor and
+  eligibility matrices, amount and server-owned fields, Ticket 10C state
+  equivalence, raw DML/read denial, replay, audit rollback, guard reset, and
+  genuine two-session duplicate/suspension/expiry/cancel/close/award/acceptance
+  races. The workflow runs it immediately after Ticket 10C discovery.
+- The complete frontend Node suite passed **97/97**. Static scope, privacy,
+  credential-pattern, explicit-projection, legacy-signature, and
+  `git diff --check` checks were run locally.
+- Docker, Supabase CLI, and `psql` are unavailable on this host. No local
+  migration reset, pgTAP, or concurrency pass is claimed. No frontend/E2E,
+  customer acceptance UI, booking/payment, exact-address, messaging, identity,
+  admin, ranking, or deployment capability was added.

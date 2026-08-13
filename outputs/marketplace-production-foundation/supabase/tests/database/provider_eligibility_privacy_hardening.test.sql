@@ -1448,14 +1448,10 @@ select is(
 select throws_ok(
   $$select public.provider_submit_bid(
     '00000000-0000-0000-0000-000000010371',
-    9000,
-    now() + interval '4 days',
-    null,
-    '{}'::text[],
-    now() + interval '1 day'
+    9000
   )$$,
   '42501',
-  'Only active approved providers may submit bids',
+  'Provider bid is unavailable',
   'suspended provider cannot submit a new bid'
 );
 
@@ -1506,8 +1502,7 @@ set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000010311","r
 
 select lives_ok(
   $$select public.provider_withdraw_bid(
-    '00000000-0000-0000-0000-000000010374',
-    'Risk-reducing withdrawal while suspended'
+    '00000000-0000-0000-0000-000000010374'
   )$$,
   'suspended provider may withdraw an owned submitted bid'
 );

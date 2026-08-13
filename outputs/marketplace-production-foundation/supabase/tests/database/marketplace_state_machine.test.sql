@@ -158,11 +158,7 @@ declare
 begin
   v_bid_id := public.provider_submit_bid(
     p_request_id,
-    p_amount_minor,
-    now() + interval '5 days',
-    'Ticket 6 provider bid.',
-    array['Ticket 6 perk'],
-    now() + interval '1 day'
+    p_amount_minor
   );
 
   return v_bid_id;
@@ -177,8 +173,7 @@ language plpgsql
 as $$
 begin
   perform public.provider_withdraw_bid(
-    p_bid_id,
-    'Ticket 6 withdrawal test'
+    p_bid_id
   );
 
   return true;

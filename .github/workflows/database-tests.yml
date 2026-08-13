@@ -83,6 +83,9 @@ jobs:
       - name: Run provider request discovery pgTAP tests
         run: supabase test db supabase/tests/database/provider_request_discovery.test.sql
 
+      - name: Run provider bidding pgTAP tests
+        run: supabase test db supabase/tests/database/provider_bidding.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 

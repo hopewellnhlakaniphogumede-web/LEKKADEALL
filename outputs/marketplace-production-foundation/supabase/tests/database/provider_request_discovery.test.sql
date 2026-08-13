@@ -496,10 +496,10 @@ select is(
 
 select is(
   pg_catalog.pg_get_functiondef(
-    'public.provider_list_discoverable_requests(integer,timestamptz,uuid)'::pg_catalog.regprocedure
+    'private.provider_request_is_discoverable(uuid,uuid,timestamptz)'::pg_catalog.regprocedure
   ) ~* 'private\.service_request_public_field_violation',
   true,
-  'discovery rechecks authoritative public-field privacy validity'
+  'shared discovery predicate rechecks authoritative public-field privacy validity'
 );
 
 -- Freeze the exact ten returned column names using information_schema routine metadata.

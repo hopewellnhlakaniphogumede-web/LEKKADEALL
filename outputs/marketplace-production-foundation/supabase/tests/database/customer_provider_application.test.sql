@@ -940,14 +940,10 @@ set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000010201';
 select throws_ok(
   $$select public.provider_submit_bid(
     '00000000-0000-0000-0000-000000010299'::uuid,
-    50000,
-    pg_catalog.now() + interval '7 days',
-    'Safe pending-provider bid test.',
-    '{}'::text[],
-    pg_catalog.now() + interval '2 days'
+    50000
   )$$,
   '42501',
-  'Only active approved providers may submit bids',
+  'Provider bid is unavailable',
   'pending applicant cannot submit a bid'
 );
 

@@ -627,3 +627,39 @@ Local verification on 2026-08-13:
   stack or runtime Playwright result is claimed; GitHub Actions must verify the
   independent discovery journey and all existing database and Ticket 9A-9 E2E
   regressions on the exact commit.
+
+## Ticket 10D Phase 1 provider bidding database gate
+
+Run the focused provider-bidding suite after a clean local reset:
+
+```powershell
+cd outputs/marketplace-production-foundation
+supabase start
+supabase db reset
+supabase test db supabase/tests/database/provider_bidding.test.sql
+supabase test db supabase/tests/database/provider_request_discovery.test.sql
+supabase test db supabase/tests/database/provider_eligibility_privacy_hardening.test.sql
+supabase test db supabase/tests/database/marketplace_state_machine.test.sql
+supabase stop --no-backup
+```
+
+The 157-assertion focused source freezes the two minimal bid mutation
+signatures and the seven-field own-bid reconciliation read, fixed
+`search_path`, schema qualification, explicit projections, least-privilege
+grants, legacy overload removal, raw bid DML/read denial, server-owned bid
+fields, generic failures, audit atomicity, and transaction-local guard reset.
+
+It also includes genuine two-session exact-duplicate, eligibility suspension,
+eligibility expiry, request cancellation, request close, request award, and
+withdrawal-versus-acceptance races. Those checks must yield one serial
+canonical result, no duplicate row/audit, no stale post-wait authority, and no
+withdrawn accepted or booking-linked bid. No retry loop or sleep is used.
+
+Local verification on 2026-08-13:
+
+- The complete frontend Node suite passed **97/97**.
+- Static changed-scope, legacy-signature, fixed-path, explicit-projection,
+  privacy/credential-pattern, and `git diff --check` checks passed.
+- Docker, Supabase CLI, and `psql` are unavailable. No local migration reset,
+  pgTAP result, or two-session runtime pass is claimed; the exact-head GitHub
+  Actions database/security matrix is authoritative.
