@@ -1038,8 +1038,22 @@ rollback;
 
 -- Remove committed concurrency-only rows and login without retaining secrets.
 begin;
+set local lekkadeall.allow_trusted_payment_update = 'on';
+alter table public.payment_events disable trigger payment_events_append_only;
+delete from public.payment_events
+where payment_id in (
+  select id
+  from public.payments
+  where booking_id in (
+    select id
+    from public.bookings
+    where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106'
+  )
+);
+alter table public.payment_events enable trigger payment_events_append_only;
 set local lekkadeall.allow_marketplace_state_transition = 'on';
 delete from public.payments where booking_id in (select id from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106');
+set local lekkadeall.allow_trusted_payment_update = 'off';
 delete from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
 delete from public.bids where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
 delete from public.service_requests where id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
