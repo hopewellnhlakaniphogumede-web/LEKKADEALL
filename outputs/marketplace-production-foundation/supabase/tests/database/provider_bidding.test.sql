@@ -1089,6 +1089,15 @@ delete from public.provider_services where provider_id in (
   '00000000-0000-0000-0000-000000012002',
   '00000000-0000-0000-0000-000000012004'
 );
+set local lekkadeall.allow_privileged_provider_profile_update = 'on';
+update public.provider_profiles
+set reviewed_by = null,
+    reviewed_at = null
+where user_id in (
+  '00000000-0000-0000-0000-000000012002',
+  '00000000-0000-0000-0000-000000012004'
+);
+set local lekkadeall.allow_privileged_provider_profile_update = 'off';
 delete from auth.users where id in (
   '00000000-0000-0000-0000-000000012001',
   '00000000-0000-0000-0000-000000012002',
