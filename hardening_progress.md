@@ -4148,7 +4148,7 @@ complete database/security matrix require exact-head GitHub Actions.
   another row or audit event; divergent and terminal replay fails closed.
   Withdrawal remains risk-reducing after suspension, is stable on exact replay,
   and rejects foreign, declined, expired, accepted, or booking-linked bids.
-- The focused 157-assertion pgTAP source covers metadata/grants, actor and
+- The focused 158-assertion pgTAP source covers metadata/grants, actor and
   eligibility matrices, amount and server-owned fields, Ticket 10C state
   equivalence, raw DML/read denial, replay, audit rollback, guard reset, and
   genuine two-session duplicate/suspension/expiry/cancel/close/award/acceptance

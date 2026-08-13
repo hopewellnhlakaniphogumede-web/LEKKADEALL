@@ -356,6 +356,11 @@ select is(
   1::pg_catalog.int8,
   'concurrent duplicate submission creates one audit event'
 );
+select is(
+  (select pg_catalog.count(*) from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)),
+  0::pg_catalog.int8,
+  'successful duplicate result is fully drained before connection reuse'
+);
 
 -- A committed suspension wins before the waiting submit performs its final check.
 do $$
@@ -943,6 +948,7 @@ insert into ticket10d_functional_ids (name, id)
 select 'submitted', public.provider_submit_bid('00000000-0000-0000-0000-000000012201', 50000);
 
 select isnt((select id from ticket10d_functional_ids where name = 'submitted'), null, 'eligible provider submits one minimal bid');
+reset role;
 select is(
   (
     select pg_catalog.count(*)
@@ -961,9 +967,12 @@ select is(
   'server owns provider, currency, schedule, expiry, free-form fields and status'
 );
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'successful submit appends one fixed audit event');
+set local role authenticated;
 select is(public.provider_submit_bid('00000000-0000-0000-0000-000000012201', 50000), (select id from ticket10d_functional_ids where name = 'submitted'), 'exact submit replay returns the same bid');
+reset role;
 select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012201' and provider_id = '00000000-0000-0000-0000-000000000011'), 1::pg_catalog.int8, 'exact replay creates no duplicate bid');
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'exact replay creates no duplicate audit');
+set local role authenticated;
 select throws_ok($$select public.provider_submit_bid('00000000-0000-0000-0000-000000012201', 50001)$$, '40001', 'Provider bid is unavailable', 'divergent replay fails closed');
 select is((select pg_catalog.count(*) from public.provider_read_own_bid('00000000-0000-0000-0000-000000012201')), 1::pg_catalog.int8, 'fresh own-bid read returns the submitted bid');
 select is((select status::pg_catalog.text from public.provider_read_own_bid('00000000-0000-0000-0000-000000012201')), 'submitted', 'fresh own-bid read returns canonical submitted state');
@@ -980,11 +989,13 @@ select throws_ok($$select public.provider_withdraw_bid('00000000-0000-0000-0000-
 
 select is(public.provider_withdraw_bid((select id from ticket10d_functional_ids where name = 'submitted'))::pg_catalog.text, 'withdrawn', 'provider withdraws owned submitted bid');
 select is((select status::pg_catalog.text from public.provider_read_own_bid('00000000-0000-0000-0000-000000012201')), 'withdrawn', 'fresh own-bid read confirms withdrawal');
+reset role;
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_withdrawn' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'withdrawal appends one fixed audit event');
+set local role authenticated;
 select is(public.provider_withdraw_bid((select id from ticket10d_functional_ids where name = 'submitted'))::pg_catalog.text, 'withdrawn', 'repeated withdrawal returns stable terminal state');
+reset role;
 select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_withdrawn' and object_id = (select id::pg_catalog.text from ticket10d_functional_ids where name = 'submitted')), 1::pg_catalog.int8, 'repeated withdrawal creates no duplicate audit');
 select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'transition guard is disabled after submit and withdrawal paths');
-reset role;
 
 -- Customer/wrong-role callers and other providers cannot gain bid access.
 set local role authenticated;

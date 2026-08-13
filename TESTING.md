@@ -643,7 +643,7 @@ supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase stop --no-backup
 ```
 
-The 157-assertion focused source freezes the two minimal bid mutation
+The 158-assertion focused source freezes the two minimal bid mutation
 signatures and the seven-field own-bid reconciliation read, fixed
 `search_path`, schema qualification, explicit projections, least-privilege
 grants, legacy overload removal, raw bid DML/read denial, server-owned bid
