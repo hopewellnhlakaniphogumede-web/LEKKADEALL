@@ -11,7 +11,7 @@ as $$
 begin
   perform pg_catalog.set_config(
     'request.jwt.claim.sub',
-    pg_catalog.coalesce(p_actor_id::pg_catalog.text, ''),
+    coalesce(p_actor_id::pg_catalog.text, ''),
     true
   );
   perform pg_catalog.set_config(
