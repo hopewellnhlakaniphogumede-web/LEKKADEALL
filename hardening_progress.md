@@ -4167,3 +4167,42 @@ complete database/security matrix require exact-head GitHub Actions.
   migration reset, pgTAP, or concurrency pass is claimed. No frontend/E2E,
   customer acceptance UI, booking/payment, exact-address, messaging, identity,
   admin, ranking, or deployment capability was added.
+
+### Ticket 10D Phase 2 - minimal provider bidding frontend and focused E2E - 2026-08-14
+
+**Status:** The minimal provider submit/withdraw UI and independent real-loopback
+Playwright boundary are implemented locally. Exact-head GitHub Actions and final
+Security/Release review remain required.
+
+- Added `provider-bidding.js` as the only browser boundary for the three
+  approved Phase 1 RPCs. Submit supplies only request ID plus bounded integer
+  amount minor; withdrawal supplies only bid ID; reconciliation accepts only
+  the seven reviewed own-bid fields.
+- Bidding appears only inside fresh Ticket 10C discoverable cards for an active
+  provider route. Initial and post-mutation own-bid reads prevent stale browser
+  state from being treated as authoritative.
+- Submit and withdrawal each require explicit confirmation and share one
+  dedicated mutation single-flight guard. There is no optimistic state change,
+  automatic retry, polling, timer, speculative mutation, alternate endpoint,
+  or direct `bids`/`service_requests` table access.
+- Success is rendered only after a fresh own-bid RPC confirms the same request,
+  bid and expected canonical terminal. Any denied, malformed, failed, stale, or
+  ambiguous result is reduced to fixed privacy-safe copy and blocks another
+  mutation in the current view until a deliberate fresh refresh.
+- The UI renders only amount, currency, proposed start, expiry and bid status.
+  Customer identity/contact, exact address, coordinates, acceptance, booking,
+  payment, messaging, audit, moderation, provider-private, ranking, admin and
+  identity capabilities remain absent.
+- Added an independent `bidding` E2E scope. It proves one confirmed submit, one
+  fresh reconciliation, one confirmed withdrawal, one second reconciliation,
+  terminal controls, zero direct DML, no duplicate bid/audit, no booking/address
+  row, privacy-safe output, and cleanup. The existing full Ticket 9A-9 scope is
+  not expanded; independent discovery and bidding scenarios remain excluded.
+- Local syntax checks passed. The focused provider-bidding suite passed **9/9**,
+  the E2E boundary suite passed **17/17**, and the complete frontend Node suite
+  passed **107/107**. Static privacy, credential, DML/RPC, address/storage,
+  retry/timer, scope, and diff checks passed.
+- Docker and Supabase CLI are unavailable locally, so no local Playwright
+  runtime pass is claimed. GitHub Actions must verify the independent bidding
+  journey and complete database/security/E2E regression matrix on the exact
+  commit.

@@ -54,7 +54,10 @@ test('eligible provider discovers one safe matching request and loses it after r
   await test.step('provider-discovery-failure:privacy', async () => {
     const discoveryMarkup = await page.locator('[data-provider-discovery]').evaluate((element) => element.innerHTML);
     expect(discoveryMarkup).not.toMatch(/customer_id|customer_email|customer_phone|profile_id|auth_id|precise_address|ciphertext|latitude|longitude|coordinates|bid_id|booking_id|payment_id|ledger|payout|audit|moderation|created_at|updated_at/iu);
-    await expect(page.getByRole('button', { name: /bid|book|message|contact|pay|payout|address/iu })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Review bid' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /accept|book|message|contact|pay|payout|address/iu })).toHaveCount(0);
+    expect(policy.getRpcCount('provider_submit_bid')).toBe(0);
+    expect(policy.getRpcCount('provider_withdraw_bid')).toBe(0);
     await assertBrowserPrivacy(page, { markers, expectAuthSession: true });
     policy.assertClean();
     emissions.assertClean();

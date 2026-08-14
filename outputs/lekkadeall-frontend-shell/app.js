@@ -55,6 +55,16 @@ import {
   PROVIDER_DISCOVERY_PAGE_SIZE,
   readProviderDiscoveryPage,
 } from './provider-discovery.js';
+import {
+  PROVIDER_BID_AMBIGUOUS_MESSAGE,
+  PROVIDER_BID_SUBMITTED_MESSAGE,
+  PROVIDER_BID_UNAVAILABLE_MESSAGE,
+  PROVIDER_BID_WITHDRAWN_MESSAGE,
+  parseProviderBidAmount,
+  readOwnProviderBid,
+  submitProviderBid,
+  withdrawProviderBid,
+} from './provider-bidding.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -85,6 +95,7 @@ const state = {
   providerDiscovery: {
     status: 'idle', items: [], cursor: null, hasMore: false, loadingMore: false,
   },
+  providerBidding: { entries: {}, action: null },
   providerApplication: {
     loadStatus: 'idle', values: {}, errors: {}, confirming: false, submitting: false,
     confirmed: false, blocked: false, message: '', validatedValues: null,
@@ -107,6 +118,8 @@ let providerApplicationInFlight = false;
 let providerApplicationSequence = 0;
 let providerDiscoveryInFlight = false;
 let providerDiscoverySequence = 0;
+let providerBidMutationInFlight = false;
+let providerBidMutationSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -149,6 +162,7 @@ function view() {
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
     providerDiscovery: state.providerDiscovery,
+    providerBidding: state.providerBidding,
     providerApplication: state.providerApplication,
     settingsProfile: state.settingsProfile,
     requestDraft: state.requestDraft,
@@ -169,6 +183,7 @@ function clearPersonalState() {
   state.customerRequestDetail = null;
   state.providerStatus = null;
   resetProviderDiscovery();
+  resetProviderBidding();
   state.settingsProfile = null;
   resetProviderApplication();
   resetCustomerDraftCancellation();
@@ -222,9 +237,16 @@ function resetProviderDiscovery(status = 'idle') {
   };
 }
 
+function resetProviderBidding() {
+  providerBidMutationSequence += 1;
+  providerBidMutationInFlight = false;
+  state.providerBidding = { entries: {}, action: null };
+}
+
 async function loadProviderDiscovery({ append = false } = {}) {
   if (providerDiscoveryInFlight || !state.client || currentPath() !== '/app/provider'
-      || state.access?.kind !== 'allowed' || state.access?.role !== 'provider') return;
+      || state.access?.kind !== 'allowed' || state.access?.role !== 'provider'
+      || providerBidMutationInFlight) return;
 
   const cursor = append ? state.providerDiscovery.cursor : null;
   if (append && (!state.providerDiscovery.hasMore || !cursor)) return;
@@ -245,7 +267,6 @@ async function loadProviderDiscovery({ append = false } = {}) {
     result = { ok: false, data: [], cursor: null, hasMore: false };
   }
   if (sequence !== providerDiscoverySequence) return;
-  providerDiscoveryInFlight = false;
   if (currentPath() !== '/app/provider' || state.access?.kind !== 'allowed'
       || state.access?.role !== 'provider') {
     resetProviderDiscovery();
@@ -253,16 +274,153 @@ async function loadProviderDiscovery({ append = false } = {}) {
   }
   if (!result.ok) {
     resetProviderDiscovery('unavailable');
+    resetProviderBidding();
     render();
     return;
   }
   const items = append ? [...state.providerDiscovery.items, ...result.data] : result.data;
+  const entries = append ? { ...state.providerBidding.entries } : {};
+  const newRequests = append ? result.data : items;
+  const reconciliations = await Promise.all(newRequests.map(async (request) => [
+    request.request_id,
+    await readOwnProviderBid(state.client, request.request_id),
+  ]));
+  if (sequence !== providerDiscoverySequence) return;
+  providerDiscoveryInFlight = false;
+  for (const [requestId, ownBid] of reconciliations) entries[requestId] = ownBid;
   state.providerDiscovery = {
     status: items.length ? 'ready' : 'empty',
     items,
     cursor: result.cursor,
     hasMore: result.hasMore,
     loadingMore: false,
+  };
+  state.providerBidding = { entries, action: null };
+  render();
+}
+
+function providerBidActionIsEligible(requestId) {
+  return currentPath() === '/app/provider'
+    && !providerDiscoveryInFlight
+    && Boolean(state.client)
+    && Boolean(state.session?.user?.id)
+    && state.access?.kind === 'allowed'
+    && state.access?.role === 'provider'
+    && state.routeProfile?.role === 'provider'
+    && state.routeProfile?.account_status === 'active'
+    && state.providerDiscovery.status === 'ready'
+    && state.providerDiscovery.items.some((request) => request.request_id === requestId)
+    && state.providerBidding.entries[requestId]?.ok === true;
+}
+
+function reviewProviderBid(form) {
+  const requestId = String(form.dataset.providerBidRequest ?? '');
+  const entry = state.providerBidding.entries[requestId];
+  if (providerBidMutationInFlight || !providerBidActionIsEligible(requestId)
+      || entry?.data !== null) return;
+  const amountMinor = parseProviderBidAmount(new FormData(form).get('bid-amount'));
+  if (amountMinor === null) {
+    state.providerBidding.action = {
+      requestId, kind: 'submit', confirming: false, submitting: false,
+      blocked: false, confirmed: false, message: PROVIDER_BID_UNAVAILABLE_MESSAGE,
+    };
+  } else {
+    state.providerBidding.action = {
+      requestId, kind: 'submit', amountMinor, confirming: true, submitting: false,
+      blocked: false, confirmed: false, message: '',
+    };
+  }
+  render();
+}
+
+function openProviderBidWithdrawal(requestId) {
+  const bid = state.providerBidding.entries[requestId]?.data;
+  if (providerBidMutationInFlight || !providerBidActionIsEligible(requestId)
+      || !bid || bid.request_id !== requestId || bid.status !== 'submitted') return;
+  state.providerBidding.action = {
+    requestId, bidId: bid.bid_id, kind: 'withdraw', confirming: true, submitting: false,
+    blocked: false, confirmed: false, message: '',
+  };
+  render();
+}
+
+async function submitProviderBidConfirmation() {
+  const action = state.providerBidding.action;
+  const requestId = action?.requestId ?? '';
+  const entry = state.providerBidding.entries[requestId];
+  const actorId = state.session?.user?.id;
+  const validSubmit = action?.kind === 'submit' && entry?.data === null
+    && Number.isSafeInteger(action.amountMinor);
+  const validWithdraw = action?.kind === 'withdraw'
+    && entry?.data?.bid_id === action.bidId && entry.data.status === 'submitted';
+  if (providerBidMutationInFlight || !action?.confirming || action.blocked
+      || !providerBidActionIsEligible(requestId) || (!validSubmit && !validWithdraw)) return;
+
+  const mutationSequence = ++providerBidMutationSequence;
+  providerBidMutationInFlight = true;
+  state.providerBidding.action = { ...action, submitting: true, message: '' };
+  render();
+
+  const result = validSubmit
+    ? await submitProviderBid(state.client, requestId, action.amountMinor)
+    : await withdrawProviderBid(state.client, action.bidId);
+  if (mutationSequence !== providerBidMutationSequence) return;
+
+  if (!providerBidActionIsEligible(requestId) || state.session?.user?.id !== actorId) {
+    resetProviderBidding();
+    return;
+  }
+  if (!result.ok) {
+    providerBidMutationInFlight = false;
+    state.providerBidding.action = {
+      ...action,
+      confirming: false,
+      submitting: false,
+      blocked: true,
+      confirmed: false,
+      message: result.message,
+    };
+    render();
+    return;
+  }
+
+  const freshBid = await readOwnProviderBid(state.client, requestId);
+  if (mutationSequence !== providerBidMutationSequence) return;
+  providerBidMutationInFlight = false;
+  const canonicalBid = freshBid.ok ? freshBid.data : null;
+  const confirmed = validSubmit
+    ? canonicalBid?.bid_id === result.bidId
+      && canonicalBid.request_id === requestId
+      && canonicalBid.amount_minor === action.amountMinor
+      && canonicalBid.status === 'submitted'
+    : canonicalBid?.bid_id === action.bidId
+      && canonicalBid.request_id === requestId
+      && canonicalBid.status === 'withdrawn';
+  if (!confirmed) {
+    state.providerBidding.action = {
+      ...action,
+      confirming: false,
+      submitting: false,
+      blocked: true,
+      confirmed: false,
+      message: PROVIDER_BID_AMBIGUOUS_MESSAGE,
+    };
+    render();
+    return;
+  }
+
+  state.providerBidding.entries = {
+    ...state.providerBidding.entries,
+    [requestId]: freshBid,
+  };
+  state.providerBidding.action = {
+    requestId,
+    kind: action.kind,
+    confirming: false,
+    submitting: false,
+    blocked: false,
+    confirmed: true,
+    message: validSubmit ? PROVIDER_BID_SUBMITTED_MESSAGE : PROVIDER_BID_WITHDRAWN_MESSAGE,
   };
   render();
 }
@@ -1137,6 +1295,18 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  const providerBidAction = event.target.closest('[data-provider-bid-action]');
+  if (providerBidAction) {
+    const requestId = String(providerBidAction.dataset.providerBidRequest ?? '');
+    const action = providerBidAction.dataset.providerBidAction;
+    if (action === 'cancel' && !providerBidMutationInFlight) {
+      state.providerBidding.action = null;
+      render();
+    }
+    if (action === 'withdraw') openProviderBidWithdrawal(requestId);
+    return;
+  }
+
   const toggle = event.target.closest('[data-menu-toggle]');
   if (toggle) {
     const nav = document.querySelector('#primary-nav');
@@ -1147,6 +1317,18 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const providerBidConfirmation = event.target.closest('[data-provider-bid-confirm-form]');
+  if (providerBidConfirmation) {
+    event.preventDefault();
+    await submitProviderBidConfirmation();
+    return;
+  }
+  const providerBidForm = event.target.closest('[data-provider-bid-form]');
+  if (providerBidForm) {
+    event.preventDefault();
+    reviewProviderBid(providerBidForm);
+    return;
+  }
   const providerApplicationConfirmation = event.target.closest('[data-provider-application-confirm-form]');
   if (providerApplicationConfirmation) {
     event.preventDefault();

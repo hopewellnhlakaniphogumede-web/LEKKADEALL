@@ -164,6 +164,13 @@ jobs:
           E2E_TEST_SCOPE: discovery
         run: pnpm run test:e2e:local
 
+      - name: Run provider bidding scenario independently
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: bidding
+        run: pnpm run test:e2e:local
+
       - name: Run lifecycle signup scenario independently
         working-directory: outputs/lekkadeall-frontend-shell
         env:

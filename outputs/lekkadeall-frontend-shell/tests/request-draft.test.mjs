@@ -170,7 +170,7 @@ test('only reviewed request mutation modules contain RPC boundaries and blocked 
   const publicationSource = entries.find(([name]) => name === 'request-publication.js')[1];
   const updateSource = entries.find(([name]) => name === 'request-update.js')[1];
   const otherSource = entries.filter(([name]) => ![
-    'provider-application.js', 'provider-discovery.js', 'request-draft.js', 'request-cancellation.js',
+    'provider-application.js', 'provider-bidding.js', 'provider-discovery.js', 'request-draft.js', 'request-cancellation.js',
     'request-publication.js', 'request-update.js',
   ].includes(name)).map(([, source]) => source).join('\n');
   assert.equal((requestSource.match(/\.rpc\(/g) ?? []).length, 1);

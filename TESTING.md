@@ -666,3 +666,54 @@ Local verification on 2026-08-13:
 - Docker, Supabase CLI, and `psql` are unavailable. No local migration reset,
   pgTAP result, or two-session runtime pass is claimed; the exact-head GitHub
   Actions database/security matrix is authoritative.
+
+## Ticket 10D Phase 2 provider bidding frontend and E2E
+
+Run the focused browser-native bidding contract suite:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/provider-bidding.test.mjs
+```
+
+Run the focused E2E/static boundary suite and the complete frontend suite:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs
+node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
+```
+
+The provider workspace attaches bidding only to freshly returned Ticket 10C
+cards. Each card reconciles through `provider_read_own_bid(p_request_id)` and
+accepts only the seven reviewed fields. Submit sends only request ID and a
+bounded integer ZAR minor-unit amount; withdrawal sends only the reconciled bid
+ID. Both actions require a separate confirmation and share one mutation
+single-flight guard.
+
+No mutation result is rendered as authoritative until a fresh own-bid read
+confirms the same request, bid, amount, and expected submitted or withdrawn
+status. Missing, malformed, denied, stale, transport-failed, or otherwise
+ambiguous outcomes use fixed messages and block further mutation until a fresh
+request refresh. The browser performs no direct bid/request DML or raw bid read,
+does not retry, and renders no customer identity/contact, exact address,
+booking, payment, message, audit, moderation, or provider-private data.
+
+The independent Playwright scope is `E2E_TEST_SCOPE=bidding`. It uses a fresh
+loopback Supabase stack and synthetic actors to prove discovery, explicit
+confirmation, exactly one submit RPC, fresh own-bid reconciliation, exactly one
+withdrawal RPC, a second fresh reconciliation, terminal controls, one bid, one
+submit audit, one withdrawal audit, no booking/address row, privacy-safe output,
+and mandatory sign-out/cleanup. The legacy full Ticket 9A-9 scope continues to
+exclude both independent Ticket 10C discovery and Ticket 10D bidding scenarios.
+
+Local verification on 2026-08-14:
+
+- Syntax checks passed for the changed frontend, E2E, runner, fixture, network,
+  and reporter modules.
+- The focused provider-bidding suite passed **9/9**.
+- The focused E2E boundary suite passed **17/17**.
+- The complete frontend Node suite passed **107/107**.
+- Credential/privacy, prohibited DML/RPC/address/storage, retry/timer, workflow
+  scope, and `git diff --check` scans passed.
+- Docker and Supabase CLI are unavailable locally. No local real-loopback
+  Playwright execution is claimed; the exact-head GitHub Actions bidding scope
+  and complete regression matrix remain authoritative.

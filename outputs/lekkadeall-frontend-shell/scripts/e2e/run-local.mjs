@@ -24,8 +24,9 @@ const outputDirectory = join(tmpdir(), `lekkadeall-e2e-output-${process.pid}`);
 const WORKFLOW_RUN_PATTERN = /^[0-9]{1,20}$/u;
 const WORKFLOW_ATTEMPT_PATTERN = /^[0-9]{1,6}$/u;
 const TEST_SCOPE_ARGS = Object.freeze({
-  full: ['--grep-invert', 'eligible provider discovers one safe matching request and loses it after revocation'],
+  full: ['--grep-invert', '(?:eligible provider discovers one safe matching request and loses it after revocation|eligible provider submits and withdraws one server-reconciled bid)'],
   discovery: ['--grep', 'eligible provider discovers one safe matching request and loses it after revocation'],
+  bidding: ['--grep', 'eligible provider submits and withdraws one server-reconciled bid'],
   lifecycle: ['--grep', 'customer registration through cancelled draft completes against real local RLS and RPCs'],
   aborted: ['--grep', 'an executed update with an aborted response is not retried and requires a fresh read'],
   affected: ['--grep', '(?:customer registration through cancelled draft completes against real local RLS and RPCs|an executed update with an aborted response is not retried and requires a fresh read)'],
