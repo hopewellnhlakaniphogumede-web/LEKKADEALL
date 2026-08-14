@@ -131,7 +131,7 @@ begin
       and bid.created_at <= v_decision_at
       and bid.updated_at = bid.created_at
       and bid.message is null
-      and pg_catalog.coalesce(pg_catalog.cardinality(bid.perks), 0) = 0
+      and coalesce(pg_catalog.cardinality(bid.perks), 0) = 0
       and bid.accepted_at is null
       and bid.declined_at is null
       and bid.withdrawn_at is null
