@@ -10,6 +10,7 @@ export const NONMATCHING_CATEGORY_ID = '90000000-0000-4000-8000-000000000003';
 export const ACTIVE_CATEGORY_NAME = 'Synthetic home maintenance';
 export const PROVIDER_DISCOVERY_MATCHING_TITLE = 'Repair synthetic indoor fixture';
 export const PROVIDER_DISCOVERY_NONMATCHING_TITLE = 'Service synthetic outdoor fixture';
+export const PROVIDER_DISCOVERY_MATCHING_REQUEST_ID = '90000000-0000-4000-8000-000000000221';
 const PROVIDER_DISCOVERY_ADMIN_ID = '90000000-0000-4000-8000-000000000201';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -343,7 +344,7 @@ export async function prepareSyntheticProviderDiscovery(
       requested_start, budget_minor, status, closes_at, published_at
     ) values
       (
-        '90000000-0000-4000-8000-000000000221'::uuid,
+        '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid,
         '${customerId}'::uuid,
         '${ACTIVE_CATEGORY_ID}'::uuid,
         '${PROVIDER_DISCOVERY_MATCHING_TITLE}',
@@ -392,6 +393,58 @@ export async function suspendSyntheticProviderDiscovery(providerEmailValue) {
     );
     reset role;
     commit;
+  `);
+}
+
+export async function assertSyntheticProviderBiddingPostconditions(providerEmailValue) {
+  const providerEmail = requireSyntheticEmail(providerEmailValue);
+  const providerId = await findSyntheticUserId(providerEmail);
+  await runSql(`
+    do $e2e$
+    declare
+      v_bid_id uuid;
+    begin
+      select bid.id into v_bid_id
+      from public.bids as bid
+      where bid.provider_id = '${providerId}'::uuid
+        and bid.request_id = '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid
+        and bid.amount_minor = 100050
+        and bid.currency = 'ZAR'
+        and bid.status = 'withdrawn'::public.bid_status
+        and bid.message is null
+        and pg_catalog.cardinality(bid.perks) = 0
+        and bid.proposed_start = (
+          select request.requested_start from public.service_requests as request
+          where request.id = '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid
+        )
+        and bid.expires_at = (
+          select request.closes_at from public.service_requests as request
+          where request.id = '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid
+        );
+
+      if v_bid_id is null
+         or (select pg_catalog.count(*) from public.bids as bid
+             where bid.provider_id = '${providerId}'::uuid
+               and bid.request_id = '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid) <> 1
+         or (select pg_catalog.count(*) from public.audit_events as audit
+             where audit.actor_id = '${providerId}'::uuid
+               and audit.object_type = 'bid'
+               and audit.object_id = v_bid_id::text
+               and audit.action = 'provider.bid_submitted') <> 1
+         or (select pg_catalog.count(*) from public.audit_events as audit
+             where audit.actor_id = '${providerId}'::uuid
+               and audit.object_type = 'bid'
+               and audit.object_id = v_bid_id::text
+               and audit.action = 'provider.bid_withdrawn') <> 1
+         or exists (select 1 from public.bookings as booking where booking.bid_id = v_bid_id)
+         or exists (
+           select 1 from private.service_request_addresses as address
+           where address.request_id = '${PROVIDER_DISCOVERY_MATCHING_REQUEST_ID}'::uuid
+         ) then
+        raise exception 'provider bidding postcondition failed';
+      end if;
+    end;
+    $e2e$;
   `);
 }
 

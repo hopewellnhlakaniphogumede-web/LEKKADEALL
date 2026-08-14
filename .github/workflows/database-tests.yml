@@ -83,6 +83,9 @@ jobs:
       - name: Run provider request discovery pgTAP tests
         run: supabase test db supabase/tests/database/provider_request_discovery.test.sql
 
+      - name: Run provider bidding pgTAP tests
+        run: supabase test db supabase/tests/database/provider_bidding.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 
@@ -159,6 +162,13 @@ jobs:
         env:
           CI: "1"
           E2E_TEST_SCOPE: discovery
+        run: pnpm run test:e2e:local
+
+      - name: Run provider bidding scenario independently
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: bidding
         run: pnpm run test:e2e:local
 
       - name: Run lifecycle signup scenario independently

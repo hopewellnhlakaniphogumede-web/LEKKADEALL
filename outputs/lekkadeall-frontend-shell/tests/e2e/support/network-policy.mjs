@@ -7,6 +7,9 @@ export const ALLOWED_MARKETPLACE_RPCS = Object.freeze([
   'customer_cancel_draft_request',
   'customer_publish_draft_request',
   'provider_list_discoverable_requests',
+  'provider_submit_bid',
+  'provider_withdraw_bid',
+  'provider_read_own_bid',
 ]);
 
 const ALLOWED_READ_TABLES = new Set([
@@ -47,6 +50,9 @@ const EXPECTED_RPC_KEYS = Object.freeze({
   provider_list_discoverable_requests: [
     'p_cursor_published_at', 'p_cursor_request_id', 'p_page_size',
   ],
+  provider_submit_bid: ['p_amount_minor', 'p_request_id'],
+  provider_withdraw_bid: ['p_bid_id'],
+  provider_read_own_bid: ['p_request_id'],
 });
 
 function decodeJwtRole(value) {

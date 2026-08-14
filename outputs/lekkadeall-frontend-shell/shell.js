@@ -24,6 +24,12 @@ import {
   PROVIDER_APPLICATION_TERMS_VERSION,
 } from './provider-application.js';
 import { PROVIDER_DISCOVERY_UNAVAILABLE_MESSAGE } from './provider-discovery.js';
+import {
+  PROVIDER_BID_CONFIRM_TEXT,
+  PROVIDER_BID_CONFIRM_TITLE,
+  PROVIDER_BID_WITHDRAW_CONFIRM_TEXT,
+  PROVIDER_BID_WITHDRAW_CONFIRM_TITLE,
+} from './provider-bidding.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -556,6 +562,63 @@ function customerRequestCreatePage(view) {
     <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>Create a private draft.</h1><p>This workflow creates a draft only. It cannot publish, collect an exact address, or contact providers.</p></div><a class="button button-secondary" href="/app/customer" data-nav>Back to dashboard</a></section>${content}`);
 }
 
+function providerBidPanel(request, bidding = {}) {
+  const entry = bidding.entries?.[request.request_id];
+  const action = bidding.action?.requestId === request.request_id ? bidding.action : null;
+  if (!entry?.ok) {
+    return '<section class="inline-warning" data-provider-bid><strong>Bid unavailable</strong><p>A fresh own-bid read is required before an action can be shown.</p></section>';
+  }
+
+  let message = '';
+  if (action?.message) {
+    message = `<p class="form-message ${action.confirmed ? 'is-success' : ''}" data-provider-bid-message role="status">${escapeHtml(action.message)}</p>`;
+  }
+  if (action?.blocked) {
+    return `<section class="inline-warning" data-provider-bid>${message}<strong>Refresh required</strong><p>No further bid mutation is available in this view.</p></section>`;
+  }
+  if (action?.confirming) {
+    const withdrawing = action.kind === 'withdraw';
+    const title = withdrawing ? PROVIDER_BID_WITHDRAW_CONFIRM_TITLE : PROVIDER_BID_CONFIRM_TITLE;
+    const description = withdrawing ? PROVIDER_BID_WITHDRAW_CONFIRM_TEXT : PROVIDER_BID_CONFIRM_TEXT;
+    const submitLabel = withdrawing ? 'Withdraw bid' : 'Submit bid';
+    return `<section class="draft-cancellation-confirmation" data-provider-bid role="alertdialog" aria-labelledby="provider-bid-confirm-title" aria-describedby="provider-bid-confirm-description">
+      <h3 id="provider-bid-confirm-title">${escapeHtml(title)}</h3>
+      <p id="provider-bid-confirm-description">${escapeHtml(description)}</p>
+      ${withdrawing ? '' : `<p><strong>Bid amount:</strong> ${escapeHtml(formatMoney(action.amountMinor, 'ZAR'))}</p>`}
+      <form data-provider-bid-confirm-form>
+        <button class="button button-secondary" type="button" data-provider-bid-action="cancel" data-provider-bid-request="${escapeHtml(request.request_id)}" ${action.submitting ? 'disabled' : ''}>Keep current bid state</button>
+        <button class="button ${withdrawing ? 'button-danger' : 'button-primary'}" type="submit" ${action.submitting ? 'disabled' : ''}>${action.submitting ? 'Confirming with server…' : submitLabel}</button>
+      </form>
+    </section>`;
+  }
+
+  const bid = entry.data;
+  if (bid) {
+    const withdraw = bid.status === 'submitted'
+      ? `<button class="button button-danger-outline" type="button" data-provider-bid-action="withdraw" data-provider-bid-request="${escapeHtml(request.request_id)}">Withdraw bid</button>`
+      : '';
+    return `<section class="panel" data-provider-bid>
+      ${message}
+      <div class="panel-heading"><div><span>YOUR BID</span><h3>${escapeHtml(bid.status)}</h3></div><span class="status-chip">Server-confirmed</span></div>
+      <dl class="request-summary-meta">
+        <div><dt>Amount</dt><dd>${escapeHtml(formatMoney(bid.amount_minor, bid.currency))}</dd></div>
+        <div><dt>Proposed start</dt><dd>${escapeHtml(formatSastDateTime(bid.proposed_start))}</dd></div>
+        <div><dt>Expires</dt><dd>${escapeHtml(formatSastDateTime(bid.expires_at))}</dd></div>
+      </dl>
+      ${withdraw}
+    </section>`;
+  }
+
+  return `<section class="panel" data-provider-bid>
+    ${message}
+    <div class="panel-heading"><div><span>PROVIDER BID</span><h3>Submit a fixed-amount bid</h3></div><span class="status-chip">Confirmation required</span></div>
+    <form class="request-form" data-provider-bid-form data-provider-bid-request="${escapeHtml(request.request_id)}">
+      <label>Bid amount (ZAR)<input name="bid-amount" type="number" inputmode="decimal" min="0.01" max="1000000" step="0.01" required></label>
+      <button class="button button-primary" type="submit">Review bid</button>
+    </form>
+  </section>`;
+}
+
 function providerDashboard(view) {
   if (view.access?.kind !== 'allowed') {
     return appPage('Provider workspace', `<section class="dashboard-heading"><div><p class="eyebrow">PROVIDER WORKSPACE</p><h1>A clear view of readiness.</h1></div></section>${accessState(view.access)}${mockPaymentBanner()}`);
@@ -595,6 +658,7 @@ function providerDashboard(view) {
               <div><dt>Category reference</dt><dd>${escapeHtml(request.category_id)}</dd></div>
               <div><dt>Request reference</dt><dd>${escapeHtml(request.request_id)}</dd></div>
             </dl>
+            ${providerBidPanel(request, view.providerBidding)}
           </article>`).join('')}</section>`
       : pageState('empty', 'No requests to show', 'No currently discoverable request matched the server-authorized service set.');
     if (discovery.hasMore) {
@@ -608,7 +672,7 @@ function providerDashboard(view) {
     <section class="panel"><div class="panel-heading"><div><span>PROVIDER STATUS</span><h2>Readiness</h2></div><span class="status-chip">Read-only</span></div>${statusContent}</section>
     <section class="panel" data-provider-discovery><div class="panel-heading"><div><span>PROVIDER DISCOVERY</span><h2>Matching open requests</h2></div><span class="status-chip">Server-authorized</span></div>${discoveryContent}</section>
     ${mockPaymentBanner()}
-    <section class="inline-warning"><strong>Discovery remains read-only</strong><p>No customer contact, exact address, bid, booking, message, payment or payout action is queried or available here.</p></section>
+    <section class="inline-warning"><strong>Controlled marketplace boundary</strong><p>Bids use only the reviewed submit, withdrawal and own-bid reconciliation functions. Customer contact, exact address, acceptance, booking, message, payment and payout actions remain unavailable.</p></section>
   `);
 }
 

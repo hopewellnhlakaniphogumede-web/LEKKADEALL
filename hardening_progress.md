@@ -4125,3 +4125,84 @@ Actions remains required for the disposable-stack runtime result.
 - Migration 020, RLS, grants, eligibility functions, exact-address boundaries,
   Auth configuration, bidding, booking, payment, payout, identity, admin, and
   deployment behavior were not changed in Phase 2.
+
+### Ticket 10D Phase 1 - provider bidding database boundary - 2026-08-13
+
+**Status:** The database/security implementation and focused static gate are
+complete locally. Migration reset, pgTAP, two-session runtime behavior, and the
+complete database/security matrix require exact-head GitHub Actions.
+
+- Replaced the legacy free-form bid submit and withdrawal overloads with
+  authenticated-only fixed-`pg_catalog` boundaries. Submit accepts only a
+  request UUID and bounded positive ZAR minor-unit amount; provider identity,
+  currency, proposed start, submitted status, and expiry remain server-owned.
+- Ticket 10C discovery and Ticket 10D submission share one private canonical
+  predicate. Bid authority is recomputed with wall-clock time after the Ticket
+  10B eligibility locks and explicit request/category/service locks, including
+  publication, close/start ordering, award/cancellation, deprecated-address,
+  and public-field privacy invariants.
+- Removed authenticated raw `bids` table reads and all raw bid policies. One
+  actor-derived reconciliation function returns only bid/request IDs, amount,
+  currency, proposed start, status, and expiry for the caller's own bid.
+- Exact submission replay returns the existing canonical submitted bid without
+  another row or audit event; divergent and terminal replay fails closed.
+  Withdrawal remains risk-reducing after suspension, is stable on exact replay,
+  and rejects foreign, declined, expired, accepted, or booking-linked bids.
+- The focused 197-assertion pgTAP source covers metadata/grants, actor and
+  eligibility matrices, amount and server-owned fields, Ticket 10C state
+  equivalence, raw DML/read denial, replay, audit rollback, guard reset, and
+  genuine two-session duplicate/suspension/expiry/cancel/close/award/acceptance
+  races. The workflow runs it immediately after Ticket 10C discovery.
+- The Phase 1 review correction establishes authority -> request -> bid for
+  submit/replay and request -> selected/competing bids for cancellation and
+  acceptance. Genuine exact-replay races against cancellation, selected-bid
+  acceptance, and competing-bid acceptance prove serial completion without a
+  duplicate bid/audit or request/bid deadlock. Unexpected submit/withdraw
+  mutation or audit failures are normalized to the fixed privacy-safe RPC
+  response while their subtransaction rolls back and clears the guard.
+- The complete frontend Node suite passed **97/97**. Static scope, privacy,
+  credential-pattern, explicit-projection, legacy-signature, and
+  `git diff --check` checks were run locally.
+- Docker, Supabase CLI, and `psql` are unavailable on this host. No local
+  migration reset, pgTAP, or concurrency pass is claimed. No frontend/E2E,
+  customer acceptance UI, booking/payment, exact-address, messaging, identity,
+  admin, ranking, or deployment capability was added.
+
+### Ticket 10D Phase 2 - minimal provider bidding frontend and focused E2E - 2026-08-14
+
+**Status:** The minimal provider submit/withdraw UI and independent real-loopback
+Playwright boundary are implemented locally. Exact-head GitHub Actions and final
+Security/Release review remain required.
+
+- Added `provider-bidding.js` as the only browser boundary for the three
+  approved Phase 1 RPCs. Submit supplies only request ID plus bounded integer
+  amount minor; withdrawal supplies only bid ID; reconciliation accepts only
+  the seven reviewed own-bid fields.
+- Bidding appears only inside fresh Ticket 10C discoverable cards for an active
+  provider route. Initial and post-mutation own-bid reads prevent stale browser
+  state from being treated as authoritative.
+- Submit and withdrawal each require explicit confirmation and share one
+  dedicated mutation single-flight guard. There is no optimistic state change,
+  automatic retry, polling, timer, speculative mutation, alternate endpoint,
+  or direct `bids`/`service_requests` table access.
+- Success is rendered only after a fresh own-bid RPC confirms the same request,
+  bid and expected canonical terminal. Any denied, malformed, failed, stale, or
+  ambiguous result is reduced to fixed privacy-safe copy and blocks another
+  mutation in the current view until a deliberate fresh refresh.
+- The UI renders only amount, currency, proposed start, expiry and bid status.
+  Customer identity/contact, exact address, coordinates, acceptance, booking,
+  payment, messaging, audit, moderation, provider-private, ranking, admin and
+  identity capabilities remain absent.
+- Added an independent `bidding` E2E scope. It proves one confirmed submit, one
+  fresh reconciliation, one confirmed withdrawal, one second reconciliation,
+  terminal controls, zero direct DML, no duplicate bid/audit, no booking/address
+  row, privacy-safe output, and cleanup. The existing full Ticket 9A-9 scope is
+  not expanded; independent discovery and bidding scenarios remain excluded.
+- Local syntax checks passed. The focused provider-bidding suite passed **9/9**,
+  the E2E boundary suite passed **17/17**, and the complete frontend Node suite
+  passed **107/107**. Static privacy, credential, DML/RPC, address/storage,
+  retry/timer, scope, and diff checks passed.
+- Docker and Supabase CLI are unavailable locally, so no local Playwright
+  runtime pass is claimed. GitHub Actions must verify the independent bidding
+  journey and complete database/security/E2E regression matrix on the exact
+  commit.

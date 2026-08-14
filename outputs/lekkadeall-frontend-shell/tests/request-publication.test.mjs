@@ -228,6 +228,7 @@ test('publication is the only new RPC boundary and adds no DML, address or crede
   const rpcModules = entries.filter(([, source]) => source.includes('.rpc(')).map(([name]) => name).sort();
   assert.deepEqual(rpcModules, [
     'provider-application.js',
+    'provider-bidding.js',
     'provider-discovery.js',
     'request-cancellation.js',
     'request-draft.js',
