@@ -388,6 +388,7 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     'customer_update_draft_request',
     'customer_cancel_draft_request',
     'customer_publish_draft_request',
+    'customer_list_current_bids',
     'provider_list_discoverable_requests',
     'provider_submit_bid',
     'provider_withdraw_bid',
@@ -404,6 +405,10 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
   assert.match(
     networkSource,
     /customer_submit_provider_application:\s*\[\s*'p_business_name', 'p_category_ids', 'p_service_radius_km', 'p_terms_version'/u,
+  );
+  assert.match(
+    networkSource,
+    /customer_list_current_bids:\s*\[\s*'p_cursor_bid_id', 'p_cursor_submitted_at', 'p_request_id'/u,
   );
   assert.match(
     networkSource,
@@ -691,7 +696,7 @@ test('provider discovery E2E is isolated, RPC-only, revocable and privacy-safe',
   assert.match(fixtureSource, /allow_marketplace_state_transition[\s\S]*PROVIDER_DISCOVERY_MATCHING_TITLE[\s\S]*PROVIDER_DISCOVERY_NONMATCHING_TITLE/u);
   assert.match(networkSource, /provider_list_discoverable_requests/u);
   assert.match(runnerSource, /discovery:\s*\['--grep', 'eligible provider discovers one safe matching request and loses it after revocation'\]/u);
-  assert.match(runnerSource, /full:\s*\['--grep-invert', '\(\?:eligible provider discovers one safe matching request and loses it after revocation\|eligible provider submits and withdraws one server-reconciled bid\)'\]/u);
+  assert.match(runnerSource, /full:\s*\['--grep-invert', '\(\?:eligible provider discovers one safe matching request and loses it after revocation\|eligible provider submits and withdraws one server-reconciled bid\|customer deliberately views only current bids for an owned live request\)'\]/u);
 });
 
 test('provider bidding E2E is independent, confirmed, reconciled and privacy-safe', async () => {
@@ -716,6 +721,61 @@ test('provider bidding E2E is independent, confirmed, reconciled and privacy-saf
   assert.match(fixtureSource, /private\.service_request_addresses/u);
   assert.match(networkSource, /provider_submit_bid[\s\S]*provider_withdraw_bid[\s\S]*provider_read_own_bid/u);
   assert.match(runnerSource, /bidding:\s*\['--grep', 'eligible provider submits and withdraws one server-reconciled bid'\]/u);
+});
+
+test('customer bid viewing E2E is independent, deliberate, filtered and privacy-safe', async () => {
+  const specSource = await readFile(join(here, 'e2e/customer-bid-viewing.spec.mjs'), 'utf8');
+  const fixtureSource = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
+  const networkSource = await readFile(join(here, 'e2e/support/network-policy.mjs'), 'utf8');
+  const reporterSource = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const runnerSource = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+
+  assert.match(specSource, /test\.setTimeout\(240_000\)/u);
+  assert.match(specSource, /prepareSyntheticCustomerBidViewing/u);
+  assert.match(specSource, /signInCustomer\(page, owner, \{ requireAnonymousStorage: true \}\)/u);
+  assert.match(
+    specSource,
+    /View current bids[\s\S]*customer_list_current_bids'\)\)\.toBe\(0\)[\s\S]*\.click\(\)[\s\S]*toHaveCount\(3\)[\s\S]*customer_list_current_bids'\)\)\.toBe\(1\)/u,
+  );
+  assert.match(specSource, /ZAR 1 000\.50[\s\S]*ZAR 1 100\.00[\s\S]*ZAR 1 300\.00/u);
+  assert.match(specSource, /ZAR 1 200\.00[\s\S]*toHaveCount\(0\)[\s\S]*ZAR 1 400\.00[\s\S]*toHaveCount\(0\)[\s\S]*ZAR 1 500\.00[\s\S]*toHaveCount\(0\)/u);
+  assert.match(specSource, /revokeSyntheticCustomerBidViewingService[\s\S]*Refresh bids[\s\S]*toHaveCount\(2\)/u);
+  for (const state of ['DRAFT', 'CANCELLED', 'AWARDED', 'PAST_CLOSE']) {
+    assert.match(specSource, new RegExp(`CUSTOMER_BID_VIEWING_${state}_REQUEST_ID`));
+  }
+  assert.match(specSource, /Sign in required[\s\S]*customer-bid-viewing-failure:cross-customer[\s\S]*Request not found or unavailable/u);
+  assert.match(specSource, /assertSyntheticCustomerBidViewingPostconditions/u);
+  assert.match(specSource, /ADJACENT_READ_TABLES[\s\S]*adjacentReadBaseline\.set\(table, policy\.getTableReadCount\(table\)\)[\s\S]*toBe\(adjacentReadBaseline\.get\(table\)\)/u);
+  assert.doesNotMatch(specSource, /waitForTimeout|await new Promise|\bretry\b|service_role|response\.(?:body|json|text)/iu);
+  assert.doesNotMatch(specSource, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/u);
+
+  assert.match(fixtureSource, /provider_submit_bid[\s\S]*provider_withdraw_bid/u);
+  assert.match(
+    fixtureSource,
+    /CUSTOMER_BID_VIEWING_REQUEST_ID[\s\S]*insert into public\.bids[\s\S]*'expired'::public\.bid_status/u,
+  );
+  assert.match(fixtureSource, /assertSyntheticCustomerBidViewingPostconditions/u);
+  assert.match(fixtureSource, /public\.bids[\s\S]*CUSTOMER_BID_VIEWING_REQUEST_ID[\s\S]*<> 6/u);
+  for (const [status, count] of [
+    ['submitted', 3], ['withdrawn', 1], ['expired', 1], ['declined', 1],
+  ]) {
+    assert.match(
+      fixtureSource,
+      new RegExp(`CUSTOMER_BID_VIEWING_REQUEST_ID[\\s\\S]*bid\\.status = '${status}'::public\\.bid_status\\) <> ${count}`),
+    );
+  }
+  assert.match(fixtureSource, /private\.service_request_addresses[\s\S]*CUSTOMER_BID_VIEWING_REQUEST_ID/u);
+  assert.match(fixtureSource, /public\.bookings[\s\S]*CUSTOMER_BID_VIEWING_REQUEST_ID/u);
+  assert.match(fixtureSource, /public\.payments[\s\S]*CUSTOMER_BID_VIEWING_REQUEST_ID/u);
+
+  assert.match(networkSource, /customer_list_current_bids/u);
+  assert.match(runnerSource, /'customer-bid-viewing':\s*\['--grep', 'customer deliberately views only current bids for an owned live request'\]/u);
+  assert.match(reporterSource, /customer-bid-viewing-failure:/u);
+  for (const stage of [
+    'fixture-setup', 'owner-session', 'deliberate-view', 'filtered-bids',
+    'service-revocation', 'request-states', 'signed-out', 'cross-customer',
+    'postcondition', 'privacy', 'sign-out',
+  ]) assert.match(reporterSource, new RegExp(`(?:\\(|\\|)${stage}(?:\\||\\))`));
 });
 
 test('CI E2E job is isolated behind the complete database security job', async () => {
@@ -748,9 +808,15 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.match(workflow, /customer-draft-lifecycle-e2e:/);
   assert.match(workflow, /needs:\s*database-tests/);
   assert.match(workflow, /pnpm run test:e2e:local/);
-  for (const scope of ['discovery', 'bidding', 'lifecycle', 'aborted', 'affected', 'full']) {
+  for (const scope of [
+    'discovery', 'bidding', 'customer-bid-viewing', 'lifecycle', 'aborted', 'affected', 'full',
+  ]) {
     assert.match(workflow, new RegExp(`E2E_TEST_SCOPE:\\s*${scope}`));
   }
+  const focusedBidViewing = workflow.indexOf('Run focused customer bid viewing frontend tests');
+  const completeFrontend = workflow.indexOf('Run Ticket 9A-8 draft edit and existing frontend tests');
+  assert.ok(focusedBidViewing >= 0);
+  assert.ok(completeFrontend > focusedBidViewing);
   assert.equal((workflow.match(/uses: supabase\/setup-cli@v2/gu) ?? []).length, 2);
   assert.equal((workflow.match(/version: 2\.110\.0/gu) ?? []).length, 2);
   assert.doesNotMatch(workflow, /version:\s*latest/u);

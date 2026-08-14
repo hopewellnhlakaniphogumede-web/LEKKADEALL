@@ -268,6 +268,7 @@ test('only reviewed RPC modules exist and blocked browser capabilities remain ab
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
   const rpcModules = entries.filter(([, source]) => source.includes('.rpc(')).map(([name]) => name).sort();
   assert.deepEqual(rpcModules, [
+    'customer-bid-viewing.js',
     'provider-application.js',
     'provider-bidding.js',
     'provider-discovery.js',

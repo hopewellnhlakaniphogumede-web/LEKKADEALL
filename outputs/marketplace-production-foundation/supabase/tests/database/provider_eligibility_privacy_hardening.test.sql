@@ -1481,12 +1481,21 @@ select throws_ok(
 
 reset role;
 
+create function pg_temp.ticket10b_test_accept_bid(p_bid_id pg_catalog.uuid)
+returns pg_catalog.uuid
+language sql
+security definer
+set search_path = pg_catalog
+as $$
+  select public.customer_accept_bid(p_bid_id);
+$$;
+
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated","aal":"aal1"}';
 
 select throws_ok(
-  $$select public.customer_accept_bid(
+  $$select pg_temp.ticket10b_test_accept_bid(
     '00000000-0000-0000-0000-000000010374'
   )$$,
   '42501',

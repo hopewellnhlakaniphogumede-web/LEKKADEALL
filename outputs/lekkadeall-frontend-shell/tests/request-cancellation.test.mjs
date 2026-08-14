@@ -201,6 +201,7 @@ test('only the reviewed frontend RPC boundaries exist and blocked capabilities r
     .map(([name]) => name)
     .sort();
   assert.deepEqual(rpcModules, [
+    'customer-bid-viewing.js',
     'provider-application.js',
     'provider-bidding.js',
     'provider-discovery.js',

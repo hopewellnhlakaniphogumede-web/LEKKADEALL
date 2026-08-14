@@ -65,6 +65,7 @@ import {
   submitProviderBid,
   withdrawProviderBid,
 } from './provider-bidding.js';
+import { readCustomerCurrentBids } from './customer-bid-viewing.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -89,6 +90,9 @@ const state = {
   },
   customerDraftPublication: {
     requestId: null, confirming: false, submitting: false, confirmed: false, blocked: false, message: '',
+  },
+  customerBidViewing: {
+    requestId: null, status: 'idle', items: [], cursor: null, hasMore: false, loadingMore: false,
   },
   customerDraftEdit: null,
   providerStatus: null,
@@ -120,6 +124,8 @@ let providerDiscoveryInFlight = false;
 let providerDiscoverySequence = 0;
 let providerBidMutationInFlight = false;
 let providerBidMutationSequence = 0;
+let customerBidViewInFlight = false;
+let customerBidViewSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -159,6 +165,7 @@ function view() {
     customerRequestDetail: state.customerRequestDetail,
     customerDraftCancellation: state.customerDraftCancellation,
     customerDraftPublication: state.customerDraftPublication,
+    customerBidViewing: state.customerBidViewing,
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
     providerDiscovery: state.providerDiscovery,
@@ -188,6 +195,7 @@ function clearPersonalState() {
   resetProviderApplication();
   resetCustomerDraftCancellation();
   resetCustomerDraftPublication();
+  resetCustomerBidViewing();
   resetCustomerDraftEdit();
 }
 
@@ -210,6 +218,14 @@ function resetCustomerDraftPublication(requestId = null) {
 function resetRequestDraft() {
   state.requestDraft = {
     values: {}, errors: {}, message: '', submitting: false, requestId: null,
+  };
+}
+
+function resetCustomerBidViewing(requestId = null, status = 'idle') {
+  customerBidViewSequence += 1;
+  customerBidViewInFlight = false;
+  state.customerBidViewing = {
+    requestId, status, items: [], cursor: null, hasMore: false, loadingMore: false,
   };
 }
 
@@ -425,6 +441,68 @@ async function submitProviderBidConfirmation() {
   render();
 }
 
+function customerBidViewIsEligible(requestId) {
+  return currentPath() === '/app/customer/requests/detail'
+    && new URLSearchParams(window.location.search).get('requestId') === requestId
+    && Boolean(state.client && state.session?.user?.id)
+    && state.access?.kind === 'allowed'
+    && state.access?.role === 'customer'
+    && state.routeProfile?.role === 'customer'
+    && state.routeProfile?.account_status === 'active'
+    && state.customerRequestDetail?.ok === true
+    && state.customerRequestDetail.data?.id === requestId
+    && state.customerRequestDetail.data?.status === 'open'
+    && state.customerBidViewing.requestId === requestId;
+}
+
+async function loadCustomerBidView({ append = false } = {}) {
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  if (customerBidViewInFlight || !isCustomerRequestId(requestId)
+      || !customerBidViewIsEligible(requestId)) return;
+
+  const cursor = append ? state.customerBidViewing.cursor : null;
+  if (append && (!state.customerBidViewing.hasMore || !cursor)) return;
+  const actorId = state.session.user.id;
+  const bidViewSequence = ++customerBidViewSequence;
+  customerBidViewInFlight = true;
+  state.customerBidViewing = append
+    ? { ...state.customerBidViewing, loadingMore: true }
+    : {
+      requestId, status: 'loading', items: [], cursor: null, hasMore: false, loadingMore: false,
+    };
+  render();
+
+  const result = await readCustomerCurrentBids(state.client, requestId, { cursor });
+  if (bidViewSequence !== customerBidViewSequence) return;
+  customerBidViewInFlight = false;
+
+  if (state.session?.user?.id !== actorId || !customerBidViewIsEligible(requestId)) {
+    resetCustomerBidViewing();
+    return;
+  }
+  if (!result.ok) {
+    resetCustomerBidViewing(requestId, 'unavailable');
+    render();
+    return;
+  }
+
+  const items = append ? [...state.customerBidViewing.items, ...result.data] : result.data;
+  if (new Set(items.map((bid) => bid.bid_id)).size !== items.length) {
+    resetCustomerBidViewing(requestId, 'unavailable');
+    render();
+    return;
+  }
+  state.customerBidViewing = {
+    requestId,
+    status: items.length ? 'ready' : 'empty',
+    items,
+    cursor: result.cursor,
+    hasMore: result.hasMore,
+    loadingMore: false,
+  };
+  render();
+}
+
 function resetCustomerDraftEdit(requestId = null, loadStatus = 'loading') {
   draftEditSequence += 1;
   draftEditInFlight = false;
@@ -552,6 +630,7 @@ async function refreshRoute() {
       const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
       resetCustomerDraftCancellation(requestId);
       resetCustomerDraftPublication(requestId);
+      resetCustomerBidViewing(requestId);
       const [request] = await Promise.all([
         readOwnCustomerRequestDetail(state.client, requestId),
         loadRequestCategories(sequence),
@@ -1288,6 +1367,14 @@ document.addEventListener('click', async (event) => {
   }
 
   const providerDiscoveryAction = event.target.closest('[data-provider-discovery-action]');
+  const customerBidViewAction = event.target.closest('[data-customer-bid-view-action]');
+  if (customerBidViewAction) {
+    const action = customerBidViewAction.dataset.customerBidViewAction;
+    if (action === 'view' || action === 'refresh') await loadCustomerBidView();
+    if (action === 'load-more') await loadCustomerBidView({ append: true });
+    return;
+  }
+
   if (providerDiscoveryAction) {
     const action = providerDiscoveryAction.dataset.providerDiscoveryAction;
     if (action === 'refresh') await loadProviderDiscovery();

@@ -227,6 +227,7 @@ test('publication is the only new RPC boundary and adds no DML, address or crede
   const entries = await Promise.all(moduleNames.map(async (name) => [name, await readFile(join(root, name), 'utf8')]));
   const rpcModules = entries.filter(([, source]) => source.includes('.rpc(')).map(([name]) => name).sort();
   assert.deepEqual(rpcModules, [
+    'customer-bid-viewing.js',
     'provider-application.js',
     'provider-bidding.js',
     'provider-discovery.js',

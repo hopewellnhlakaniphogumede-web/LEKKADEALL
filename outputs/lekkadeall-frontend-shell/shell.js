@@ -30,6 +30,10 @@ import {
   PROVIDER_BID_WITHDRAW_CONFIRM_TEXT,
   PROVIDER_BID_WITHDRAW_CONFIRM_TITLE,
 } from './provider-bidding.js';
+import {
+  CUSTOMER_CURRENT_BIDS_EMPTY_MESSAGE,
+  CUSTOMER_CURRENT_BIDS_UNAVAILABLE_MESSAGE,
+} from './customer-bid-viewing.js';
 
 export const MOCK_PAYMENT_LABEL = 'Mock/sandbox — no real money moved';
 
@@ -385,6 +389,58 @@ function customerRequestListPage(view) {
   `);
 }
 
+function customerBidViewingPanel(view, request) {
+  if (request.status !== 'open' || view.accountStatus !== 'active') return '';
+  const bidView = view.customerBidViewing ?? {};
+  if (bidView.requestId !== request.id || bidView.status === 'idle') {
+    return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
+      <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Deliberate read</span></div>
+      <p>Load the current server-authorized bid fields for this request.</p>
+      <button class="button button-primary" type="button" data-customer-bid-view-action="view">View current bids</button>
+    </section>`;
+  }
+
+  if (bidView.status === 'loading') {
+    return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
+      <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Server-authorized</span></div>
+      ${pageState('loading', 'Loading current bids', 'Only the reviewed customer bid-view boundary is being used.')}
+    </section>`;
+  }
+
+  if (bidView.status === 'unavailable') {
+    return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
+      <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Unavailable</span></div>
+      <p class="form-message" role="status">${escapeHtml(CUSTOMER_CURRENT_BIDS_UNAVAILABLE_MESSAGE)}</p>
+      <button class="button button-secondary" type="button" data-customer-bid-view-action="refresh">Try again</button>
+    </section>`;
+  }
+
+  const bids = Array.isArray(bidView.items) ? bidView.items : [];
+  const cards = bids.map((bid) => `<article class="request-summary-card customer-bid-card" data-customer-bid-card>
+    <div class="request-summary-top"><span class="status-chip">${escapeHtml(bid.status)}</span><time>${escapeHtml(formatSastDateTime(bid.submitted_at))}</time></div>
+    <h3>${escapeHtml(formatZarBudgetMinor(bid.amount_minor))}</h3>
+    <dl class="request-summary-meta">
+      <div><dt>Currency</dt><dd>${escapeHtml(bid.currency)}</dd></div>
+      <div><dt>Proposed start</dt><dd>${escapeHtml(formatSastDateTime(bid.proposed_start))}</dd></div>
+      <div><dt>Expires</dt><dd>${escapeHtml(formatSastDateTime(bid.expires_at))}</dd></div>
+      <div><dt>Submitted</dt><dd>${escapeHtml(formatSastDateTime(bid.submitted_at))}</dd></div>
+      <div><dt>Bid reference</dt><dd>${escapeHtml(bid.bid_id)}</dd></div>
+    </dl>
+  </article>`).join('');
+  const content = bidView.status === 'empty' || bids.length === 0
+    ? `<p class="form-message" role="status">${escapeHtml(CUSTOMER_CURRENT_BIDS_EMPTY_MESSAGE)}</p>`
+    : `<section class="request-list" aria-label="Current bids">${cards}</section>`;
+  const loadMore = bidView.hasMore
+    ? `<button class="button button-secondary" type="button" data-customer-bid-view-action="load-more" ${bidView.loadingMore ? 'disabled' : ''}>${bidView.loadingMore ? 'Loading bids&hellip;' : 'Load more bids'}</button>`
+    : '';
+  return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
+    <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Server-authorized</span></div>
+    ${content}
+    <div class="dashboard-actions"><button class="button button-secondary" type="button" data-customer-bid-view-action="refresh" ${bidView.loadingMore ? 'disabled' : ''}>Refresh bids</button>${loadMore}</div>
+    <p class="form-message">Bid viewing is read-only and does not create a marketplace transition.</p>
+  </section>`;
+}
+
 function customerRequestDetailPage(view) {
   if (view.access?.kind !== 'allowed' || view.access?.role !== 'customer') {
     const deniedAccess = view.access?.kind === 'allowed' ? { kind: 'accessDenied' } : view.access;
@@ -458,7 +514,8 @@ function customerRequestDetailPage(view) {
       </dl>
     </article>
     ${draftActionsContent}
-    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned eligible draft may be edited, cancelled or published. Exact-address handling, provider bidding and payment actions remain unavailable.</p></section>
+    ${customerBidViewingPanel(view, request)}
+    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned eligible draft may be edited, cancelled or published. Bid viewing is available only for an eligible open request; exact-address handling and downstream marketplace actions remain unavailable.</p></section>
   `);
 }
 
