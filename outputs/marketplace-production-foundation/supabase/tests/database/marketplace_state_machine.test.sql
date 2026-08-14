@@ -185,6 +185,8 @@ $$;
 create function pg_temp.try_accept_bid(p_bid_id uuid)
 returns uuid
 language plpgsql
+security definer
+set search_path = pg_catalog
 as $$
 declare
   v_booking_id uuid;

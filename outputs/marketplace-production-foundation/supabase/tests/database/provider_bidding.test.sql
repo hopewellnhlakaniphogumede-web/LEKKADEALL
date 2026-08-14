@@ -285,6 +285,17 @@ $$;
 revoke all on function public.ticket10d_test_lock_request(pg_catalog.uuid) from public, anon, authenticated, service_role;
 grant execute on function public.ticket10d_test_lock_request(pg_catalog.uuid) to authenticated;
 
+create function public.ticket10d_test_accept_bid(p_bid_id pg_catalog.uuid)
+returns pg_catalog.uuid
+language sql
+security definer
+set search_path = pg_catalog
+as $$
+  select public.customer_accept_bid(p_bid_id);
+$$;
+revoke all on function public.ticket10d_test_accept_bid(pg_catalog.uuid) from public, anon, authenticated, service_role;
+grant execute on function public.ticket10d_test_accept_bid(pg_catalog.uuid) to authenticated;
+
 do $$
 declare
   v_password pg_catalog.text := pg_catalog.replace(
@@ -703,7 +714,7 @@ update ticket10d_results as result
 set result_value = remote.booking_id
 from extensions.dblink(
   'ticket10d_a',
-  $$select public.customer_accept_bid('00000000-0000-0000-0000-000000012112')::pg_catalog.text$$
+  $$select public.ticket10d_test_accept_bid('00000000-0000-0000-0000-000000012112')::pg_catalog.text$$
 ) as remote(booking_id pg_catalog.text)
 where result.name = 'blocked';
 select isnt((select result_value from ticket10d_results where name = 'blocked'), null, 'selected-bid acceptance completes without replay deadlock');
@@ -747,7 +758,7 @@ update ticket10d_results as result
 set result_value = remote.booking_id
 from extensions.dblink(
   'ticket10d_a',
-  $$select public.customer_accept_bid('00000000-0000-0000-0000-000000012114')::pg_catalog.text$$
+  $$select public.ticket10d_test_accept_bid('00000000-0000-0000-0000-000000012114')::pg_catalog.text$$
 ) as remote(booking_id pg_catalog.text)
 where result.name = 'blocked';
 select isnt((select result_value from ticket10d_results where name = 'blocked'), null, 'competing-bid acceptance completes without replay deadlock');
@@ -820,7 +831,7 @@ select is(
   extensions.dblink_send_query(
     'ticket10d_a',
     pg_catalog.format(
-      'select public.customer_accept_bid(%L::pg_catalog.uuid)::pg_catalog.text',
+      'select public.ticket10d_test_accept_bid(%L::pg_catalog.uuid)::pg_catalog.text',
       (select result_value from ticket10d_results where name = 'withdraw')
     )
   ),
@@ -880,7 +891,7 @@ select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'request awar
 select is(
   extensions.dblink_send_query(
     'ticket10d_a',
-    $$select public.customer_accept_bid('00000000-0000-0000-0000-000000012110')::pg_catalog.text$$
+    $$select public.ticket10d_test_accept_bid('00000000-0000-0000-0000-000000012110')::pg_catalog.text$$
   ),
   1,
   'request award starts before the competing provider bid'
@@ -1323,6 +1334,7 @@ delete from public.service_categories where id = '00000000-0000-0000-0000-000000
 drop function public.ticket10d_test_cancel_request(pg_catalog.uuid);
 drop function public.ticket10d_test_close_request(pg_catalog.uuid);
 drop function public.ticket10d_test_lock_request(pg_catalog.uuid);
+drop function public.ticket10d_test_accept_bid(pg_catalog.uuid);
 commit;
 
 drop role ticket10d_concurrency_login;
