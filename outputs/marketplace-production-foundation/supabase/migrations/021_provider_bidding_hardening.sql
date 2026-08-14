@@ -272,32 +272,6 @@ begin
     raise exception 'Provider bid is unavailable' using errcode = '22023';
   end if;
 
-  -- If this can be a replay, take the bid lock before authority/request locks.
-  -- Acceptance and withdrawal also begin with this bid lock, avoiding a
-  -- reverse edge for an already-existing bid.
-  select
-    bid.id,
-    bid.amount_minor,
-    bid.currency,
-    bid.proposed_start,
-    bid.status,
-    bid.expires_at,
-    bid.message,
-    bid.perks
-    into
-      v_bid_id,
-      v_existing_amount,
-      v_existing_currency,
-      v_existing_start,
-      v_existing_status,
-      v_existing_expires_at,
-      v_existing_message,
-      v_existing_perks
-  from public.bids as bid
-  where bid.request_id = p_request_id
-    and bid.provider_id = v_actor_id
-  for update;
-
   begin
     perform private.require_provider_marketplace_eligibility(v_actor_id);
   exception
@@ -354,32 +328,31 @@ begin
     raise exception 'Provider bid is unavailable' using errcode = '42501';
   end if;
 
-  -- A concurrent first submission is serialized by the request lock. Observe
-  -- it here before deciding whether this call is an exact replay.
-  if v_bid_id is null then
-    select
-      bid.id,
-      bid.amount_minor,
-      bid.currency,
-      bid.proposed_start,
-      bid.status,
-      bid.expires_at,
-      bid.message,
-      bid.perks
-      into
-        v_bid_id,
-        v_existing_amount,
-        v_existing_currency,
-        v_existing_start,
-        v_existing_status,
-        v_existing_expires_at,
-        v_existing_message,
-        v_existing_perks
-    from public.bids as bid
-    where bid.request_id = p_request_id
-      and bid.provider_id = v_actor_id
-    for update;
-  end if;
+  -- Every submit and exact replay follows authority -> request -> bid. The
+  -- request lock serializes cancellation and acceptance before a replay can
+  -- lock its bid, preventing a bid/request reverse edge.
+  select
+    bid.id,
+    bid.amount_minor,
+    bid.currency,
+    bid.proposed_start,
+    bid.status,
+    bid.expires_at,
+    bid.message,
+    bid.perks
+    into
+      v_bid_id,
+      v_existing_amount,
+      v_existing_currency,
+      v_existing_start,
+      v_existing_status,
+      v_existing_expires_at,
+      v_existing_message,
+      v_existing_perks
+  from public.bids as bid
+  where bid.request_id = p_request_id
+    and bid.provider_id = v_actor_id
+  for update;
 
   if v_bid_id is not null then
     if v_existing_amount = p_amount_minor
@@ -444,7 +417,7 @@ begin
         'off',
         true
       );
-      raise;
+      raise exception 'Provider bid is unavailable' using errcode = '40001';
   end;
 
   perform pg_catalog.set_config(
@@ -550,7 +523,7 @@ begin
         'off',
         true
       );
-      raise;
+      raise exception 'Provider bid is unavailable' using errcode = '40001';
   end;
 
   perform pg_catalog.set_config(
@@ -598,6 +571,239 @@ begin
   from public.bids as bid
   where bid.provider_id = v_actor_id
     and bid.request_id = p_request_id;
+end;
+$$;
+
+-- Cancellation already locks request -> submitted bids. Keep acceptance and
+-- submit/replay on that same request -> bid order so no path can hold a bid
+-- while waiting for a request that another transaction holds while waiting
+-- for that bid.
+create or replace function public.customer_accept_bid(
+  p_bid_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, private, auth
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_bid_request_id uuid;
+  v_bid public.bids%rowtype;
+  v_request public.service_requests%rowtype;
+  v_booking_id uuid;
+  v_platform_fee_minor integer;
+begin
+  if v_actor_id is null then
+    raise exception 'Authentication is required to accept a bid'
+      using errcode = '42501';
+  end if;
+
+  -- request_id is immutable under the marketplace state trigger. Resolve it
+  -- without a row lock, then take the canonical request lock before any bid.
+  select bid.request_id
+    into v_bid_request_id
+  from public.bids as bid
+  where bid.id = p_bid_id;
+
+  if not found then
+    raise exception 'Bid % does not exist', p_bid_id
+      using errcode = '02000';
+  end if;
+
+  select *
+    into v_request
+  from public.service_requests
+  where id = v_bid_request_id
+  for update;
+
+  if not found or v_request.customer_id <> v_actor_id then
+    raise exception 'Request not found or not owned by caller'
+      using errcode = '42501';
+  end if;
+
+  select *
+    into v_bid
+  from public.bids
+  where id = p_bid_id
+  for update;
+
+  if not found then
+    raise exception 'Bid % does not exist', p_bid_id
+      using errcode = '02000';
+  end if;
+
+  if v_request.status <> 'open' then
+    raise exception 'Only open requests may accept bids'
+      using errcode = '42501';
+  end if;
+
+  if v_request.closes_at is null or v_request.closes_at <= now() then
+    raise exception 'Request is closed for bid acceptance'
+      using errcode = '42501';
+  end if;
+
+  if v_bid.request_id <> v_request.id then
+    raise exception 'Bid does not belong to this request'
+      using errcode = '23514';
+  end if;
+
+  if v_bid.status <> 'submitted' then
+    raise exception 'Only submitted bids may be accepted'
+      using errcode = '42501';
+  end if;
+
+  if v_bid.expires_at <= now() then
+    raise exception 'Expired bids may not be accepted'
+      using errcode = '42501';
+  end if;
+
+  if not public.is_approved_provider(v_bid.provider_id) then
+    raise exception 'Bid provider is no longer active and approved'
+      using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1
+    from public.provider_services ps
+    where ps.provider_id = v_bid.provider_id
+      and ps.category_id = v_request.category_id
+      and ps.active = true
+  ) then
+    raise exception 'Bid provider is no longer eligible for this request category'
+      using errcode = '42501';
+  end if;
+
+  if exists (
+    select 1
+    from public.bookings b
+    where b.request_id = v_request.id
+  ) then
+    raise exception 'A booking already exists for this request'
+      using errcode = '23505';
+  end if;
+
+  v_platform_fee_minor := private.calculate_platform_fee_minor(v_bid.amount_minor);
+
+  perform set_config('lekkadeall.allow_marketplace_state_transition', 'on', true);
+
+  begin
+    update public.bids
+    set status = 'accepted',
+        accepted_at = now(),
+        updated_at = now()
+    where id = v_bid.id;
+
+    update public.bids
+    set status = 'declined',
+        declined_at = now(),
+        updated_at = now()
+    where request_id = v_request.id
+      and id <> v_bid.id
+      and status = 'submitted';
+
+    update public.service_requests
+    set status = 'awarded',
+        awarded_at = now(),
+        updated_at = now()
+    where id = v_request.id;
+
+    insert into public.bookings (
+      public_reference,
+      request_id,
+      bid_id,
+      customer_id,
+      provider_id,
+      service_amount_minor,
+      platform_fee_minor,
+      currency,
+      scheduled_start,
+      status
+    ) values (
+      'LD-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 12)),
+      v_request.id,
+      v_bid.id,
+      v_request.customer_id,
+      v_bid.provider_id,
+      v_bid.amount_minor,
+      v_platform_fee_minor,
+      v_bid.currency,
+      v_bid.proposed_start,
+      'scheduled'
+    )
+    returning id into v_booking_id;
+
+    insert into public.payments (
+      booking_id,
+      provider_name,
+      provider_reference,
+      status,
+      amount_minor,
+      currency,
+      release_paused,
+      funded_at,
+      refunded_minor
+    ) values (
+      v_booking_id,
+      'internal_pending',
+      null,
+      'pending',
+      v_bid.amount_minor + v_platform_fee_minor,
+      v_bid.currency,
+      true,
+      null,
+      0
+    );
+
+    perform private.append_audit_event(
+      v_actor_id,
+      'customer.bid_accepted',
+      'bid',
+      v_bid.id::text,
+      'Customer accepted provider bid through controlled transaction',
+      jsonb_build_object(
+        'request_id', v_request.id,
+        'booking_id', v_booking_id,
+        'provider_id', v_bid.provider_id
+      )
+    );
+
+    perform private.append_audit_event(
+      v_actor_id,
+      'booking.created',
+      'booking',
+      v_booking_id::text,
+      'Booking created from accepted bid',
+      jsonb_build_object(
+        'request_id', v_request.id,
+        'bid_id', v_bid.id,
+        'customer_id', v_request.customer_id,
+        'provider_id', v_bid.provider_id,
+        'status', 'scheduled'
+      )
+    );
+
+    perform private.append_audit_event(
+      v_actor_id,
+      'payment.intent_prepared',
+      'booking',
+      v_booking_id::text,
+      'Internal pending payment record prepared; real payment integration remains a later ticket',
+      jsonb_build_object(
+        'booking_id', v_booking_id,
+        'amount_minor', v_bid.amount_minor + v_platform_fee_minor,
+        'currency', v_bid.currency
+      )
+    );
+  exception
+    when others then
+      perform set_config('lekkadeall.allow_marketplace_state_transition', 'off', true);
+      raise;
+  end;
+
+  perform set_config('lekkadeall.allow_marketplace_state_transition', 'off', true);
+
+  return v_booking_id;
 end;
 $$;
 

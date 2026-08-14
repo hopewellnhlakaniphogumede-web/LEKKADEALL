@@ -643,17 +643,20 @@ supabase test db supabase/tests/database/marketplace_state_machine.test.sql
 supabase stop --no-backup
 ```
 
-The 158-assertion focused source freezes the two minimal bid mutation
+The 197-assertion focused source freezes the two minimal bid mutation
 signatures and the seven-field own-bid reconciliation read, fixed
 `search_path`, schema qualification, explicit projections, least-privilege
 grants, legacy overload removal, raw bid DML/read denial, server-owned bid
-fields, generic failures, audit atomicity, and transaction-local guard reset.
+fields, generic internal-failure normalization, audit atomicity, and
+transaction-local guard reset.
 
 It also includes genuine two-session exact-duplicate, eligibility suspension,
 eligibility expiry, request cancellation, request close, request award, and
-withdrawal-versus-acceptance races. Those checks must yield one serial
-canonical result, no duplicate row/audit, no stale post-wait authority, and no
-withdrawn accepted or booking-linked bid. No retry loop or sleep is used.
+withdrawal-versus-acceptance races. Exact replay is additionally raced against
+request cancellation, selected-bid acceptance, and competing-bid acceptance.
+Those checks must yield one serial canonical result, no deadlock, no duplicate
+row/audit, no stale post-wait authority, and no withdrawn accepted or
+booking-linked bid. No retry loop or sleep is used.
 
 Local verification on 2026-08-13:
 

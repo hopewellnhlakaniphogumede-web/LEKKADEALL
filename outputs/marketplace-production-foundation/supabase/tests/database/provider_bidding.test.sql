@@ -156,7 +156,10 @@ insert into public.service_requests (
   ('00000000-0000-0000-0000-000000012103', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Concurrent cancellation bid request', 'Safe public request for cancellation versus bid serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 52000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
   ('00000000-0000-0000-0000-000000012104', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Concurrent acceptance bid request', 'Safe public request for acceptance versus withdrawal serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 53000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
   ('00000000-0000-0000-0000-000000012105', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Concurrent award bid request', 'Safe public request for award versus competing bid serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 54000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
-  ('00000000-0000-0000-0000-000000012106', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Concurrent close bid request', 'Safe public request for close versus bid serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 55000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour');
+  ('00000000-0000-0000-0000-000000012106', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Concurrent close bid request', 'Safe public request for close versus bid serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 55000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
+  ('00000000-0000-0000-0000-000000012107', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Replay cancellation request', 'Safe public request for replay versus cancellation serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 56000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
+  ('00000000-0000-0000-0000-000000012108', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Selected replay acceptance request', 'Safe public request for selected replay versus acceptance serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 57000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour'),
+  ('00000000-0000-0000-0000-000000012109', '00000000-0000-0000-0000-000000012003', '00000000-0000-0000-0000-000000012010', 'Competing replay acceptance request', 'Safe public request for competing replay versus acceptance serialization.', 'Die Bult', 'Potchefstroom', pg_catalog.now() + interval '5 days', 58000, 'open', pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour');
 
 insert into public.bids (
   id, request_id, provider_id, amount_minor, currency, proposed_start,
@@ -173,6 +176,48 @@ insert into public.bids (
   'submitted',
   pg_catalog.now() + interval '2 days'
 );
+
+insert into public.bids (
+  id, request_id, provider_id, amount_minor, currency, proposed_start,
+  message, perks, status, expires_at
+)
+select
+  fixture.bid_id,
+  request.id,
+  fixture.provider_id,
+  fixture.amount_minor,
+  'ZAR',
+  request.requested_start,
+  null,
+  '{}'::pg_catalog.text[],
+  'submitted',
+  request.closes_at
+from public.service_requests as request
+join (
+  values
+    ('00000000-0000-0000-0000-000000012111'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012107'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012002'::pg_catalog.uuid, 49100),
+    ('00000000-0000-0000-0000-000000012112'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012108'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012002'::pg_catalog.uuid, 49200),
+    ('00000000-0000-0000-0000-000000012113'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012109'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012002'::pg_catalog.uuid, 49300),
+    ('00000000-0000-0000-0000-000000012114'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012109'::pg_catalog.uuid, '00000000-0000-0000-0000-000000012004'::pg_catalog.uuid, 49400)
+) as fixture(bid_id, request_id, provider_id, amount_minor)
+  on fixture.request_id = request.id;
+
+insert into public.audit_events (
+  actor_id, action, object_type, object_id, reason, metadata
+)
+select
+  bid.provider_id,
+  'provider.bid_submitted',
+  'bid',
+  bid.id::pg_catalog.text,
+  'Provider submitted bid through controlled boundary',
+  pg_catalog.jsonb_build_object(
+    'request_id', bid.request_id,
+    'amount_minor', bid.amount_minor,
+    'expires_at', bid.expires_at
+  )
+from public.bids as bid
+where bid.id between '00000000-0000-0000-0000-000000012111' and '00000000-0000-0000-0000-000000012114';
 set local lekkadeall.allow_marketplace_state_transition = 'off';
 
 create function public.ticket10d_test_close_request(p_request_id pg_catalog.uuid)
@@ -217,6 +262,28 @@ end;
 $$;
 revoke all on function public.ticket10d_test_cancel_request(pg_catalog.uuid) from public, anon, authenticated, service_role;
 grant execute on function public.ticket10d_test_cancel_request(pg_catalog.uuid) to authenticated;
+
+create function public.ticket10d_test_lock_request(p_request_id pg_catalog.uuid)
+returns pg_catalog.text
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  perform request.id
+  from public.service_requests as request
+  where request.id = p_request_id
+  for update;
+
+  if not found then
+    raise exception 'Synthetic request fixture is unavailable';
+  end if;
+
+  return 'locked';
+end;
+$$;
+revoke all on function public.ticket10d_test_lock_request(pg_catalog.uuid) from public, anon, authenticated, service_role;
+grant execute on function public.ticket10d_test_lock_request(pg_catalog.uuid) to authenticated;
 
 do $$
 declare
@@ -557,6 +624,147 @@ select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket1
 select is((select status::pg_catalog.text from public.service_requests where id = '00000000-0000-0000-0000-000000012103'), 'cancelled', 'cancellation remains authoritative');
 select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012103'), 0::pg_catalog.int8, 'cancellation race creates no bid');
 
+-- An exact replay follows request -> bid, so cancellation can complete while
+-- replay waits without forming the former request/bid deadlock cycle.
+select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'replay cancellation session begins');
+select is(
+  (
+    select result.lock_state
+    from extensions.dblink(
+      'ticket10d_a',
+      $$select public.ticket10d_test_lock_request('00000000-0000-0000-0000-000000012107')$$
+    ) as result(lock_state pg_catalog.text)
+  ),
+  'locked',
+  'cancellation session holds the canonical request lock before replay'
+);
+select is(
+  extensions.dblink_send_query(
+    'ticket10d_b',
+    $$select public.provider_submit_bid('00000000-0000-0000-0000-000000012107', 49100)::pg_catalog.text$$
+  ),
+  1,
+  'exact replay starts while cancellation owns the request lock'
+);
+select is(extensions.dblink_is_busy('ticket10d_b'), 1, 'exact replay waits on request before its bid');
+select is(
+  (
+    select result.cancel_state
+    from extensions.dblink(
+      'ticket10d_a',
+      $$select public.ticket10d_test_cancel_request('00000000-0000-0000-0000-000000012107')$$
+    ) as result(cancel_state pg_catalog.text)
+  ),
+  'cancelled',
+  'cancellation completes without waiting on a replay-held bid'
+);
+select is(extensions.dblink_exec('ticket10d_a', 'commit'), 'COMMIT', 'replay cancellation commits its serial outcome');
+update ticket10d_results as result
+set result_value = remote.result_value
+from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)
+where result.name = 'blocked';
+update ticket10d_results
+set error_message = extensions.dblink_error_message('ticket10d_b')
+where name = 'blocked';
+select is(
+  (select pg_catalog.split_part(error_message, E'\n', 1) from ticket10d_results where name = 'blocked'),
+  'ERROR:  Provider bid is unavailable',
+  'waiting exact replay fails closed after cancellation'
+);
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'failed replay cancellation result is drained');
+select is((select status::pg_catalog.text from public.service_requests where id = '00000000-0000-0000-0000-000000012107'), 'cancelled', 'replay cancellation leaves the request cancelled');
+select is((select status::pg_catalog.text from public.bids where id = '00000000-0000-0000-0000-000000012111'), 'declined', 'replay cancellation leaves the existing bid declined');
+select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012107'), 1::pg_catalog.int8, 'replay cancellation creates no duplicate bid');
+select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and object_id = '00000000-0000-0000-0000-000000012111'), 1::pg_catalog.int8, 'replay cancellation creates no duplicate submit audit');
+
+-- Selected-bid replay also waits on the request before the selected bid.
+select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'selected replay acceptance session begins');
+select is(
+  (
+    select result.lock_state
+    from extensions.dblink(
+      'ticket10d_a',
+      $$select public.ticket10d_test_lock_request('00000000-0000-0000-0000-000000012108')$$
+    ) as result(lock_state pg_catalog.text)
+  ),
+  'locked',
+  'acceptance session holds request before selected-bid replay'
+);
+select is(
+  extensions.dblink_send_query(
+    'ticket10d_b',
+    $$select public.provider_submit_bid('00000000-0000-0000-0000-000000012108', 49200)::pg_catalog.text$$
+  ),
+  1,
+  'selected-bid exact replay starts while acceptance owns request'
+);
+select is(extensions.dblink_is_busy('ticket10d_b'), 1, 'selected-bid replay waits on request before selected bid');
+update ticket10d_results as result
+set result_value = remote.booking_id
+from extensions.dblink(
+  'ticket10d_a',
+  $$select public.customer_accept_bid('00000000-0000-0000-0000-000000012112')::pg_catalog.text$$
+) as remote(booking_id pg_catalog.text)
+where result.name = 'blocked';
+select isnt((select result_value from ticket10d_results where name = 'blocked'), null, 'selected-bid acceptance completes without replay deadlock');
+select is(extensions.dblink_exec('ticket10d_a', 'commit'), 'COMMIT', 'selected-bid acceptance commits its serial outcome');
+update ticket10d_results as result
+set result_value = remote.result_value
+from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)
+where result.name = 'blocked';
+update ticket10d_results set error_message = extensions.dblink_error_message('ticket10d_b') where name = 'blocked';
+select is((select pg_catalog.split_part(error_message, E'\n', 1) from ticket10d_results where name = 'blocked'), 'ERROR:  Provider bid is unavailable', 'selected-bid replay fails closed after acceptance');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'failed selected-bid replay result is drained');
+select is((select status::pg_catalog.text from public.bids where id = '00000000-0000-0000-0000-000000012112'), 'accepted', 'selected replay race leaves bid accepted');
+select is((select pg_catalog.count(*) from public.bookings where request_id = '00000000-0000-0000-0000-000000012108'), 1::pg_catalog.int8, 'selected replay race creates exactly one booking');
+select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012108'), 1::pg_catalog.int8, 'selected replay race creates no duplicate bid');
+select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and object_id = '00000000-0000-0000-0000-000000012112'), 1::pg_catalog.int8, 'selected replay race creates no duplicate submit audit');
+
+-- Competing-bid replay waits at the same request boundary while acceptance
+-- locks the selected bid and then declines the replayed competitor.
+select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'competing replay acceptance session begins');
+select is(
+  (
+    select result.lock_state
+    from extensions.dblink(
+      'ticket10d_a',
+      $$select public.ticket10d_test_lock_request('00000000-0000-0000-0000-000000012109')$$
+    ) as result(lock_state pg_catalog.text)
+  ),
+  'locked',
+  'acceptance session holds request before competing-bid replay'
+);
+select is(
+  extensions.dblink_send_query(
+    'ticket10d_b',
+    $$select public.provider_submit_bid('00000000-0000-0000-0000-000000012109', 49300)::pg_catalog.text$$
+  ),
+  1,
+  'competing exact replay starts while acceptance owns request'
+);
+select is(extensions.dblink_is_busy('ticket10d_b'), 1, 'competing replay waits on request before competing bid');
+update ticket10d_results as result
+set result_value = remote.booking_id
+from extensions.dblink(
+  'ticket10d_a',
+  $$select public.customer_accept_bid('00000000-0000-0000-0000-000000012114')::pg_catalog.text$$
+) as remote(booking_id pg_catalog.text)
+where result.name = 'blocked';
+select isnt((select result_value from ticket10d_results where name = 'blocked'), null, 'competing-bid acceptance completes without replay deadlock');
+select is(extensions.dblink_exec('ticket10d_a', 'commit'), 'COMMIT', 'competing-bid acceptance commits its serial outcome');
+update ticket10d_results as result
+set result_value = remote.result_value
+from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)
+where result.name = 'blocked';
+update ticket10d_results set error_message = extensions.dblink_error_message('ticket10d_b') where name = 'blocked';
+select is((select pg_catalog.split_part(error_message, E'\n', 1) from ticket10d_results where name = 'blocked'), 'ERROR:  Provider bid is unavailable', 'competing replay fails closed after request award');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10d_b', false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'failed competing replay result is drained');
+select is((select status::pg_catalog.text from public.bids where id = '00000000-0000-0000-0000-000000012114'), 'accepted', 'competing replay race leaves selected bid accepted');
+select is((select status::pg_catalog.text from public.bids where id = '00000000-0000-0000-0000-000000012113'), 'declined', 'competing replay race leaves replayed bid declined');
+select is((select pg_catalog.count(*) from public.bookings where request_id = '00000000-0000-0000-0000-000000012109'), 1::pg_catalog.int8, 'competing replay race creates exactly one booking');
+select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012109'), 2::pg_catalog.int8, 'competing replay race creates no duplicate bid');
+select is((select pg_catalog.count(*) from public.audit_events where action = 'provider.bid_submitted' and object_id = '00000000-0000-0000-0000-000000012113'), 1::pg_catalog.int8, 'competing replay race creates no duplicate submit audit');
+
 -- A close-time transition retains the request lock; submit uses wall clock
 -- only after that wait and cannot preserve stale pre-close authority.
 select is(extensions.dblink_exec('ticket10d_a', 'begin'), 'BEGIN', 'request close session begins');
@@ -796,6 +1004,8 @@ select is(pg_catalog.pg_get_functiondef('public.provider_submit_bid(uuid,integer
 select is(pg_catalog.pg_get_functiondef('public.provider_withdraw_bid(uuid)'::pg_catalog.regprocedure) ~* 'p_reason', false, 'withdraw exposes no caller-controlled audit reason');
 select is(pg_catalog.pg_get_functiondef('public.provider_submit_bid(uuid,integer)'::pg_catalog.regprocedure) ~* 'private\.provider_request_is_discoverable', true, 'submit uses the shared Ticket 10C predicate');
 select is(pg_catalog.pg_get_functiondef('public.provider_list_discoverable_requests(integer,timestamptz,uuid)'::pg_catalog.regprocedure) ~* 'private\.provider_request_is_discoverable', true, 'Ticket 10C discovery uses the same predicate');
+select is(pg_catalog.pg_get_functiondef('public.provider_submit_bid(uuid,integer)'::pg_catalog.regprocedure) ~ 'raise;', false, 'submit does not rethrow raw internal failures');
+select is(pg_catalog.pg_get_functiondef('public.provider_withdraw_bid(uuid)'::pg_catalog.regprocedure) ~ 'raise;', false, 'withdraw does not rethrow raw internal failures');
 
 select is(
   (
@@ -1026,7 +1236,7 @@ update public.service_requests set published_at = pg_catalog.now() - interval '1
 set local lekkadeall.allow_marketplace_state_transition = 'off';
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000011';
-select throws_ok($$select public.provider_submit_bid('00000000-0000-0000-0000-000000012202', 51000)$$, 'P0001', 'Synthetic bid audit failure', 'audit failure prevents bid success');
+select throws_ok($$select public.provider_submit_bid('00000000-0000-0000-0000-000000012202', 51000)$$, '40001', 'Provider bid is unavailable', 'audit failure returns only the fixed generic response');
 reset role;
 drop trigger fail_ticket10d_audit_insert on public.audit_events;
 select is((select pg_catalog.count(*) from public.bids where request_id = '00000000-0000-0000-0000-000000012202'), 0::pg_catalog.int8, 'audit failure rolls back bid insertion');
@@ -1047,16 +1257,16 @@ where payment_id in (
   where booking_id in (
     select id
     from public.bookings
-    where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106'
+    where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012109'
   )
 );
 alter table public.payment_events enable trigger payment_events_append_only;
 set local lekkadeall.allow_marketplace_state_transition = 'on';
-delete from public.payments where booking_id in (select id from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106');
+delete from public.payments where booking_id in (select id from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012109');
 set local lekkadeall.allow_trusted_payment_update = 'off';
-delete from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
-delete from public.bids where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
-delete from public.service_requests where id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012106';
+delete from public.bookings where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012109';
+delete from public.bids where request_id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012109';
+delete from public.service_requests where id between '00000000-0000-0000-0000-000000012101' and '00000000-0000-0000-0000-000000012109';
 set local lekkadeall.allow_marketplace_state_transition = 'off';
 
 alter table public.audit_events disable trigger audit_events_append_only;
@@ -1073,7 +1283,10 @@ or metadata ->> 'request_id' in (
   '00000000-0000-0000-0000-000000012103',
   '00000000-0000-0000-0000-000000012104',
   '00000000-0000-0000-0000-000000012105',
-  '00000000-0000-0000-0000-000000012106'
+  '00000000-0000-0000-0000-000000012106',
+  '00000000-0000-0000-0000-000000012107',
+  '00000000-0000-0000-0000-000000012108',
+  '00000000-0000-0000-0000-000000012109'
 );
 alter table public.audit_events enable trigger audit_events_append_only;
 
@@ -1109,6 +1322,7 @@ alter table private.provider_eligibility_decisions enable trigger provider_eligi
 delete from public.service_categories where id = '00000000-0000-0000-0000-000000012010';
 drop function public.ticket10d_test_cancel_request(pg_catalog.uuid);
 drop function public.ticket10d_test_close_request(pg_catalog.uuid);
+drop function public.ticket10d_test_lock_request(pg_catalog.uuid);
 commit;
 
 drop role ticket10d_concurrency_login;

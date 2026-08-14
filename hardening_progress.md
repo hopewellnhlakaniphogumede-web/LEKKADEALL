@@ -4148,11 +4148,18 @@ complete database/security matrix require exact-head GitHub Actions.
   another row or audit event; divergent and terminal replay fails closed.
   Withdrawal remains risk-reducing after suspension, is stable on exact replay,
   and rejects foreign, declined, expired, accepted, or booking-linked bids.
-- The focused 158-assertion pgTAP source covers metadata/grants, actor and
+- The focused 197-assertion pgTAP source covers metadata/grants, actor and
   eligibility matrices, amount and server-owned fields, Ticket 10C state
   equivalence, raw DML/read denial, replay, audit rollback, guard reset, and
   genuine two-session duplicate/suspension/expiry/cancel/close/award/acceptance
   races. The workflow runs it immediately after Ticket 10C discovery.
+- The Phase 1 review correction establishes authority -> request -> bid for
+  submit/replay and request -> selected/competing bids for cancellation and
+  acceptance. Genuine exact-replay races against cancellation, selected-bid
+  acceptance, and competing-bid acceptance prove serial completion without a
+  duplicate bid/audit or request/bid deadlock. Unexpected submit/withdraw
+  mutation or audit failures are normalized to the fixed privacy-safe RPC
+  response while their subtransaction rolls back and clears the guard.
 - The complete frontend Node suite passed **97/97**. Static scope, privacy,
   credential-pattern, explicit-projection, legacy-signature, and
   `git diff --check` checks were run locally.
