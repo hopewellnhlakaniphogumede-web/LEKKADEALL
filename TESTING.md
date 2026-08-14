@@ -717,3 +717,49 @@ Local verification on 2026-08-14:
 - Docker and Supabase CLI are unavailable locally. No local real-loopback
   Playwright execution is claimed; the exact-head GitHub Actions bidding scope
   and complete regression matrix remain authoritative.
+
+## Ticket 10E Phase 2 customer bid viewing frontend and E2E
+
+Run the focused customer bid-viewing and E2E/static boundary suites:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/customer-bid-viewing.test.mjs
+node --test outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs
+```
+
+The customer request-detail view exposes one deliberate read action only for a
+fresh RLS-owned open request on an active customer route. The browser calls
+only `customer_list_current_bids(p_request_id, p_cursor_submitted_at,
+p_cursor_bid_id)`, accepts the exact seven reviewed fields, and renders a fixed
+20-row chronological keyset page using escaped ZAR/SAST presentation. It sends
+no authority input, performs no direct `bids` read or DML, persists no bid
+state, and adds no acceptance, booking, payment, address, contact, messaging,
+ranking, or provider-identity capability.
+
+The viewer is not prefetched or polled. Each initial view, refresh, and
+load-more read is a deliberate single-flight action. Failed, malformed, stale,
+ineligible, or actor-switched outcomes clear prior cards and use fixed generic
+empty/unavailable states without automatic retry or record-existence detail.
+
+The independent Playwright scope is
+`E2E_TEST_SCOPE=customer-bid-viewing`. It creates disposable synthetic owner,
+cross-customer, and provider actors; creates canonical submitted and withdrawn
+bids through the reviewed provider RPCs; and seeds only the additional expired
+and declined negative fixtures behind the loopback-only fixture boundary. It
+proves zero viewer RPCs before the deliberate action, exactly one initial RPC,
+chronological safe cards, exclusion of withdrawn/expired/declined bids,
+fresh service-revocation filtering, signed-out and cross-customer denial, and
+absence on draft/cancelled/awarded/past-close request states. The legacy full
+scope excludes this independent journey.
+
+Local verification on 2026-08-14:
+
+- Syntax checks passed for the changed frontend, focused test, Playwright
+  scenario, fixture, network-policy, reporter, runner, and E2E-boundary modules.
+- The focused customer bid-viewing plus E2E/static boundary run passed
+  **25/25**; the focused module accounts for **7/7** of those tests.
+- The complete frontend Node suite passed **115/115** before the final
+  documentation-only update and is rerun as part of the commit gate.
+- Docker and Supabase CLI are unavailable locally. No local disposable-stack
+  Playwright result is claimed; the exact-head GitHub Actions independent scope
+  and complete database/security/E2E matrix remain authoritative.

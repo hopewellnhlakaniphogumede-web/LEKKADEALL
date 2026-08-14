@@ -4206,3 +4206,48 @@ Security/Release review remain required.
   runtime pass is claimed. GitHub Actions must verify the independent bidding
   journey and complete database/security/E2E regression matrix on the exact
   commit.
+
+### Ticket 10E Phase 2 - minimal customer bid viewing frontend and focused E2E - 2026-08-14
+
+**Status:** The minimal read-only customer bid viewer and independent
+real-loopback Playwright boundary are implemented locally. Exact-head GitHub
+Actions and final Security/Release review remain required.
+
+- Added `customer-bid-viewing.js` as the only browser boundary for
+  `customer_list_current_bids(...)`. It validates the owned request UUID and
+  paired keyset cursor, sends only the three reviewed arguments, accepts only
+  the seven reviewed fields, and fails closed on broad, malformed, unordered,
+  denied, or transport-failed results.
+- The customer request-detail route renders the deliberate viewer only for a
+  fresh RLS-owned open request and active customer profile. Initial view,
+  refresh, and load-more are user actions protected by a dedicated
+  single-flight guard; there is no prefetch, polling, timer, automatic retry,
+  offset pagination, or persisted bid state.
+- Cards expose only opaque bid ID, integer ZAR amount/currency, proposed start,
+  submitted status, expiry, and submission time with escaped SAST formatting.
+  Provider identity/contact/private fields, message/perks, exact address,
+  counts/ranking, acceptance/selection, booking, payment, admin, and identity
+  capabilities remain absent.
+- A denied, malformed, stale, duplicate, route-changed, or actor-changed read
+  clears all prior cards and renders fixed generic copy. The browser never
+  directly reads or mutates `bids` or `service_requests` and does not call or
+  expose the revoked legacy customer acceptance function.
+- Added an independent `customer-bid-viewing` E2E scope. It proves zero viewer
+  calls before a deliberate action, one exact initial RPC, ordered visible
+  submitted bids, exclusion of withdrawn/expired/declined bids, fresh
+  provider-service revocation, signed-out and cross-customer denial, and absent
+  controls for draft/cancelled/awarded/past-close states. Fixture postconditions
+  require no address, booking, or payment row. One worker, zero retries,
+  loopback-only services, disabled sensitive artifacts, and privacy-safe output
+  remain unchanged.
+- The workflow runs the focused static suite before the complete frontend
+  suite and the independent Playwright scope before legacy Ticket 9A-9 scopes.
+  The legacy full scope remains stable by excluding discovery, bidding, and
+  customer bid-viewing scenarios.
+- Local syntax checks passed. The combined focused bid-viewing and E2E-boundary
+  run passed **25/25** (**7/7** focused module tests), and the complete frontend
+  Node suite passed **115/115** before the final documentation-only update.
+- Docker and Supabase CLI are unavailable locally, so no local Playwright
+  runtime pass is claimed. GitHub Actions must verify the independent viewer
+  journey and complete database/security/E2E regression matrix on the exact
+  commit.

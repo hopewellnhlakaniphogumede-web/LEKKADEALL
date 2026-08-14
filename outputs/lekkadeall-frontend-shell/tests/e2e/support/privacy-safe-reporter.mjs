@@ -1,6 +1,7 @@
 const SAFE_FAILURE_PHASE = /^(?:provider-discovery-failure:(fixture-setup|browser-session|initial-discovery|revocation|fresh-discovery|privacy|sign-out)|registration-failure:(signup-http-409|signup-http-422-(?:weak-password|signup-disabled|user-already-exists|validation-failed|unknown)|signup-http-429|signup-http-other|signup-session-missing|profile-readiness-timeout|signup-network-failure|signup-duplicate-request|signup-unexpected-collision|signup-reconciliation-invalid|signup-reconciliation-session-failure)|registration-phase:(identity-precondition|signup-request|auth-session|profile-ready|dashboard)|ambiguous-update-failure:(isolated-setup|single-update-execution|ambiguous-ui|interception-release|detail-navigation|fresh-rls-read|canonical-values|postcondition|sign-out|cleanup)|ambiguous-publication-failure:(isolated-setup|single-publication-execution|ambiguous-ui|interception-release|detail-navigation|fresh-rls-read|postcondition|sign-out|cleanup)|ambiguous-setup-failure:(browser-context|fixture-account|browser-session|draft-create|edit-route)|guard-state:(restricted|suspended|closed|provider|missing-profile)|negative-actor-phase:(restricted|suspended|closed|provider|missing-profile):(auth-creation|ticket-9b-profile-readiness|context-creation|page-creation|sign-in|authenticated-privacy|fixture-state-application|route-guard-verification|sign-out)|negative-actor-failure:(restricted|suspended|closed|provider|missing-profile):(auth-creation|ticket-9b-profile-readiness|context-creation|page-creation|anonymous-storage-precondition|sign-in-network|sign-in-http-429|sign-in-http-4xx|sign-in-http-5xx|sign-in-http-unexpected|auth-session-missing|customer-route|active-profile-readiness|authenticated-privacy|context-cleanup|unknown|fixture-state-application|route-guard-verification|sign-out)|lifecycle-phase:(registration|reauthentication|category-dashboard|create|list-detail|publish|update|cancel|postcondition|sign-out))$/u;
 const SAFE_PROGRESS_PHASE = /^ambiguous-update:(?:mutation-executed|interceptor-release-start|fetch-disabled|response-listener-removed|cdp-detached|detail-navigation|rls-read-observed|canonical-values-verified|cleanup)$/u;
 const SAFE_PROVIDER_BIDDING_FAILURE = /^provider-bidding-failure:(?:fixture-setup|browser-session|discoverable-request|confirmed-submit|confirmed-withdrawal|terminal-controls|postcondition|privacy|sign-out)$/u;
+const SAFE_CUSTOMER_BID_VIEWING_FAILURE = /^customer-bid-viewing-failure:(?:fixture-setup|owner-session|deliberate-view|filtered-bids|service-revocation|request-states|signed-out|cross-customer|postcondition|privacy|sign-out)$/u;
 const SAFE_CANONICAL_VALUE_PHASE = /^canonical-values:(?:status|category|title|description|suburb|city|start|budget)-pass$/u;
 const SAFE_CONTEXT_CLEANUP_FAILURE = /^negative-actor-failure:(?:restricted|suspended|closed|provider|missing-profile):context-cleanup$/u;
 
@@ -9,7 +10,8 @@ function failedSafePhase(steps = []) {
     const nested = failedSafePhase(step.steps);
     if (nested) return nested;
     if (step.error && (SAFE_FAILURE_PHASE.test(step.title)
-        || SAFE_PROVIDER_BIDDING_FAILURE.test(step.title))) return step.title;
+        || SAFE_PROVIDER_BIDDING_FAILURE.test(step.title)
+        || SAFE_CUSTOMER_BID_VIEWING_FAILURE.test(step.title))) return step.title;
   }
   return null;
 }
