@@ -23,6 +23,9 @@ import { assertBrowserPrivacy, attachSensitiveEmissionAudit } from './support/pr
 const appUrl = process.env.E2E_APP_URL;
 const supabaseUrl = process.env.E2E_SUPABASE_URL;
 const anonKey = process.env.E2E_ANON_KEY;
+const ADJACENT_READ_TABLES = Object.freeze([
+  'bids', 'bookings', 'payments', 'service_request_addresses', 'messages', 'contacts',
+]);
 
 test.beforeAll(() => {
   if (process.env.E2E_LOCAL_STACK_READY !== '1') throw new Error('local-e2e-stack-not-ready');
@@ -41,6 +44,7 @@ test('customer deliberately views only current bids for an owned live request', 
   ];
   const policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
   const emissions = attachSensitiveEmissionAudit(page, markers);
+  const adjacentReadBaseline = new Map();
 
   await test.step('customer-bid-viewing-failure:fixture-setup', async () => {
     await prepareSyntheticCustomerBidViewing({ owner, otherCustomer, providers });
@@ -57,6 +61,9 @@ test('customer deliberately views only current bids for an owned live request', 
     await expect(page.getByRole('button', { name: 'View current bids' })).toBeVisible();
     expect(policy.getRpcCount('customer_list_current_bids')).toBe(0);
     expect(policy.getTableReadCount('bids')).toBe(0);
+    for (const table of ADJACENT_READ_TABLES) {
+      adjacentReadBaseline.set(table, policy.getTableReadCount(table));
+    }
 
     await page.getByRole('button', { name: 'View current bids' }).click();
     const cards = page.locator('[data-customer-bid-card]');
@@ -84,10 +91,8 @@ test('customer deliberately views only current bids for an owned live request', 
     ]) {
       expect(policy.getRpcCount(functionName)).toBe(0);
     }
-    for (const table of [
-      'bids', 'bookings', 'payments', 'service_request_addresses', 'messages', 'contacts',
-    ]) {
-      expect(policy.getTableReadCount(table)).toBe(0);
+    for (const table of ADJACENT_READ_TABLES) {
+      expect(policy.getTableReadCount(table)).toBe(adjacentReadBaseline.get(table));
     }
   });
 

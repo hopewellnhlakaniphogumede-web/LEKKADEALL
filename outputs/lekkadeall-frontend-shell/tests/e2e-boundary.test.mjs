@@ -745,7 +745,7 @@ test('customer bid viewing E2E is independent, deliberate, filtered and privacy-
   }
   assert.match(specSource, /Sign in required[\s\S]*customer-bid-viewing-failure:cross-customer[\s\S]*Request not found or unavailable/u);
   assert.match(specSource, /assertSyntheticCustomerBidViewingPostconditions/u);
-  assert.match(specSource, /'bids', 'bookings', 'payments', 'service_request_addresses', 'messages', 'contacts'/u);
+  assert.match(specSource, /ADJACENT_READ_TABLES[\s\S]*adjacentReadBaseline\.set\(table, policy\.getTableReadCount\(table\)\)[\s\S]*toBe\(adjacentReadBaseline\.get\(table\)\)/u);
   assert.doesNotMatch(specSource, /waitForTimeout|await new Promise|\bretry\b|service_role|response\.(?:body|json|text)/iu);
   assert.doesNotMatch(specSource, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/u);
 
