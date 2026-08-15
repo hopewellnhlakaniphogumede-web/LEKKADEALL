@@ -686,6 +686,10 @@ begin
   perform pg_catalog.set_config('lekkadeall.ticket10f_concurrency_password', '', false);
   perform extensions.dblink_exec('ticket10f_a', 'set application_name = ''ticket10f_a''');
   perform extensions.dblink_exec('ticket10f_b', 'set application_name = ''ticket10f_b''');
+  perform extensions.dblink_exec('ticket10f_a', 'set lock_timeout = ''10s''');
+  perform extensions.dblink_exec('ticket10f_b', 'set lock_timeout = ''10s''');
+  perform extensions.dblink_exec('ticket10f_a', 'set statement_timeout = ''30s''');
+  perform extensions.dblink_exec('ticket10f_b', 'set statement_timeout = ''30s''');
 end;
 $$;
 
