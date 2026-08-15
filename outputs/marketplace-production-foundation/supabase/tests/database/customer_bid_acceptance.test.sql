@@ -192,7 +192,8 @@ insert into auth.users (id, email) values
   ('00000000-0000-4000-8000-0000000f0101', 'ticket10f-provider-1@lekkadeall.test'),
   ('00000000-0000-4000-8000-0000000f0102', 'ticket10f-provider-2@lekkadeall.test'),
   ('00000000-0000-4000-8000-0000000f0103', 'ticket10f-provider-3@lekkadeall.test'),
-  ('00000000-0000-4000-8000-0000000f0104', 'ticket10f-provider-4@lekkadeall.test');
+  ('00000000-0000-4000-8000-0000000f0104', 'ticket10f-provider-4@lekkadeall.test'),
+  ('00000000-0000-4000-8000-0000000f0105', 'ticket10f-provider-5@lekkadeall.test');
 
 set local lekkadeall.allow_privileged_profile_update = 'on';
 update public.profiles set role = 'admin'::public.user_role
@@ -203,7 +204,8 @@ where id in (
   '00000000-0000-4000-8000-0000000f0101',
   '00000000-0000-4000-8000-0000000f0102',
   '00000000-0000-4000-8000-0000000f0103',
-  '00000000-0000-4000-8000-0000000f0104'
+  '00000000-0000-4000-8000-0000000f0104',
+  '00000000-0000-4000-8000-0000000f0105'
 );
 update public.profiles set role = 'support'::public.user_role
 where id = '00000000-0000-4000-8000-0000000f0008';
@@ -226,7 +228,8 @@ insert into public.provider_profiles (
   ('00000000-0000-4000-8000-0000000f0101', 'Ticket 10F Provider 1', 20, 'not_started', 'approved'),
   ('00000000-0000-4000-8000-0000000f0102', 'Ticket 10F Provider 2', 20, 'not_started', 'approved'),
   ('00000000-0000-4000-8000-0000000f0103', 'Ticket 10F Provider 3', 20, 'not_started', 'approved'),
-  ('00000000-0000-4000-8000-0000000f0104', 'Ticket 10F Provider 4', 20, 'not_started', 'approved');
+  ('00000000-0000-4000-8000-0000000f0104', 'Ticket 10F Provider 4', 20, 'not_started', 'approved'),
+  ('00000000-0000-4000-8000-0000000f0105', 'Ticket 10F Provider 5', 20, 'not_started', 'approved');
 
 create temporary table ticket10f_decisions on commit drop as
 select provider.user_id as provider_id,
@@ -234,7 +237,7 @@ select provider.user_id as provider_id,
   pg_catalog.gen_random_uuid() as idempotency_key
 from public.provider_profiles as provider
 where provider.user_id between '00000000-0000-4000-8000-0000000f0101'
-  and '00000000-0000-4000-8000-0000000f0104';
+  and '00000000-0000-4000-8000-0000000f0105';
 
 insert into private.provider_eligibility_decisions (
   id, provider_id, reviewer_id, action, previous_status, new_status, basis,
@@ -269,6 +272,7 @@ insert into public.provider_services (
   ('00000000-0000-4000-8000-0000000f0102', '00000000-0000-4000-8000-0000000f0201', null, null, true),
   ('00000000-0000-4000-8000-0000000f0103', '00000000-0000-4000-8000-0000000f0201', null, null, true),
   ('00000000-0000-4000-8000-0000000f0104', '00000000-0000-4000-8000-0000000f0201', null, null, false),
+  ('00000000-0000-4000-8000-0000000f0105', '00000000-0000-4000-8000-0000000f0201', null, null, true),
   ('00000000-0000-4000-8000-0000000f0101', '00000000-0000-4000-8000-0000000f0202', null, null, true);
 
 create temporary table ticket10f_clock on commit drop as
@@ -324,6 +328,7 @@ select
   case when suffix = '1019' then '00000000-0000-4000-8000-0000000f0103'::pg_catalog.uuid
     when suffix = '1020' then '00000000-0000-4000-8000-0000000f0104'::pg_catalog.uuid
     when suffix = '1208' then '00000000-0000-4000-8000-0000000f0102'::pg_catalog.uuid
+    when suffix = '1209' then '00000000-0000-4000-8000-0000000f0105'::pg_catalog.uuid
     else '00000000-0000-4000-8000-0000000f0101'::pg_catalog.uuid end,
   50000, 'ZAR',
   clock.decision_at + case when suffix = '1018' then '6 days'::pg_catalog.interval else '5 days'::pg_catalog.interval end,
@@ -788,13 +793,13 @@ select is((select result_value from ticket10f_race_results where name='restore-p
 
 -- Service deactivation wins while acceptance waits on the service row.
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'service deactivation begins');
-select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_service_active('00000000-0000-4000-8000-0000000f0101','00000000-0000-4000-8000-0000000f0201',false)$q$), 1, 'service deactivation starts first');
+select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_service_active('00000000-0000-4000-8000-0000000f0105','00000000-0000-4000-8000-0000000f0201',false)$q$), 1, 'service deactivation starts first');
 insert into ticket10f_race_results select 'service-a', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
 select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_test_accept('00000000-0000-4000-8000-0000000f1209','00000000-0000-4000-8000-0000000f3209','00000000-0000-4000-8000-0000000f5209')$q$), 1, 'acceptance starts behind service deactivation');
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on provider-service lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'service deactivation commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses service race');
-select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_service_active('00000000-0000-4000-8000-0000000f0101','00000000-0000-4000-8000-0000000f0201',true)$q$), 1, 'service restore starts after isolated race');
+select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_service_active('00000000-0000-4000-8000-0000000f0105','00000000-0000-4000-8000-0000000f0201',true)$q$), 1, 'service restore starts after isolated race');
 insert into ticket10f_race_results select 'restore-service', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
 select is((select result_value from ticket10f_race_results where name='restore-service'), 'active', 'service is restored after isolated race');
 
@@ -831,7 +836,7 @@ alter table private.customer_bid_acceptance_receipts enable trigger customer_bid
 alter table public.audit_events disable trigger audit_events_append_only;
 delete from public.audit_events
 where actor_id between '00000000-0000-4000-8000-0000000f0001'
-  and '00000000-0000-4000-8000-0000000f0104'
+  and '00000000-0000-4000-8000-0000000f0105'
    or metadata ->> 'request_id' between '00000000-0000-4000-8000-0000000f1001'
      and '00000000-0000-4000-8000-0000000f1210';
 alter table public.audit_events enable trigger audit_events_append_only;
@@ -842,11 +847,11 @@ delete from public.service_requests where id between '00000000-0000-4000-8000-00
 set local lekkadeall.allow_marketplace_state_transition = 'off';
 
 alter table private.provider_eligibility_decisions disable trigger provider_eligibility_decisions_append_only;
-delete from private.provider_marketplace_eligibility where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0104';
-delete from private.provider_eligibility_decisions where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0104';
+delete from private.provider_marketplace_eligibility where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0105';
+delete from private.provider_eligibility_decisions where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0105';
 alter table private.provider_eligibility_decisions enable trigger provider_eligibility_decisions_append_only;
-delete from public.provider_services where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0104';
-delete from auth.users where id between '00000000-0000-4000-8000-0000000f0001' and '00000000-0000-4000-8000-0000000f0104';
+delete from public.provider_services where provider_id between '00000000-0000-4000-8000-0000000f0101' and '00000000-0000-4000-8000-0000000f0105';
+delete from auth.users where id between '00000000-0000-4000-8000-0000000f0001' and '00000000-0000-4000-8000-0000000f0105';
 delete from public.service_categories where id in ('00000000-0000-4000-8000-0000000f0201','00000000-0000-4000-8000-0000000f0202');
 drop function public.ticket10f_test_accept(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid);
 drop function public.ticket10f_test_cancel_request(pg_catalog.uuid);
