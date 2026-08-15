@@ -525,7 +525,7 @@ select throws_ok($$select * from public.customer_accept_current_bid(null,'000000
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-0000-0000-000000000000','00000000-0000-4000-8000-0000000f3001',pg_catalog.statement_timestamp(),pg_catalog.statement_timestamp(),'00000000-0000-4000-8000-0000000f5013')$$, '42501', 'Customer bid acceptance is unavailable', 'nil request fails closed');
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-0000-0000-000000000000',pg_catalog.statement_timestamp(),pg_catalog.statement_timestamp(),'00000000-0000-4000-8000-0000000f5014')$$, '42501', 'Customer bid acceptance is unavailable', 'nil bid fails closed');
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f9999','00000000-0000-4000-8000-0000000f3999',pg_catalog.statement_timestamp(),pg_catalog.statement_timestamp(),'00000000-0000-4000-8000-0000000f5015')$$, '42501', 'Customer bid acceptance is unavailable', 'missing identifiers fail closed');
-select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-4000-8000-0000000f3002',(select request_updated_at from ticket10f_expected),(select created_at from public.bids where id='00000000-0000-4000-8000-0000000f3002'),'00000000-0000-4000-8000-0000000f5016')$$, '42501', 'Customer bid acceptance is unavailable', 'bid from another request fails closed');
+select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-4000-8000-0000000f3002',(select request_updated_at from ticket10f_expected),(select bid_submitted_at from ticket10f_expected),'00000000-0000-4000-8000-0000000f5016')$$, '42501', 'Customer bid acceptance is unavailable', 'bid from another request fails closed');
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-4000-8000-0000000f3001',(select request_updated_at - interval '1 second' from ticket10f_expected),(select bid_submitted_at from ticket10f_expected),'00000000-0000-4000-8000-0000000f5017')$$, '42501', 'Customer bid acceptance is unavailable', 'stale request version fails closed');
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-4000-8000-0000000f3001',(select request_updated_at from ticket10f_expected),(select bid_submitted_at - interval '1 second' from ticket10f_expected),'00000000-0000-4000-8000-0000000f5018')$$, '42501', 'Customer bid acceptance is unavailable', 'stale bid version fails closed');
 select throws_ok($$select * from public.customer_accept_current_bid('00000000-0000-4000-8000-0000000f1001','00000000-0000-4000-8000-0000000f3001',(select request_updated_at from ticket10f_expected),(select bid_submitted_at from ticket10f_expected),'00000000-0000-0000-0000-000000000000')$$, '42501', 'Customer bid acceptance is unavailable', 'nil idempotency key fails closed');
@@ -608,7 +608,7 @@ drop trigger fail_ticket10f_audit_insert on public.audit_events;
 select is((select status from public.service_requests where id='00000000-0000-4000-8000-0000000f1021'), 'open'::public.request_status, 'audit failure rolls request back');
 select is((select status from public.bids where id='00000000-0000-4000-8000-0000000f3021'), 'submitted'::public.bid_status, 'audit failure rolls selected bid back');
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1021'), 0::pg_catalog.int8, 'audit failure rolls receipt back');
-select is(pg_catalog.coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'audit failure clears transition guard');
+select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'audit failure clears transition guard');
 
 create function pg_temp.fail_ticket10f_receipt() returns pg_catalog.trigger language plpgsql set search_path=pg_catalog as $$ begin if new.request_id='00000000-0000-4000-8000-0000000f1022' then raise exception 'forced receipt failure'; end if; return new; end; $$;
 create trigger fail_ticket10f_receipt_insert before insert on private.customer_bid_acceptance_receipts for each row execute function pg_temp.fail_ticket10f_receipt();
@@ -618,7 +618,7 @@ drop trigger fail_ticket10f_receipt_insert on private.customer_bid_acceptance_re
 select is((select status from public.service_requests where id='00000000-0000-4000-8000-0000000f1022'), 'open'::public.request_status, 'receipt failure rolls request back');
 select is((select status from public.bids where id='00000000-0000-4000-8000-0000000f3022'), 'submitted'::public.bid_status, 'receipt failure rolls bid back');
 select is((select pg_catalog.count(*) from public.audit_events where metadata->>'request_id'='00000000-0000-4000-8000-0000000f1022'), 0::pg_catalog.int8, 'receipt failure leaves no audit');
-select is(pg_catalog.coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'receipt failure clears transition guard');
+select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'receipt failure clears transition guard');
 
 create function pg_temp.fail_ticket10f_request_update() returns pg_catalog.trigger language plpgsql set search_path=pg_catalog as $$ begin if new.id='00000000-0000-4000-8000-0000000f1023' then raise exception 'forced request update failure'; end if; return new; end; $$;
 create trigger fail_ticket10f_request_update before update on public.service_requests for each row execute function pg_temp.fail_ticket10f_request_update();
@@ -628,7 +628,7 @@ drop trigger fail_ticket10f_request_update on public.service_requests;
 select is((select status from public.service_requests where id='00000000-0000-4000-8000-0000000f1023'), 'open'::public.request_status, 'update failure leaves request open');
 select is((select status from public.bids where id='00000000-0000-4000-8000-0000000f3023'), 'submitted'::public.bid_status, 'update failure rolls selected bid back');
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1023'), 0::pg_catalog.int8, 'update failure leaves no receipt');
-select is(pg_catalog.coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'update failure clears transition guard');
+select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'update failure clears transition guard');
 
 -- True two-session races use the disposable local database only. The login
 -- password is generated at runtime, never printed, and cleared after connect.

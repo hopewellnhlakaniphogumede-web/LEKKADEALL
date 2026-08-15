@@ -419,7 +419,7 @@ begin
        or v_bid_updated_at is distinct from v_bid_created_at
        or v_bid_created_at is distinct from p_expected_bid_submitted_at
        or v_message is not null
-       or pg_catalog.coalesce(pg_catalog.cardinality(v_perks), 0) <> 0
+       or coalesce(pg_catalog.cardinality(v_perks), 0) <> 0
        or v_bid_accepted_at is not null
        or v_bid_declined_at is not null
        or v_bid_withdrawn_at is not null
