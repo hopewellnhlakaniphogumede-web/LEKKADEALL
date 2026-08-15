@@ -717,6 +717,7 @@ select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'same-key replay is lock-
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'same-key winner commits');
 insert into ticket10f_race_results select 'same-key-b', remote.result_value from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text);
 select is((select result_value from ticket10f_race_results where name='same-key-b'), (select result_value from ticket10f_race_results where name='same-key-a'), 'same-key waiter receives identical canonical result');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'same-key waiter result is fully drained');
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one receipt');
 select is((select pg_catalog.count(*) from public.audit_events where action='customer.bid_accepted' and metadata->>'request_id'='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one audit');
 
@@ -728,6 +729,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'different-key waiter is lock-blocked');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'different-key winner commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'different-key waiter fails generically');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'different-key waiter result is fully drained');
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1202'), 1::pg_catalog.int8, 'different-key race creates one receipt');
 
 -- Two selected bids on one request: request and ordered bid locks admit one.
@@ -738,6 +740,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'competing selection waits on request lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'different-bid winner commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'competing selection loses generically');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'competing selection result is fully drained');
 select is((select pg_catalog.count(*) from public.bids where request_id='00000000-0000-4000-8000-0000000f1203' and status='accepted'), 1::pg_catalog.int8, 'different-bid race has one accepted bid');
 select is((select status from public.bids where id='00000000-0000-4000-8000-0000000f4203'), 'declined'::public.bid_status, 'losing submitted bid is declined once');
 
@@ -750,6 +753,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on withdrawn bid lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'withdrawal commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses withdrawal race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'withdrawal race result is fully drained');
 select is((select status from public.bids where id='00000000-0000-4000-8000-0000000f3204'), 'withdrawn'::public.bid_status, 'withdrawal is authoritative');
 select is((select status from public.service_requests where id='00000000-0000-4000-8000-0000000f1204'), 'open'::public.request_status, 'withdrawal race leaves request open');
 
@@ -762,6 +766,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on cancellation request lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'cancellation commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses cancellation race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'cancellation race result is fully drained');
 select is((select status from public.service_requests where id='00000000-0000-4000-8000-0000000f1205'), 'cancelled'::public.request_status, 'cancellation is authoritative');
 
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'close winner begins');
@@ -771,6 +776,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on close request lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'close commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses close race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'close race result is fully drained');
 
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'expiry winner begins');
 select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_expire_request('00000000-0000-4000-8000-0000000f1207')$q$), 1, 'expiry starts first');
@@ -779,6 +785,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on expiry request lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'expiry commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses expiry race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'expiry race result is fully drained');
 
 -- Provider suspension and expiry win while acceptance waits on authority locks.
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'provider suspension begins');
@@ -788,6 +795,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on provider authority lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'provider suspension commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses suspension race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'suspension race result is fully drained');
 select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_provider_eligibility('00000000-0000-4000-8000-0000000f0102','approved')$q$), 1, 'provider restore starts for isolated expiry race');
 insert into ticket10f_race_results select 'restore-provider-a', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
 select is((select result_value from ticket10f_race_results where name='restore-provider-a'), 'approved', 'provider is restored for isolated expiry race');
@@ -799,6 +807,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on expiring provider lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'provider expiry commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses provider expiry race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'provider expiry race result is fully drained');
 select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_provider_eligibility('00000000-0000-4000-8000-0000000f0102','approved')$q$), 1, 'provider restore starts after expiry race');
 insert into ticket10f_race_results select 'restore-provider-b', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
 select is((select result_value from ticket10f_race_results where name='restore-provider-b'), 'approved', 'provider is restored after expiry race');
@@ -811,6 +820,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'acceptance waits on provider-service lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'service deactivation commits');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'acceptance loses service race');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'service race result is fully drained');
 select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_set_service_active('00000000-0000-4000-8000-0000000f0105','00000000-0000-4000-8000-0000000f0201',true)$q$), 1, 'service restore starts after isolated race');
 insert into ticket10f_race_results select 'restore-service', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
 select is((select result_value from ticket10f_race_results where name='restore-service'), 'active', 'service is restored after isolated race');
@@ -825,6 +835,7 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.provider_s
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'late competing bid waits on request lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'acceptance commits before late bid');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'late competing bid fails after award');
+select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'late competing bid result is fully drained');
 select is((select pg_catalog.count(*) from public.bids where request_id='00000000-0000-4000-8000-0000000f1210'), 1::pg_catalog.int8, 'late race creates no extra bid');
 
 select is(extensions.dblink_disconnect('ticket10f_a'), 'OK', 'first acceptance session disconnects');
