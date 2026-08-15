@@ -93,6 +93,9 @@ jobs:
       - name: Run customer bid viewing pgTAP tests
         run: supabase test db supabase/tests/database/customer_bid_viewing.test.sql
 
+      - name: Run customer bid acceptance pgTAP tests
+        run: supabase test db supabase/tests/database/customer_bid_acceptance.test.sql
+
       - name: Run exact address privacy pgTAP tests
         run: supabase test db supabase/tests/database/exact_address_privacy.test.sql
 
