@@ -635,6 +635,14 @@ select is((select status from public.bids where id='00000000-0000-4000-8000-0000
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1023'), 0::pg_catalog.int8, 'update failure leaves no receipt');
 select is(coalesce(pg_catalog.current_setting('lekkadeall.allow_marketplace_state_transition', true), 'off'), 'off', 'update failure clears transition guard');
 
+-- Release locks retained by the functional assertions before independent
+-- sessions establish the concurrency barriers. pgTAP state and temporary
+-- helper functions are session-scoped; committed synthetic rows are removed
+-- by the explicit cleanup below.
+commit;
+begin;
+set local search_path = public, extensions, auth;
+
 -- True two-session races use the disposable local database only. The login
 -- password is generated at runtime, never printed, and cleared after connect.
 select is(
