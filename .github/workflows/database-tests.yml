@@ -209,6 +209,27 @@ jobs:
           E2E_TEST_SCOPE: affected
         run: pnpm run test:e2e:local
 
+      - name: Run security-boundary diagnostic scenarios in file order
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: security-boundary
+        run: pnpm run test:e2e:local
+
+      - name: Run cross-customer scenario on a fresh stack
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: cross-customer
+        run: pnpm run test:e2e:local
+
+      - name: Run stale-edit scenario on a fresh stack
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: stale-edit
+        run: pnpm run test:e2e:local
+
       - name: Run full local-only Ticket 9A-9 Playwright boundary
         working-directory: outputs/lekkadeall-frontend-shell
         env:

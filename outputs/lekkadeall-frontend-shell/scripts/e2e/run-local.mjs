@@ -31,6 +31,9 @@ const TEST_SCOPE_ARGS = Object.freeze({
   lifecycle: ['--grep', 'customer registration through cancelled draft completes against real local RLS and RPCs'],
   aborted: ['--grep', 'an executed update with an aborted response is not retried and requires a fresh read'],
   affected: ['--grep', '(?:customer registration through cancelled draft completes against real local RLS and RPCs|an executed update with an aborted response is not retried and requires a fresh read)'],
+  'security-boundary': ['--grep', '(?:cross-customer request IDs remain RLS-hidden and non-actionable|restricted suspended closed missing-profile and wrong-role actors fail closed|a stale edit is rejected after another tab cancels the draft|an executed update with an aborted response is not retried and requires a fresh read|an executed publication with an aborted response is not retried and requires a fresh read)'],
+  'cross-customer': ['--grep', 'cross-customer request IDs remain RLS-hidden and non-actionable'],
+  'stale-edit': ['--grep', 'a stale edit is rejected after another tab cancels the draft'],
 });
 const testScope = String(process.env.E2E_TEST_SCOPE ?? 'full');
 
