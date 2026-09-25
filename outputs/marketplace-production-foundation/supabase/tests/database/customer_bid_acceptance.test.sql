@@ -706,6 +706,52 @@ create temporary table ticket10f_race_results (
   result_value pg_catalog.text
 ) on commit drop;
 
+-- Freeze one pre-award intent before either same-key session starts. Both
+-- sessions submit this identical SQL; neither can reread a post-award version.
+create temporary table ticket10f_same_key_invocation (
+  request_version pg_catalog.timestamptz not null,
+  bid_version pg_catalog.timestamptz not null,
+  query_text pg_catalog.text not null
+) on commit drop;
+
+insert into ticket10f_same_key_invocation (
+  request_version, bid_version, query_text
+)
+select request.updated_at, bid.created_at,
+  pg_catalog.format(
+    $q$select pg_catalog.concat_ws(':',
+      result.request_id::pg_catalog.text,
+      result.accepted_bid_id::pg_catalog.text,
+      result.request_status::pg_catalog.text,
+      result.bid_status::pg_catalog.text
+    ) from public.customer_accept_current_bid(
+      %L::pg_catalog.uuid, %L::pg_catalog.uuid,
+      %L::pg_catalog.timestamptz, %L::pg_catalog.timestamptz,
+      %L::pg_catalog.uuid
+    ) as result$q$,
+    request.id, bid.id, request.updated_at, bid.created_at,
+    '00000000-0000-4000-8000-0000000f5201'::pg_catalog.uuid
+  )
+from public.service_requests as request
+join public.bids as bid on bid.request_id = request.id
+where request.id = '00000000-0000-4000-8000-0000000f1201'
+  and bid.id = '00000000-0000-4000-8000-0000000f3201';
+
+-- Keep backend PIDs only in the test session, never in TAP diagnostics.
+create temporary table ticket10f_same_key_backends (
+  name pg_catalog.text primary key,
+  backend_pid pg_catalog.int4 not null
+) on commit drop;
+
+insert into ticket10f_same_key_backends (name, backend_pid)
+select 'winner', remote.backend_pid
+from extensions.dblink('ticket10f_a', 'select pg_catalog.pg_backend_pid()')
+  as remote(backend_pid pg_catalog.int4);
+insert into ticket10f_same_key_backends (name, backend_pid)
+select 'waiter', remote.backend_pid
+from extensions.dblink('ticket10f_b', 'select pg_catalog.pg_backend_pid()')
+  as remote(backend_pid pg_catalog.int4);
+
 -- Classify the already-collected remote outcome without emitting its error text.
 create function pg_temp.ticket10f_same_key_waiter_category()
 returns pg_catalog.text language plpgsql set search_path = pg_catalog as $$
@@ -764,10 +810,21 @@ $$;
 select pg_temp.set_ticket10f_remote_actor('ticket10f_a','00000000-0000-4000-8000-0000000f0002');
 select pg_temp.set_ticket10f_remote_actor('ticket10f_b','00000000-0000-4000-8000-0000000f0002');
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'same-key winner begins');
-select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_accept('00000000-0000-4000-8000-0000000f1201','00000000-0000-4000-8000-0000000f3201','00000000-0000-4000-8000-0000000f5201')$q$), 1, 'same-key winner starts');
+select is(extensions.dblink_send_query('ticket10f_a',
+  (select query_text from ticket10f_same_key_invocation)
+), 1, 'same-key winner starts');
 insert into ticket10f_race_results select 'same-key-a', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
-select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_test_accept('00000000-0000-4000-8000-0000000f1201','00000000-0000-4000-8000-0000000f3201','00000000-0000-4000-8000-0000000f5201')$q$), 1, 'same-key replay starts behind held request lock');
-select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'same-key replay is lock-blocked without a sleep');
+select is(extensions.dblink_send_query('ticket10f_b',
+  (select query_text from ticket10f_same_key_invocation)
+), 1, 'same-key replay starts behind held request lock');
+select is(coalesce((
+  select activity.wait_event_type = 'Lock'
+    and winner.backend_pid = any(pg_catalog.pg_blocking_pids(waiter.backend_pid))
+  from ticket10f_same_key_backends as winner
+  join ticket10f_same_key_backends as waiter on waiter.name = 'waiter'
+  join pg_catalog.pg_stat_activity as activity on activity.pid = waiter.backend_pid
+  where winner.name = 'winner'
+), false), true, 'same-key replay is blocked by winner on request-row lock');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'same-key winner commits');
 insert into ticket10f_race_results select 'same-key-b', remote.result_value from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text);
 select diag('same-key winner category: ' || case
