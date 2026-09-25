@@ -752,6 +752,49 @@ select 'waiter', remote.backend_pid
 from extensions.dblink('ticket10f_b', 'select pg_catalog.pg_backend_pid()')
   as remote(backend_pid pg_catalog.int4);
 
+-- Observe the exact lock edge within a fixed deadline; async dispatch alone
+-- does not prove that the waiter has reached the request-row lock.
+create function pg_temp.ticket10f_wait_for_same_key_lock()
+returns pg_catalog.bool language plpgsql volatile set search_path = pg_catalog as $$
+declare
+  v_winner_pid pg_catalog.int4;
+  v_waiter_pid pg_catalog.int4;
+  v_blocked pg_catalog.bool;
+  v_deadline pg_catalog.timestamptz := pg_catalog.clock_timestamp()
+    + pg_catalog.make_interval(secs => 5);
+begin
+  select backend.backend_pid into v_winner_pid
+  from pg_temp.ticket10f_same_key_backends as backend
+  where backend.name = 'winner';
+  select backend.backend_pid into v_waiter_pid
+  from pg_temp.ticket10f_same_key_backends as backend
+  where backend.name = 'waiter';
+  if v_winner_pid is null or v_waiter_pid is null then
+    return false;
+  end if;
+
+  loop
+    if pg_catalog.clock_timestamp() >= v_deadline then
+      return false;
+    end if;
+    perform pg_catalog.pg_stat_clear_snapshot();
+    select activity.wait_event_type = 'Lock'
+      and v_winner_pid = any(pg_catalog.pg_blocking_pids(v_waiter_pid))
+      into v_blocked
+    from pg_catalog.pg_stat_activity as activity
+    where activity.pid = v_waiter_pid;
+    if pg_catalog.coalesce(v_blocked, false)
+       and pg_catalog.clock_timestamp() <= v_deadline then
+      return true;
+    end if;
+  end loop;
+end;
+$$;
+
+create temporary table ticket10f_same_key_lock_barrier (
+  observed pg_catalog.bool not null
+) on commit drop;
+
 -- Classify the already-collected remote outcome without emitting its error text.
 create function pg_temp.ticket10f_same_key_waiter_category()
 returns pg_catalog.text language plpgsql set search_path = pg_catalog as $$
@@ -817,15 +860,14 @@ insert into ticket10f_race_results select 'same-key-a', remote.result_value from
 select is(extensions.dblink_send_query('ticket10f_b',
   (select query_text from ticket10f_same_key_invocation)
 ), 1, 'same-key replay starts behind held request lock');
-select is(coalesce((
-  select activity.wait_event_type = 'Lock'
-    and winner.backend_pid = any(pg_catalog.pg_blocking_pids(waiter.backend_pid))
-  from ticket10f_same_key_backends as winner
-  join ticket10f_same_key_backends as waiter on waiter.name = 'waiter'
-  join pg_catalog.pg_stat_activity as activity on activity.pid = waiter.backend_pid
-  where winner.name = 'winner'
-), false), true, 'same-key replay is blocked by winner on request-row lock');
-select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'same-key winner commits');
+insert into ticket10f_same_key_lock_barrier (observed)
+select pg_temp.ticket10f_wait_for_same_key_lock();
+select is((select observed from ticket10f_same_key_lock_barrier), true,
+  'same-key replay is blocked by winner on request-row lock');
+select is(extensions.dblink_exec('ticket10f_a',
+  case when (select observed from ticket10f_same_key_lock_barrier)
+    then 'commit' else 'rollback' end
+), 'COMMIT', 'same-key winner commits only after proven lock wait');
 insert into ticket10f_race_results select 'same-key-b', remote.result_value from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text);
 select diag('same-key winner category: ' || case
   when (select result_value from ticket10f_race_results where name='same-key-a') =
