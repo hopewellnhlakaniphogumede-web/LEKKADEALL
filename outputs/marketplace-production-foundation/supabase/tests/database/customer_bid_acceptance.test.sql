@@ -783,7 +783,7 @@ begin
       into v_blocked
     from pg_catalog.pg_stat_activity as activity
     where activity.pid = v_waiter_pid;
-    if pg_catalog.coalesce(v_blocked, false)
+    if coalesce(v_blocked, false)
        and pg_catalog.clock_timestamp() <= v_deadline then
       return true;
     end if;
