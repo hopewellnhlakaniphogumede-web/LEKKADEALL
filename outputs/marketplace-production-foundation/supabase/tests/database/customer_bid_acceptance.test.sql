@@ -706,6 +706,60 @@ create temporary table ticket10f_race_results (
   result_value pg_catalog.text
 ) on commit drop;
 
+-- Classify the already-collected remote outcome without emitting its error text.
+create function pg_temp.ticket10f_same_key_waiter_category()
+returns pg_catalog.text language plpgsql set search_path = pg_catalog as $$
+declare
+  v_winner pg_catalog.text;
+  v_waiter pg_catalog.text;
+  v_has_waiter pg_catalog.bool;
+  v_remote_error pg_catalog.text;
+  v_expected pg_catalog.text := '00000000-0000-4000-8000-0000000f1201:00000000-0000-4000-8000-0000000f3201:awarded:accepted';
+begin
+  select result.result_value into v_winner
+  from pg_temp.ticket10f_race_results as result where result.name = 'same-key-a';
+  select result.result_value into v_waiter
+  from pg_temp.ticket10f_race_results as result where result.name = 'same-key-b';
+  v_has_waiter := found;
+  if v_has_waiter and v_winner = v_expected and v_waiter = v_expected then
+    return 'canonical-result';
+  end if;
+  if not v_has_waiter then
+    v_remote_error := extensions.dblink_error_message('ticket10f_b');
+    if v_remote_error ~ '^ERROR:[[:space:]]+Customer bid acceptance is unavailable([[:space:]]|$)' then
+      return 'generic-remote-failure-no-result';
+    end if;
+  end if;
+  return 'unexpected-diagnostic-state';
+exception when others then
+  return 'unexpected-diagnostic-state';
+end;
+$$;
+
+-- This invoker-rights probe uses only the reviewed public reconciliation RPC.
+create function pg_temp.ticket10f_same_key_reconciliation_category()
+returns pg_catalog.text language plpgsql security invoker set search_path = pg_catalog as $$
+begin
+  perform result.request_id
+  from public.customer_reconcile_bid_acceptance(
+    '00000000-0000-4000-8000-0000000f1201',
+    '00000000-0000-4000-8000-0000000f5201'
+  ) as result;
+  if found then
+    return 'result-present';
+  end if;
+  return 'unexpected-diagnostic-state';
+exception
+  when sqlstate '42501' then
+    if sqlerrm = 'Customer bid acceptance reconciliation is unavailable' then
+      return 'generic-failure';
+    end if;
+    return 'unexpected-diagnostic-state';
+  when others then
+    return 'unexpected-diagnostic-state';
+end;
+$$;
+
 -- Same request, bid and key: the waiter replays the one canonical result.
 select pg_temp.set_ticket10f_remote_actor('ticket10f_a','00000000-0000-4000-8000-0000000f0002');
 select pg_temp.set_ticket10f_remote_actor('ticket10f_b','00000000-0000-4000-8000-0000000f0002');
@@ -716,8 +770,16 @@ select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_
 select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'same-key replay is lock-blocked without a sleep');
 select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'same-key winner commits');
 insert into ticket10f_race_results select 'same-key-b', remote.result_value from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text);
+select diag('same-key winner category: ' || case
+  when (select result_value from ticket10f_race_results where name='same-key-a') =
+    '00000000-0000-4000-8000-0000000f1201:00000000-0000-4000-8000-0000000f3201:awarded:accepted'
+    then 'canonical-result' else 'unexpected-diagnostic-state' end);
+select diag('same-key waiter category: ' || pg_temp.ticket10f_same_key_waiter_category());
 select is((select result_value from ticket10f_race_results where name='same-key-b'), (select result_value from ticket10f_race_results where name='same-key-a'), 'same-key waiter receives identical canonical result');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'same-key waiter result is fully drained');
+select pg_temp.set_ticket10f_actor('00000000-0000-4000-8000-0000000f0002'); set local role authenticated;
+select diag('same-key reconciliation category: ' || pg_temp.ticket10f_same_key_reconciliation_category());
+reset role;
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one receipt');
 select is((select pg_catalog.count(*) from public.audit_events where action='customer.bid_accepted' and metadata->>'request_id'='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one audit');
 

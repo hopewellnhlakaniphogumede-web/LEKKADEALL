@@ -66,6 +66,7 @@ jobs:
             | grep -Eiq '(database_password|db_password|service_role|jwt_secret|secret|payment|identity|api_key|access_token|supabase\\.co|project_ref|db_url|production|prod_)'
 
       - name: Verify and pre-pull pinned disposable Supabase images sequentially
+        id: supabase_images
         working-directory: .
         run: bash .github/scripts/prepull-supabase-local-images.sh
 
@@ -137,6 +138,11 @@ jobs:
 
       - name: Run payment webhook pgTAP tests
         run: supabase test db supabase/tests/database/payment_webhooks.test.sql
+
+      - name: Compare immutable Linux runner image identities
+        if: always() && steps.supabase_images.outcome == 'success'
+        working-directory: .
+        run: bash .github/scripts/prepull-supabase-local-images.sh --compare-identities
 
       - name: Stop Supabase local stack
         if: always()
