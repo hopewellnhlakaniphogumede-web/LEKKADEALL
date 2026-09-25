@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Supabase CLI 2.110.0 defaults to this registry. The E2E runner's isolated
-# child environment drops registry overrides, so both jobs use that default.
+# Supabase CLI 2.110.0 uses the reviewed GHCR override in both CI jobs.
 if [[ "$(supabase --version)" != '2.110.0' ]]; then
   echo 'Pinned Supabase CLI version mismatch' >&2
   exit 1
 fi
-if [[ "${SUPABASE_INTERNAL_IMAGE_REGISTRY:-}" != 'public.ecr.aws' ]]; then
+if [[ "${SUPABASE_INTERNAL_IMAGE_REGISTRY:-}" != 'ghcr.io' ]]; then
   echo 'Pinned Supabase image registry mismatch' >&2
   exit 1
 fi
@@ -54,15 +53,13 @@ if [[ "${1:-}" == '--compare-identities' ]]; then
   fi
   for image in "${images[@]}"; do
     name="${image%%:*}"
-    ecr_reference="public.ecr.aws/supabase/$image"
     ghcr_reference="ghcr.io/supabase/$image"
-    if ! local_id="$(docker image inspect --format '{{.Id}}' "$ecr_reference" 2>/dev/null)" \
-      || ! ecr_id="$(image_config_digest "$ecr_reference")" \
+    if ! local_id="$(docker image inspect --format '{{.Id}}' "$ghcr_reference" 2>/dev/null)" \
       || ! ghcr_id="$(image_config_digest "$ghcr_reference")"; then
       echo "Supabase image identity $name: UNRESOLVED" >&2
       exit 1
     fi
-    if [[ ! "$local_id" =~ ^sha256:[a-f0-9]{64}$ || "$local_id" != "$ecr_id" || "$ecr_id" != "$ghcr_id" ]]; then
+    if [[ ! "$local_id" =~ ^sha256:[a-f0-9]{64}$ || "$local_id" != "$ghcr_id" ]]; then
       echo "Supabase image identity $name: MISMATCH" >&2
       exit 1
     fi
@@ -77,6 +74,16 @@ if [[ "${1:-}" == '--compare-identities' ]]; then
       fi
     fi
     echo "Supabase image identity $name: MATCH"
+    # ECR is comparison-only: its rate limit cannot block the GHCR stack.
+    ecr_reference="public.ecr.aws/supabase/$image"
+    if ! ecr_id="$(image_config_digest "$ecr_reference")"; then
+      echo "Supabase ECR comparison $name: UNRESOLVED"
+    elif [[ "$ecr_id" != "$ghcr_id" ]]; then
+      echo "Supabase ECR comparison $name: MISMATCH" >&2
+      exit 1
+    else
+      echo "Supabase ECR comparison $name: MATCH"
+    fi
   done
   exit 0
 elif [[ $# -ne 0 ]]; then
@@ -85,11 +92,11 @@ elif [[ $# -ne 0 ]]; then
 fi
 
 for image in "${images[@]}"; do
-  reference="public.ecr.aws/supabase/$image"
+  reference="ghcr.io/supabase/$image"
   docker pull --quiet "$reference" >/dev/null
   name="${image%%:*}"
   digests="$(docker image inspect --format '{{json .RepoDigests}}' "$reference")"
-  if [[ ! "$digests" =~ public\.ecr\.aws/supabase/${name}@sha256:[a-f0-9]{64} ]]; then
+  if [[ ! "$digests" =~ ghcr\.io/supabase/${name}@sha256:[a-f0-9]{64} ]]; then
     echo "Fresh pull lacked a verified registry digest: $name" >&2
     exit 1
   fi

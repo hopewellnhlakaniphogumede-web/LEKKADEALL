@@ -68,6 +68,13 @@ function safeChildEnvironment(extra = {}) {
   return { ...safe, ...extra };
 }
 
+function safeSupabaseEnvironment() {
+  const registry = process.env.SUPABASE_INTERNAL_IMAGE_REGISTRY;
+  if (registry === undefined && !process.env.CI) return safeChildEnvironment();
+  if (registry !== 'ghcr.io') throw new Error('e2e-supabase-registry-invalid');
+  return safeChildEnvironment({ SUPABASE_INTERNAL_IMAGE_REGISTRY: 'ghcr.io' });
+}
+
 function assertCleanupPath(target) {
   const resolved = resolve(target);
   const temporaryRoot = resolve(tmpdir());
@@ -135,7 +142,7 @@ async function cleanup() {
   if (supabaseStarted) {
     await runCaptured('supabase', ['stop', '--no-backup'], {
       cwd: foundationRoot,
-      env: safeChildEnvironment(),
+      env: safeSupabaseEnvironment(),
       allowFailure: true,
     });
   }
@@ -154,19 +161,19 @@ async function main() {
 
   const existing = await runCaptured('supabase', ['status'], {
     cwd: foundationRoot,
-    env: safeChildEnvironment(),
+    env: safeSupabaseEnvironment(),
     allowFailure: true,
   });
   if (existing.ok) throw new Error('e2e-refuses-preexisting-supabase-stack');
 
   process.stdout.write('Ticket 9A-9: starting disposable local Supabase\n');
-  await runCaptured('supabase', ['start'], { cwd: foundationRoot, env: safeChildEnvironment() });
+  await runCaptured('supabase', ['start'], { cwd: foundationRoot, env: safeSupabaseEnvironment() });
   supabaseStarted = true;
-  await runCaptured('supabase', ['db', 'reset'], { cwd: foundationRoot, env: safeChildEnvironment() });
+  await runCaptured('supabase', ['db', 'reset'], { cwd: foundationRoot, env: safeSupabaseEnvironment() });
 
   const statusResult = await runCaptured('supabase', ['status', '-o', 'env'], {
     cwd: foundationRoot,
-    env: safeChildEnvironment(),
+    env: safeSupabaseEnvironment(),
   });
   const local = parseSupabaseStatusEnv(statusResult.stdout);
   const localFixtureAdmin = parseLocalFixtureAdminEnv(statusResult.stdout);

@@ -955,6 +955,30 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.doesNotMatch(workflow, /upload-artifact/);
 });
 
+test('authenticated GHCR remains confined to disposable Supabase children', async () => {
+  const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
+  const helper = await readFile(join(repositoryRoot, '.github/scripts/prepull-supabase-local-images.sh'), 'utf8');
+  const runner = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const permissions = workflow.match(/^permissions:\r?\n((?:  [^\r\n]+\r?\n)+)/mu)?.[1];
+  assert.deepEqual(permissions?.trim().split(/\r?\n/u).map((line) => line.trim()), [
+    'contents: read', 'packages: read',
+  ]);
+  assert.equal((workflow.match(/SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr\.io/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/- name: Authenticate Docker to GHCR/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/docker login ghcr\.io[^\n]*--password-stdin/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/GHCR_TOKEN: \$\{\{ github\.token \}\}/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/- name: Log out Docker from GHCR/gu) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /SUPABASE_INTERNAL_IMAGE_REGISTRY: public\.ecr\.aws|packages: write|id-token: write/u);
+  assert.match(helper, /SUPABASE_INTERNAL_IMAGE_REGISTRY:-\}" != 'ghcr\.io'/u);
+  assert.match(helper, /reference="ghcr\.io\/supabase\/\$image"[\s\S]*docker pull --quiet "\$reference"/u);
+  assert.match(helper, /local_id="\$\(docker image inspect[^\n]*"\$ghcr_reference"/u);
+  assert.match(helper, /Supabase ECR comparison \$name: UNRESOLVED/u);
+  assert.match(runner, /if \(registry !== 'ghcr\.io'\) throw new Error\('e2e-supabase-registry-invalid'\)/u);
+  assert.equal((runner.match(/env: safeSupabaseEnvironment\(\)/gu) ?? []).length, 5);
+  assert.doesNotMatch(runner, /safeChildEnvironment\(\{[^}]*SUPABASE_INTERNAL_IMAGE_REGISTRY[^}]*E2E_/su);
+  assert.doesNotMatch(runner, /GITHUB_TOKEN|GHCR_TOKEN|GHCR_ACTOR/u);
+});
+
 test('E2E sign-out follows the implemented fail-closed sign-in redirect', async () => {
   const helperSource = await readFile(join(here, 'e2e/support/journey-helpers.mjs'), 'utf8');
   assert.equal(helperSource.includes('toHaveURL(/\\/auth\\/sign-in\\/?$/u)'), true);
