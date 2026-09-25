@@ -12,6 +12,8 @@ jobs:
     name: Run webhook route, Supabase migrations, and pgTAP tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
 
     defaults:
       run:
@@ -62,6 +64,10 @@ jobs:
           test -f outputs/marketplace-production-foundation/supabase/config.toml
           ! grep -Ev '^[[:space:]]*(#|$)' outputs/marketplace-production-foundation/supabase/config.toml \
             | grep -Eiq '(database_password|db_password|service_role|jwt_secret|secret|payment|identity|api_key|access_token|supabase\\.co|project_ref|db_url|production|prod_)'
+
+      - name: Verify and pre-pull pinned disposable Supabase images sequentially
+        working-directory: .
+        run: bash .github/scripts/prepull-supabase-local-images.sh
 
       - name: Start Supabase local stack
         run: supabase start
@@ -141,6 +147,8 @@ jobs:
     needs: database-tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
 
     steps:
       - name: Check out repository
@@ -166,6 +174,9 @@ jobs:
         with:
           version: 2.110.0
           github-token: ${{ github.token }}
+
+      - name: Verify and pre-pull pinned disposable Supabase images sequentially
+        run: bash .github/scripts/prepull-supabase-local-images.sh
 
       - name: Run provider discovery scenario independently
         working-directory: outputs/lekkadeall-frontend-shell
