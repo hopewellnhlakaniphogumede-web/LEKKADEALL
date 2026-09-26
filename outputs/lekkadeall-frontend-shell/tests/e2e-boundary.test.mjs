@@ -809,6 +809,7 @@ test('customer bid acceptance E2E is explicit, stale-safe, reconciled and isolat
   assert.match(spec, /route\.fetch\(\)[\s\S]*route\.abort\('failed'\)/u);
   assert.match(spec, /acceptedKey[\s\S]*reconciledKey[\s\S]*toBe\(acceptedKey\)/u);
   assert.match(spec, /assertSyntheticCustomerBidAcceptancePostconditions/u);
+  assert.match(spec, /foreign-denial[\s\S]*page\.goto\(`[\s\S]*Request not found or unavailable/u);
   assert.match(fixtures, /private\.customer_bid_acceptance_receipts[\s\S]*customer\.bid_accepted/u);
   assert.match(runner, /'customer-bid-acceptance':\s*\['--grep', 'customer accepts one current bid and reconciles one executed ambiguous response'\]/u);
   assert.match(reporter, /customer-bid-acceptance-failure:/u);

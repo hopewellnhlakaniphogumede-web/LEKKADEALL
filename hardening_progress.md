@@ -4279,3 +4279,9 @@ unchanged.
   frontend Node suite passed **126/126** before the documentation update.
   Docker and Supabase CLI are unavailable locally, so real Playwright and pgTAP
   execution is pending exact-head GitHub Actions; no runtime pass is claimed.
+- Initial push/PR CI on `0a27c6b` passed the database/security job. Acceptance
+  E2E advanced through stale denial, direct success, one executed-response
+  reconciliation and server postconditions, then failed at foreign denial: its
+  test helper incorrectly required an RLS-hidden request detail card. The
+  focused test now navigates normally and retains the generic unavailable
+  assertion. This is test-only; exact-head CI must verify the correction.

@@ -797,3 +797,11 @@ passed **29/29**; the complete frontend Node suite passed **126/126** before
 this documentation update. Docker and Supabase CLI are unavailable locally;
 the runtime Playwright and database/security matrix must be verified by
 GitHub Actions on the exact PR head. No local E2E or pgTAP pass is claimed.
+
+The first Phase 2 CI push and PR runs on `0a27c6b` passed the complete database
+job and advanced the new acceptance E2E through stale denial, direct success,
+ambiguous reconciliation and fixture postconditions. Both failed at the final
+foreign-denial step because the E2E test called `openDraftDetail(...)`, which
+requires a detail card for a request intentionally hidden by RLS. The test now
+navigates normally and still requires the generic unavailable page; this is a
+test-only correction. Fresh exact-head CI remains required.

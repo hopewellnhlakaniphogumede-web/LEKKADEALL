@@ -129,7 +129,7 @@ test('customer accepts one current bid and reconciles one executed ambiguous res
   await test.step('customer-bid-acceptance-failure:foreign-denial', async () => {
     await signOutCustomer(page);
     await signInCustomer(page, otherCustomer, { requireAnonymousStorage: true });
-    await openDraftDetail(page, CUSTOMER_BID_VIEWING_REQUEST_ID);
+    await page.goto(`/app/customer/requests/detail/?requestId=${CUSTOMER_BID_VIEWING_REQUEST_ID}`);
     await expect(page.getByRole('heading', { name: 'Request not found or unavailable' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Accept bid' })).toHaveCount(0);
     expect(policy.getRpcCount('customer_accept_current_bid')).toBe(3);
