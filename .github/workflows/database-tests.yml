@@ -38,6 +38,10 @@ jobs:
         working-directory: .
         run: node --test outputs/lekkadeall-frontend-shell/tests/customer-bid-viewing.test.mjs
 
+      - name: Run focused customer bid acceptance frontend tests
+        working-directory: .
+        run: node --test outputs/lekkadeall-frontend-shell/tests/customer-bid-acceptance.test.mjs
+
       - name: Run Ticket 9A-8 draft edit and existing frontend tests
         working-directory: .
         run: node --test outputs/lekkadeall-frontend-shell/tests/*.test.mjs
@@ -237,6 +241,13 @@ jobs:
         env:
           CI: "1"
           E2E_TEST_SCOPE: customer-bid-viewing
+        run: pnpm run test:e2e:local
+
+      - name: Run customer bid acceptance scenario independently
+        working-directory: outputs/lekkadeall-frontend-shell
+        env:
+          CI: "1"
+          E2E_TEST_SCOPE: customer-bid-acceptance
         run: pnpm run test:e2e:local
 
       - name: Run lifecycle signup scenario independently

@@ -66,6 +66,13 @@ import {
   withdrawProviderBid,
 } from './provider-bidding.js';
 import { readCustomerCurrentBids } from './customer-bid-viewing.js';
+import {
+  CUSTOMER_BID_ACCEPT_SUCCESS_MESSAGE,
+  CUSTOMER_BID_ACCEPT_UNAVAILABLE_MESSAGE,
+  acceptCustomerCurrentBid,
+  createCustomerBidAcceptanceIntent,
+  reconcileCustomerBidAcceptance,
+} from './customer-bid-acceptance.js';
 import { isCustomerRequestId } from './customer-requests.js';
 import { normalizePath, renderRoute } from './shell.js';
 
@@ -93,6 +100,10 @@ const state = {
   },
   customerBidViewing: {
     requestId: null, status: 'idle', items: [], cursor: null, hasMore: false, loadingMore: false,
+  },
+  customerBidAcceptance: {
+    requestId: null, selectedBid: null, confirming: false, submitting: false,
+    confirmed: false, blocked: false, message: '',
   },
   customerDraftEdit: null,
   providerStatus: null,
@@ -126,6 +137,8 @@ let providerBidMutationInFlight = false;
 let providerBidMutationSequence = 0;
 let customerBidViewInFlight = false;
 let customerBidViewSequence = 0;
+let customerBidAcceptanceInFlight = false;
+let customerBidAcceptanceSequence = 0;
 
 const pageTitles = Object.freeze({
   '/': 'Local services, clearly arranged',
@@ -166,6 +179,7 @@ function view() {
     customerDraftCancellation: state.customerDraftCancellation,
     customerDraftPublication: state.customerDraftPublication,
     customerBidViewing: state.customerBidViewing,
+    customerBidAcceptance: state.customerBidAcceptance,
     customerDraftEdit: state.customerDraftEdit,
     providerStatus: state.providerStatus,
     providerDiscovery: state.providerDiscovery,
@@ -196,6 +210,7 @@ function clearPersonalState() {
   resetCustomerDraftCancellation();
   resetCustomerDraftPublication();
   resetCustomerBidViewing();
+  resetCustomerBidAcceptance();
   resetCustomerDraftEdit();
 }
 
@@ -226,6 +241,15 @@ function resetCustomerBidViewing(requestId = null, status = 'idle') {
   customerBidViewInFlight = false;
   state.customerBidViewing = {
     requestId, status, items: [], cursor: null, hasMore: false, loadingMore: false,
+  };
+}
+
+function resetCustomerBidAcceptance(requestId = null) {
+  customerBidAcceptanceSequence += 1;
+  customerBidAcceptanceInFlight = false;
+  state.customerBidAcceptance = {
+    requestId, selectedBid: null, confirming: false, submitting: false,
+    confirmed: false, blocked: false, message: '',
   };
 }
 
@@ -457,8 +481,12 @@ function customerBidViewIsEligible(requestId) {
 
 async function loadCustomerBidView({ append = false } = {}) {
   const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
-  if (customerBidViewInFlight || !isCustomerRequestId(requestId)
+  if (customerBidViewInFlight || customerBidAcceptanceInFlight
+      || state.customerBidAcceptance.blocked || state.customerBidAcceptance.confirmed
+      || !isCustomerRequestId(requestId)
       || !customerBidViewIsEligible(requestId)) return;
+
+  resetCustomerBidAcceptance(requestId);
 
   const cursor = append ? state.customerBidViewing.cursor : null;
   if (append && (!state.customerBidViewing.hasMore || !cursor)) return;
@@ -500,6 +528,73 @@ async function loadCustomerBidView({ append = false } = {}) {
     hasMore: result.hasMore,
     loadingMore: false,
   };
+  render();
+}
+
+function customerBidAcceptanceIsEligible(requestId, bid) {
+  return customerBidViewIsEligible(requestId)
+    && state.customerBidViewing.status === 'ready'
+    && !state.customerBidViewing.loadingMore
+    && bid?.status === 'submitted'
+    && state.customerBidViewing.items.includes(bid)
+    && state.customerBidAcceptance.requestId === requestId
+    && !state.customerBidAcceptance.blocked
+    && !state.customerBidAcceptance.confirmed;
+}
+
+function openCustomerBidAcceptance(index) {
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  const bid = state.customerBidViewing.items[index];
+  if (customerBidAcceptanceInFlight || state.customerBidAcceptance.confirming
+      || !Number.isSafeInteger(index) || index < 0
+      || !customerBidAcceptanceIsEligible(requestId, bid)) return;
+  state.customerBidAcceptance = {
+    requestId, selectedBid: bid, confirming: true, submitting: false,
+    confirmed: false, blocked: false, message: '',
+  };
+  render();
+}
+
+async function submitCustomerBidAcceptance() {
+  const requestId = new URLSearchParams(window.location.search).get('requestId') ?? '';
+  const bid = state.customerBidAcceptance.selectedBid;
+  if (customerBidAcceptanceInFlight || !state.customerBidAcceptance.confirming
+      || !customerBidAcceptanceIsEligible(requestId, bid)) return;
+  const actorId = state.session.user.id;
+  const intent = createCustomerBidAcceptanceIntent(state.customerRequestDetail.data, bid);
+  if (!intent) {
+    state.customerBidAcceptance = {
+      ...state.customerBidAcceptance, confirming: false, blocked: true,
+      message: CUSTOMER_BID_ACCEPT_UNAVAILABLE_MESSAGE,
+    };
+    render();
+    return;
+  }
+
+  const sequence = ++customerBidAcceptanceSequence;
+  customerBidAcceptanceInFlight = true;
+  state.customerBidAcceptance.submitting = true;
+  render();
+
+  let canonical = await acceptCustomerCurrentBid(state.client, intent);
+  if (!canonical) canonical = await reconcileCustomerBidAcceptance(state.client, intent);
+  if (sequence !== customerBidAcceptanceSequence) return;
+  customerBidAcceptanceInFlight = false;
+  if (state.session?.user?.id !== actorId || !customerBidViewIsEligible(requestId)) {
+    resetCustomerBidAcceptance();
+    return;
+  }
+
+  state.customerBidAcceptance = {
+    requestId,
+    selectedBid: canonical ? bid : null,
+    confirming: false,
+    submitting: false,
+    confirmed: Boolean(canonical),
+    blocked: !canonical,
+    message: canonical ? CUSTOMER_BID_ACCEPT_SUCCESS_MESSAGE : CUSTOMER_BID_ACCEPT_UNAVAILABLE_MESSAGE,
+  };
+  if (canonical) resetCustomerBidViewing(requestId);
   render();
 }
 
@@ -631,6 +726,7 @@ async function refreshRoute() {
       resetCustomerDraftCancellation(requestId);
       resetCustomerDraftPublication(requestId);
       resetCustomerBidViewing(requestId);
+      resetCustomerBidAcceptance(requestId);
       const [request] = await Promise.all([
         readOwnCustomerRequestDetail(state.client, requestId),
         loadRequestCategories(sequence),
@@ -1367,6 +1463,19 @@ document.addEventListener('click', async (event) => {
   }
 
   const providerDiscoveryAction = event.target.closest('[data-provider-discovery-action]');
+  const customerBidAcceptAction = event.target.closest('[data-customer-bid-accept-action]');
+  if (customerBidAcceptAction) {
+    const action = customerBidAcceptAction.dataset.customerBidAcceptAction;
+    if (action === 'open') {
+      openCustomerBidAcceptance(Number(customerBidAcceptAction.dataset.customerBidIndex));
+    } else if (action === 'cancel' && !customerBidAcceptanceInFlight) {
+      resetCustomerBidAcceptance(state.customerBidAcceptance.requestId);
+      render();
+    } else if (action === 'refresh' && !customerBidAcceptanceInFlight) {
+      await refreshRoute();
+    }
+    return;
+  }
   const customerBidViewAction = event.target.closest('[data-customer-bid-view-action]');
   if (customerBidViewAction) {
     const action = customerBidViewAction.dataset.customerBidViewAction;
@@ -1404,6 +1513,12 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('submit', async (event) => {
+  const customerBidAcceptanceForm = event.target.closest('[data-customer-bid-accept-form]');
+  if (customerBidAcceptanceForm) {
+    event.preventDefault();
+    await submitCustomerBidAcceptance();
+    return;
+  }
   const providerBidConfirmation = event.target.closest('[data-provider-bid-confirm-form]');
   if (providerBidConfirmation) {
     event.preventDefault();

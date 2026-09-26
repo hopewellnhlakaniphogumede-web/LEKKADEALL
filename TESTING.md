@@ -763,3 +763,37 @@ Local verification on 2026-08-14:
 - Docker and Supabase CLI are unavailable locally. No local disposable-stack
   Playwright result is claimed; the exact-head GitHub Actions independent scope
   and complete database/security/E2E matrix remain authoritative.
+
+## Ticket 10F Phase 2 customer bid acceptance UI and E2E
+
+Run the focused acceptance and E2E boundary suites:
+
+```powershell
+node --test outputs/lekkadeall-frontend-shell/tests/customer-bid-acceptance.test.mjs
+node --test outputs/lekkadeall-frontend-shell/tests/e2e-boundary.test.mjs
+```
+
+The active customer sees Accept bid only after an owned open request detail and
+a deliberate current-bids RPC read. Selection opens a confirmation; Cancel sends
+no mutation. Confirm creates one in-memory native UUID key, sends exactly one
+`customer_accept_current_bid` RPC with the reviewed request/bid IDs and their
+current version timestamps, and requires the exact six-field canonical result.
+An ambiguous or denied result permits at most one read-only
+`customer_reconcile_bid_acceptance` RPC with the same key. Unresolved outcomes
+block further acceptance until a deliberate fresh request and bid read.
+Canonical success removes bid actions and shows an in-session awarded state;
+no booking, payment, contact information or exact address is exposed.
+
+The independent `E2E_TEST_SCOPE=customer-bid-acceptance` journey uses the
+disposable loopback stack. It verifies confirmation cancellation, stale-version
+denial and deliberate refresh, direct success, an executed response lost before
+the browser receives it followed by one read-only reconciliation, owner-only
+route access, and server-side award/bid/receipt/audit postconditions. The
+legacy full scope excludes this independent journey. Browser network policy
+adds only the exact acceptance and reconciliation RPCs.
+
+Local verification on 2026-09-26: focused acceptance plus E2E boundary tests
+passed **29/29**; the complete frontend Node suite passed **126/126** before
+this documentation update. Docker and Supabase CLI are unavailable locally;
+the runtime Playwright and database/security matrix must be verified by
+GitHub Actions on the exact PR head. No local E2E or pgTAP pass is claimed.

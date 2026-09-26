@@ -80,7 +80,8 @@ test('customer deliberately views only current bids for an owned live request', 
     await expect(panel.getByText('ZAR 1 200.00', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('ZAR 1 400.00', { exact: true })).toHaveCount(0);
     await expect(panel.getByText('ZAR 1 500.00', { exact: true })).toHaveCount(0);
-    await expect(panel.getByRole('button', { name: /Accept|Choose|Select|Book|Pay|Contact|Message/iu })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Accept bid' })).toHaveCount(3);
+    await expect(panel.getByRole('button', { name: /Choose|Select|Book|Pay|Contact|Message/iu })).toHaveCount(0);
     const text = await panel.textContent();
     expect(text).not.toMatch(/provider|business|email|phone|message|perk|address|booking|payment|payout|audit/iu);
     for (const functionName of [

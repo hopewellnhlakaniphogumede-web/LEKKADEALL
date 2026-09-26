@@ -4251,3 +4251,31 @@ Actions and final Security/Release review remain required.
   runtime pass is claimed. GitHub Actions must verify the independent viewer
   journey and complete database/security/E2E regression matrix on the exact
   commit.
+
+### Ticket 10F Phase 2 - customer bid acceptance UI and focused E2E - 2026-09-26
+
+**Status:** Frontend and test implementation is local; exact-head CI, Security,
+and Release review remain required. Ticket 10F Phase 1 backend authority is
+unchanged.
+
+- Added a narrow acceptance module with exact RPC payloads and strict six-field
+  awarded/accepted response parsing. A native random UUID is held only in
+  memory for one confirmed intent. There is one acceptance call, no mutation
+  retry, and at most one read-only same-key reconciliation after any ambiguous
+  result. Unknown/malformed/stale outcomes fail closed with generic copy.
+- The active customer can select only a currently rendered submitted bid after
+  a deliberate bid read on an owned open request. Confirmation is explicit,
+  single-flight, and cancellable without network mutation. Server-confirmed
+  success clears bid actions and shows an in-session awarded state; unresolved
+  outcomes require a deliberate fresh request and bid read before another
+  intent. No direct protected-table DML/read path, provider contact, booking,
+  payment, address, persistent key, or legacy acceptance authority was added.
+- Added an independent disposable-stack Playwright scope with stale-version
+  denial, direct success, one executed-but-aborted response reconciled once,
+  cross-customer denial and server-side request/bid/receipt/audit postconditions.
+  Network policy allowlists only the two reviewed RPCs. The existing one-worker,
+  zero-retry and privacy-safe artifact gates remain unchanged.
+- Local focused acceptance/E2E boundary tests passed **29/29** and the complete
+  frontend Node suite passed **126/126** before the documentation update.
+  Docker and Supabase CLI are unavailable locally, so real Playwright and pgTAP
+  execution is pending exact-head GitHub Actions; no runtime pass is claimed.

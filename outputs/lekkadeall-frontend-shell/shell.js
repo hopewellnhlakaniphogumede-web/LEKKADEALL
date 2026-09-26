@@ -390,8 +390,23 @@ function customerRequestListPage(view) {
 }
 
 function customerBidViewingPanel(view, request) {
-  if (request.status !== 'open' || view.accountStatus !== 'active') return '';
+  if (!view.sessionReady || request.status !== 'open' || view.accountStatus !== 'active') return '';
   const bidView = view.customerBidViewing ?? {};
+  const acceptance = view.customerBidAcceptance ?? {};
+  if (acceptance.requestId === request.id && acceptance.confirmed) {
+    const bid = acceptance.selectedBid;
+    return `<section class="panel customer-bid-acceptance" data-customer-bid-acceptance>
+      <div class="panel-heading"><div><span>SERVER-CONFIRMED AWARD</span><h2>Bid accepted. This request is now awarded.</h2></div><span class="status-chip">Awarded</span></div>
+      <p>${escapeHtml(formatZarBudgetMinor(bid?.amount_minor))} · ${escapeHtml(formatSastDateTime(bid?.proposed_start))} · Bid reference ${escapeHtml(bid?.bid_id ?? '')}</p>
+      <p>No booking, payment, contact details or exact address have been created or revealed yet.</p>
+    </section>`;
+  }
+  if (acceptance.requestId === request.id && acceptance.blocked) {
+    return `<section class="panel customer-bid-acceptance" data-customer-bid-acceptance>
+      <p class="form-message" role="status">Bid acceptance is unavailable. Refresh the request and bids before trying again.</p>
+      <button class="button button-secondary" type="button" data-customer-bid-accept-action="refresh">Refresh request</button>
+    </section>`;
+  }
   if (bidView.requestId !== request.id || bidView.status === 'idle') {
     return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
       <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Deliberate read</span></div>
@@ -416,7 +431,7 @@ function customerBidViewingPanel(view, request) {
   }
 
   const bids = Array.isArray(bidView.items) ? bidView.items : [];
-  const cards = bids.map((bid) => `<article class="request-summary-card customer-bid-card" data-customer-bid-card>
+  const cards = bids.map((bid, index) => `<article class="request-summary-card customer-bid-card" data-customer-bid-card>
     <div class="request-summary-top"><span class="status-chip">${escapeHtml(bid.status)}</span><time>${escapeHtml(formatSastDateTime(bid.submitted_at))}</time></div>
     <h3>${escapeHtml(formatZarBudgetMinor(bid.amount_minor))}</h3>
     <dl class="request-summary-meta">
@@ -426,6 +441,7 @@ function customerBidViewingPanel(view, request) {
       <div><dt>Submitted</dt><dd>${escapeHtml(formatSastDateTime(bid.submitted_at))}</dd></div>
       <div><dt>Bid reference</dt><dd>${escapeHtml(bid.bid_id)}</dd></div>
     </dl>
+    ${acceptance.confirming ? '' : `<button class="button button-primary" type="button" data-customer-bid-accept-action="open" data-customer-bid-index="${index}">Accept bid</button>`}
   </article>`).join('');
   const content = bidView.status === 'empty' || bids.length === 0
     ? `<p class="form-message" role="status">${escapeHtml(CUSTOMER_CURRENT_BIDS_EMPTY_MESSAGE)}</p>`
@@ -433,11 +449,23 @@ function customerBidViewingPanel(view, request) {
   const loadMore = bidView.hasMore
     ? `<button class="button button-secondary" type="button" data-customer-bid-view-action="load-more" ${bidView.loadingMore ? 'disabled' : ''}>${bidView.loadingMore ? 'Loading bids&hellip;' : 'Load more bids'}</button>`
     : '';
+  const selected = acceptance.selectedBid;
+  const confirmation = acceptance.confirming && selected
+    ? `<section class="draft-cancellation-confirmation customer-bid-accept-confirmation" role="alertdialog" aria-labelledby="accept-bid-title" aria-describedby="accept-bid-description">
+        <h3 id="accept-bid-title">Confirm bid acceptance</h3>
+        <p id="accept-bid-description">Accepting awards this request to the selected bid. The server declines competing submitted bids. This transition cannot be undone here. No booking, payment, messaging, contact details or exact address are created or revealed.</p>
+        <p>${escapeHtml(formatZarBudgetMinor(selected.amount_minor))} · ${escapeHtml(formatSastDateTime(selected.proposed_start))} · Bid reference ${escapeHtml(selected.bid_id)}</p>
+        <form data-customer-bid-accept-form>
+          <button class="button button-secondary" type="button" data-customer-bid-accept-action="cancel" ${acceptance.submitting ? 'disabled' : ''}>Cancel</button>
+          <button class="button button-primary" type="submit" ${acceptance.submitting ? 'disabled' : ''}>${acceptance.submitting ? 'Confirming…' : 'Confirm acceptance'}</button>
+        </form>
+      </section>` : '';
   return `<section class="panel customer-bid-viewing" data-customer-bid-viewing>
     <div class="panel-heading"><div><span>CURRENT BIDS</span><h2>Review current bids</h2></div><span class="status-chip">Server-authorized</span></div>
     ${content}
-    <div class="dashboard-actions"><button class="button button-secondary" type="button" data-customer-bid-view-action="refresh" ${bidView.loadingMore ? 'disabled' : ''}>Refresh bids</button>${loadMore}</div>
-    <p class="form-message">Bid viewing is read-only and does not create a marketplace transition.</p>
+    ${confirmation}
+    <div class="dashboard-actions"><button class="button button-secondary" type="button" data-customer-bid-view-action="refresh" ${bidView.loadingMore || acceptance.confirming ? 'disabled' : ''}>Refresh bids</button>${acceptance.confirming ? '' : loadMore}</div>
+    <p class="form-message">Only the selected current bid can be accepted after explicit confirmation.</p>
   </section>`;
 }
 
@@ -459,6 +487,7 @@ function customerRequestDetailPage(view) {
   const category = activeCategoryLabel(view.categories, request.category_id);
   const cancellation = view.customerDraftCancellation ?? {};
   const publication = view.customerDraftPublication ?? {};
+  const acceptance = view.customerBidAcceptance ?? {};
   const editHref = customerRequestEditHref(request.id);
   let draftActionsContent = '';
   if (publication.message) {
@@ -502,7 +531,7 @@ function customerRequestDetailPage(view) {
   return appPage('Request details', `
     <section class="dashboard-heading"><div><p class="eyebrow">CUSTOMER REQUEST</p><h1>${escapeHtml(request.title)}</h1><p>Protected details returned through your existing RLS boundary.</p></div><a class="button button-secondary" href="/app/customer/requests" data-nav>View all requests</a></section>
     <article class="request-detail-card">
-      <div class="request-detail-status"><span class="status-chip">${escapeHtml(customerRequestStatusLabel(request.status))}</span><span>${escapeHtml(category)}</span></div>
+      <div class="request-detail-status"><span class="status-chip">${escapeHtml(acceptance.requestId === request.id && acceptance.confirmed ? 'Awarded' : customerRequestStatusLabel(request.status))}</span><span>${escapeHtml(category)}</span></div>
       <section class="request-detail-description"><h2>Public description</h2><p>${escapeHtml(request.description)}</p></section>
       <dl class="request-detail-grid">
         <div><dt>Suburb</dt><dd>${escapeHtml(request.suburb)}</dd></div>
@@ -515,7 +544,7 @@ function customerRequestDetailPage(view) {
     </article>
     ${draftActionsContent}
     ${customerBidViewingPanel(view, request)}
-    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned eligible draft may be edited, cancelled or published. Bid viewing is available only for an eligible open request; exact-address handling and downstream marketplace actions remain unavailable.</p></section>
+    <section class="inline-warning request-boundary-note"><strong>Strict workflow boundary</strong><p>Only an owned eligible draft may be edited, cancelled or published. Bid acceptance requires a current bid on an owned open request and explicit confirmation. Booking, payment and exact-address handling remain unavailable.</p></section>
   `);
 }
 
