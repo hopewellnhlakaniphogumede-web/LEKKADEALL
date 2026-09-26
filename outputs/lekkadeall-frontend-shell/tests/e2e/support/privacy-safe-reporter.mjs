@@ -5,6 +5,7 @@ const SAFE_SECONDARY_CLEANUP_PHASE = /^(?:cross-customer|stale-edit):cleanup-sec
 const SAFE_PROGRESS_PHASE = /^ambiguous-update:(?:mutation-executed|interceptor-release-start|fetch-disabled|response-listener-removed|cdp-detached|detail-navigation|rls-read-observed|canonical-values-verified|cleanup)$/u;
 const SAFE_PROVIDER_BIDDING_FAILURE = /^provider-bidding-failure:(?:fixture-setup|browser-session|discoverable-request|confirmed-submit|confirmed-withdrawal|terminal-controls|postcondition|privacy|sign-out)$/u;
 const SAFE_CUSTOMER_BID_VIEWING_FAILURE = /^customer-bid-viewing-failure:(?:fixture-setup|owner-session|deliberate-view|filtered-bids|service-revocation|request-states|signed-out|cross-customer|postcondition|privacy|sign-out)$/u;
+const SAFE_CUSTOMER_BID_ACCEPTANCE_FAILURE = /^customer-bid-acceptance-failure:(?:fixture-setup|owner-session|direct-confirmation|stale-version|direct-success|ambiguous-reconciliation|postcondition|foreign-denial|privacy)$/u;
 const SAFE_CANONICAL_VALUE_PHASE = /^canonical-values:(?:status|category|title|description|suburb|city|start|budget)-pass$/u;
 const SAFE_CONTEXT_CLEANUP_FAILURE = /^negative-actor-failure:(?:restricted|suspended|closed|provider|missing-profile):context-cleanup$/u;
 
@@ -15,7 +16,8 @@ function failedSafePhase(steps = []) {
     if (step.error && (SAFE_FAILURE_PHASE.test(step.title)
         || SAFE_SECURITY_BOUNDARY_PHASE.test(step.title)
         || SAFE_PROVIDER_BIDDING_FAILURE.test(step.title)
-        || SAFE_CUSTOMER_BID_VIEWING_FAILURE.test(step.title))) return step.title;
+        || SAFE_CUSTOMER_BID_VIEWING_FAILURE.test(step.title)
+        || SAFE_CUSTOMER_BID_ACCEPTANCE_FAILURE.test(step.title))) return step.title;
   }
   return null;
 }

@@ -17,6 +17,7 @@ export const CUSTOMER_BID_VIEWING_CANCELLED_REQUEST_ID = '90000000-0000-4000-800
 export const CUSTOMER_BID_VIEWING_AWARDED_REQUEST_ID = '90000000-0000-4000-8000-000000000226';
 export const CUSTOMER_BID_VIEWING_PAST_CLOSE_REQUEST_ID = '90000000-0000-4000-8000-000000000227';
 export const CUSTOMER_BID_VIEWING_TITLE = 'Review synthetic current bids';
+export const CUSTOMER_BID_ACCEPTANCE_REQUEST_ID = '90000000-0000-4000-8000-000000000228';
 const PROVIDER_DISCOVERY_ADMIN_ID = '90000000-0000-4000-8000-000000000201';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -710,6 +711,93 @@ export async function assertSyntheticCustomerBidViewingPostconditions(ownerEmail
         where booking.request_id = '${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid
       ) then
         raise exception 'customer bid viewing postcondition failed';
+      end if;
+    end;
+    $e2e$;
+  `);
+}
+
+export async function prepareSyntheticCustomerBidAcceptance({ owner, otherCustomer, providers }) {
+  await prepareSyntheticCustomerBidViewing({ owner, otherCustomer, providers });
+  const ownerId = await findSyntheticUserId(owner.email);
+  await runSql(`
+    begin;
+    set local lekkadeall.allow_marketplace_state_transition = 'on';
+    insert into public.service_requests (
+      id, customer_id, category_id, title, description, suburb, city,
+      requested_start, budget_minor, status, closes_at, published_at,
+      awarded_at, cancelled_at
+    ) values (
+      '${CUSTOMER_BID_ACCEPTANCE_REQUEST_ID}'::uuid, '${ownerId}'::uuid,
+      '${ACTIVE_CATEGORY_ID}'::uuid, 'Review synthetic acceptance recovery',
+      'Review one synthetic current bid through the server-owned acceptance boundary.',
+      'Woodstock', 'Cape Town', pg_catalog.now() + interval '5 days',
+      150000, 'open'::public.request_status,
+      pg_catalog.now() + interval '2 days', pg_catalog.now() - interval '1 hour',
+      null, null
+    );
+    set local lekkadeall.allow_marketplace_state_transition = 'off';
+    commit;
+  `);
+  const directBidId = await runSql(`
+    select bid.id from public.bids as bid
+    where bid.request_id = '${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid
+      and bid.amount_minor = 100050 and bid.status = 'submitted'::public.bid_status;
+  `);
+  const recoveredBidId = await submitSyntheticProviderBid(
+    providers[0].email, CUSTOMER_BID_ACCEPTANCE_REQUEST_ID, 100050,
+  );
+  return { directBidId: requireUuid(directBidId.trim()), recoveredBidId };
+}
+
+export async function staleSyntheticCustomerBidAcceptanceRequest() {
+  const updatedId = await runSql(`
+    update public.service_requests as request
+    set updated_at = pg_catalog.clock_timestamp()
+    where request.id = '${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid
+      and request.status = 'open'::public.request_status
+    returning request.id;
+  `);
+  if (updatedId !== CUSTOMER_BID_VIEWING_REQUEST_ID) {
+    throw new Error('customer-bid-acceptance-stale-fixture-unavailable');
+  }
+}
+
+export async function assertSyntheticCustomerBidAcceptancePostconditions(ownerEmailValue, directBidId, recoveredBidId) {
+  const ownerId = await findSyntheticUserId(ownerEmailValue);
+  const direct = requireUuid(directBidId);
+  const recovered = requireUuid(recoveredBidId);
+  await runSql(`
+    do $e2e$
+    begin
+      if (select pg_catalog.count(*) from public.service_requests as request
+          where request.id in ('${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid,
+                               '${CUSTOMER_BID_ACCEPTANCE_REQUEST_ID}'::uuid)
+            and request.customer_id = '${ownerId}'::uuid
+            and request.status = 'awarded'::public.request_status
+            and request.awarded_at is not null) <> 2
+      or (select pg_catalog.count(*) from public.bids as bid
+          where bid.id in ('${direct}'::uuid, '${recovered}'::uuid)
+            and bid.status = 'accepted'::public.bid_status
+            and bid.accepted_at is not null) <> 2
+      or (select pg_catalog.count(*) from public.bids as bid
+          where bid.request_id = '${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid
+            and bid.status = 'declined'::public.bid_status) <> 3
+      or (select pg_catalog.count(*) from private.customer_bid_acceptance_receipts as receipt
+          where receipt.request_id in ('${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid,
+                                      '${CUSTOMER_BID_ACCEPTANCE_REQUEST_ID}'::uuid)
+            and receipt.customer_id = '${ownerId}'::uuid) <> 2
+      or (select pg_catalog.count(*) from public.audit_events as audit
+          where audit.action = 'customer.bid_accepted'
+            and audit.object_type = 'bid'
+            and audit.object_id in ('${direct}', '${recovered}')) <> 2
+      or exists (select 1 from private.service_request_addresses as address
+          where address.request_id in ('${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid,
+                                       '${CUSTOMER_BID_ACCEPTANCE_REQUEST_ID}'::uuid))
+      or exists (select 1 from public.bookings as booking
+          where booking.request_id in ('${CUSTOMER_BID_VIEWING_REQUEST_ID}'::uuid,
+                                       '${CUSTOMER_BID_ACCEPTANCE_REQUEST_ID}'::uuid)) then
+        raise exception 'customer bid acceptance postcondition failed';
       end if;
     end;
     $e2e$;

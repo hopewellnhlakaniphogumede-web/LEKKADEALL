@@ -51,6 +51,7 @@ function openRequest(status = 'open') {
 
 function detailView(status = 'open', bidView = {}) {
   return {
+    sessionReady: true,
     access: { kind: 'allowed', role: 'customer' },
     accountStatus: 'active',
     categories: [],
@@ -227,7 +228,7 @@ test('app keeps viewing single-flight, deliberate, in-memory and stale-clearing'
     source.indexOf("path === '/app/customer/requests/edit'"),
   );
   assert.match(source, /let customerBidViewInFlight = false;/u);
-  assert.match(source, /if \(customerBidViewInFlight \|\| !isCustomerRequestId\(requestId\)/u);
+  assert.match(source, /if \(customerBidViewInFlight \|\| customerBidAcceptanceInFlight[\s\S]*!isCustomerRequestId\(requestId\)/u);
   assert.equal((source.match(/await readCustomerCurrentBids\(state\.client, requestId, \{ cursor \}\)/gu) ?? []).length, 1);
   assert.doesNotMatch(detailLoad, /readCustomerCurrentBids/u);
   assert.match(source, /data-customer-bid-view-action[\s\S]*action === 'view'[\s\S]*loadCustomerBidView\(\)/u);
@@ -248,13 +249,16 @@ test('new customer bid-view sources contain no alternate authority, mutation or 
     for (const token of [
       '.from(', '.select(', '.insert(', '.update(', '.upsert(', '.delete(',
       'customer_accept_bid', 'provider_id', 'business_name', 'email', 'phone',
-      'perks', 'address', 'booking', 'payment', 'payout', 'audit',
+      'perks', 'payout', 'audit',
       'localStorage', 'sessionStorage', 'indexedDB', 'setTimeout', 'setInterval',
-      'retry', 'poll', 'Accept bid', 'Choose provider', 'Select provider',
+      'retry', 'poll', 'Choose provider', 'Select provider',
       'Book provider', 'Pay provider', 'Contact provider',
     ]) {
       assert.equal(source.includes(token), false, `prohibited customer bid-view token: ${token}`);
     }
+  }
+  for (const token of ['address', 'booking', 'payment']) {
+    assert.equal(moduleSource.includes(token), false, `prohibited customer bid-view module token: ${token}`);
   }
   assert.equal(parseCustomerCurrentBid(bid({ provider_id: secondBidId })), null);
 });

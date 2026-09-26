@@ -403,6 +403,8 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     'customer_cancel_draft_request',
     'customer_publish_draft_request',
     'customer_list_current_bids',
+    'customer_accept_current_bid',
+    'customer_reconcile_bid_acceptance',
     'provider_list_discoverable_requests',
     'provider_submit_bid',
     'provider_withdraw_bid',
@@ -424,6 +426,8 @@ test('browser mutation and fixture boundaries are narrowly allowlisted', async (
     networkSource,
     /customer_list_current_bids:\s*\[\s*'p_cursor_bid_id', 'p_cursor_submitted_at', 'p_request_id'/u,
   );
+  assert.match(networkSource, /customer_accept_current_bid:\s*\[\s*'p_bid_id', 'p_expected_bid_submitted_at', 'p_expected_request_updated_at',[\s\S]*'p_idempotency_key', 'p_request_id'/u);
+  assert.match(networkSource, /customer_reconcile_bid_acceptance:\s*\['p_idempotency_key', 'p_request_id'\]/u);
   assert.match(
     networkSource,
     /provider_list_discoverable_requests:\s*\[\s*'p_cursor_published_at', 'p_cursor_request_id', 'p_page_size'/u,
@@ -710,7 +714,7 @@ test('provider discovery E2E is isolated, RPC-only, revocable and privacy-safe',
   assert.match(fixtureSource, /allow_marketplace_state_transition[\s\S]*PROVIDER_DISCOVERY_MATCHING_TITLE[\s\S]*PROVIDER_DISCOVERY_NONMATCHING_TITLE/u);
   assert.match(networkSource, /provider_list_discoverable_requests/u);
   assert.match(runnerSource, /discovery:\s*\['--grep', 'eligible provider discovers one safe matching request and loses it after revocation'\]/u);
-  assert.match(runnerSource, /full:\s*\['--grep-invert', '\(\?:eligible provider discovers one safe matching request and loses it after revocation\|eligible provider submits and withdraws one server-reconciled bid\|customer deliberately views only current bids for an owned live request\)'\]/u);
+  assert.match(runnerSource, /full:\s*\['--grep-invert', '\(\?:eligible provider discovers one safe matching request and loses it after revocation\|eligible provider submits and withdraws one server-reconciled bid\|customer deliberately views only current bids for an owned live request\|customer accepts one current bid and reconciles one executed ambiguous response\)'\]/u);
 });
 
 test('provider bidding E2E is independent, confirmed, reconciled and privacy-safe', async () => {
@@ -790,6 +794,28 @@ test('customer bid viewing E2E is independent, deliberate, filtered and privacy-
     'service-revocation', 'request-states', 'signed-out', 'cross-customer',
     'postcondition', 'privacy', 'sign-out',
   ]) assert.match(reporterSource, new RegExp(`(?:\\(|\\|)${stage}(?:\\||\\))`));
+});
+
+test('customer bid acceptance E2E is explicit, stale-safe, reconciled and isolated', async () => {
+  const spec = await readFile(join(here, 'e2e/customer-bid-acceptance.spec.mjs'), 'utf8');
+  const fixtures = await readFile(join(here, 'e2e/support/local-fixtures.mjs'), 'utf8');
+  const runner = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const reporter = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
+
+  assert.match(spec, /prepareSyntheticCustomerBidAcceptance/u);
+  assert.match(spec, /Confirm acceptance[\s\S]*customer_accept_current_bid/u);
+  assert.match(spec, /staleSyntheticCustomerBidAcceptanceRequest[\s\S]*Refresh request/u);
+  assert.match(spec, /route\.fetch\(\)[\s\S]*route\.abort\('failed'\)/u);
+  assert.match(spec, /acceptedKey[\s\S]*reconciledKey[\s\S]*toBe\(acceptedKey\)/u);
+  assert.match(spec, /assertSyntheticCustomerBidAcceptancePostconditions/u);
+  assert.match(spec, /foreign-denial[\s\S]*page\.goto\(`[\s\S]*Request not found or unavailable/u);
+  assert.match(fixtures, /private\.customer_bid_acceptance_receipts[\s\S]*customer\.bid_accepted/u);
+  assert.match(runner, /'customer-bid-acceptance':\s*\['--grep', 'customer accepts one current bid and reconciles one executed ambiguous response'\]/u);
+  assert.match(reporter, /customer-bid-acceptance-failure:/u);
+  assert.match(workflow, /E2E_TEST_SCOPE: customer-bid-acceptance/u);
+  assert.doesNotMatch(spec, /waitForTimeout|await new Promise|\bretry\b|service_role|response\.(?:body|json|text)/iu);
+  assert.doesNotMatch(spec, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/u);
 });
 
 test('Ticket 9A-9R stages isolate security failures without weakening browser boundaries', async () => {
@@ -994,7 +1020,7 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.match(workflow, /needs:\s*database-tests/);
   assert.match(workflow, /pnpm run test:e2e:local/);
   for (const scope of [
-    'discovery', 'bidding', 'customer-bid-viewing', 'lifecycle', 'aborted', 'affected', 'full',
+    'discovery', 'bidding', 'customer-bid-viewing', 'customer-bid-acceptance', 'lifecycle', 'aborted', 'affected', 'full',
   ]) {
     assert.match(workflow, new RegExp(`E2E_TEST_SCOPE:\\s*${scope}`));
   }

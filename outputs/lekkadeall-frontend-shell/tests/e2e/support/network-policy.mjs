@@ -7,6 +7,8 @@ export const ALLOWED_MARKETPLACE_RPCS = Object.freeze([
   'customer_cancel_draft_request',
   'customer_publish_draft_request',
   'customer_list_current_bids',
+  'customer_accept_current_bid',
+  'customer_reconcile_bid_acceptance',
   'provider_list_discoverable_requests',
   'provider_submit_bid',
   'provider_withdraw_bid',
@@ -51,6 +53,11 @@ const EXPECTED_RPC_KEYS = Object.freeze({
   customer_list_current_bids: [
     'p_cursor_bid_id', 'p_cursor_submitted_at', 'p_request_id',
   ],
+  customer_accept_current_bid: [
+    'p_bid_id', 'p_expected_bid_submitted_at', 'p_expected_request_updated_at',
+    'p_idempotency_key', 'p_request_id',
+  ],
+  customer_reconcile_bid_acceptance: ['p_idempotency_key', 'p_request_id'],
   provider_list_discoverable_requests: [
     'p_cursor_published_at', 'p_cursor_request_id', 'p_page_size',
   ],
