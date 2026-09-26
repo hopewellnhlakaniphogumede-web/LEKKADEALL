@@ -11,6 +11,11 @@ import {
   parseSupabaseStatusEnv,
 } from './e2e/support/local-environment.mjs';
 import { ALLOWED_MARKETPLACE_RPCS } from './e2e/support/network-policy.mjs';
+import {
+  SAFE_SECURITY_BOUNDARY_PHASE,
+  SAFE_SETUP_PROGRESS_PHASE,
+} from './e2e/support/privacy-safe-reporter.mjs';
+import PrivacySafeReporter from './e2e/support/privacy-safe-reporter.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(here, '..');
@@ -98,7 +103,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|context-creation\|page-creation\|sign-in\|authenticated-privacy\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(
     reporterSource,
-    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
+    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-400\|sign-in-http-401\|sign-in-http-403\|sign-in-http-other-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
   );
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|publish\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /provider-discovery-failure:\(fixture-setup\|browser-session\|initial-discovery\|revocation\|fresh-discovery\|privacy\|sign-out\)/);
@@ -110,8 +115,10 @@ test('long E2E security journeys have bounded time without retries or verbose di
   );
   assert.match(reporterSource, /signup-network-failure\|signup-duplicate-request\|signup-unexpected-collision\|signup-reconciliation-invalid\|signup-reconciliation-session-failure/);
   assert.match(reporterSource, /ambiguous-update-failure:\(isolated-setup\|single-update-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|canonical-values\|postcondition\|sign-out\|cleanup\)/);
-  assert.match(reporterSource, /ambiguous-publication-failure:\(isolated-setup\|single-publication-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|postcondition\|sign-out\|cleanup\)/);
-  assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|draft-create\|edit-route\)/);
+  assert.match(reporterSource, /ambiguous-publication-failure:\(context-creation\|page-creation\|network-policy\|fixture-account\|anonymous-storage-precondition/);
+  assert.match(reporterSource, /detail-readiness\|single-publication-execution\|ambiguous-ui\|interception-release\|detail-navigation\|fresh-rls-read\|postcondition\|sign-out\|cleanup\)/);
+  assert.match(reporterSource, /ambiguous-setup-failure:\(browser-context\|fixture-account\|browser-session\|anonymous-storage-precondition/);
+  assert.match(reporterSource, /unknown\|draft-create\|edit-route\)/);
   assert.match(
     reporterSource,
     /ambiguous-update:\(\?:mutation-executed\|interceptor-release-start\|fetch-disabled\|response-listener-removed\|cdp-detached\|detail-navigation\|rls-read-observed\|canonical-values-verified\|cleanup\)/,
@@ -241,7 +248,10 @@ test('negative actors report fixed privacy-safe browser-session boundaries', asy
     'anonymous-storage-precondition',
     'sign-in-network',
     'sign-in-http-429',
-    'sign-in-http-4xx',
+    'sign-in-http-400',
+    'sign-in-http-401',
+    'sign-in-http-403',
+    'sign-in-http-other-4xx',
     'sign-in-http-5xx',
     'sign-in-http-unexpected',
     'auth-session-missing',
@@ -286,9 +296,13 @@ test('negative actors report fixed privacy-safe browser-session boundaries', asy
   assert.match(signInSource, /candidate\.request\(\)\.method\(\) === 'POST'/u);
   assert.doesNotMatch(signInSource, /retry|setTimeout|waitForTimeout|sleep/iu);
   assert.match(signInSource, /status === 429[\s\S]*sign-in-http-429/u);
-  assert.match(signInSource, /status >= 400 && status < 500[\s\S]*sign-in-http-4xx/u);
+  for (const status of [400, 401, 403]) {
+    assert.match(signInSource, new RegExp(`status === ${status}[^\\n]*sign-in-http-${status}`, 'u'));
+  }
+  assert.match(signInSource, /status >= 400 && status < 500[^\n]*sign-in-http-other-4xx/u);
   assert.match(signInSource, /status >= 500 && status < 600[\s\S]*sign-in-http-5xx/u);
   assert.match(signInSource, /!response\.ok\(\)[\s\S]*sign-in-http-unexpected/u);
+  assert.equal((signInSource.match(/response\.status\(\)/gu) ?? []).length, 1);
   assert.doesNotMatch(signInSource, /response\.(?:body|json|text|headers|headerValue)\b/u);
   assert.doesNotMatch(
     signInSource,
@@ -778,6 +792,177 @@ test('customer bid viewing E2E is independent, deliberate, filtered and privacy-
   ]) assert.match(reporterSource, new RegExp(`(?:\\(|\\|)${stage}(?:\\||\\))`));
 });
 
+test('Ticket 9A-9R stages isolate security failures without weakening browser boundaries', async () => {
+  const security = await readFile(join(here, 'e2e/security-boundaries.spec.mjs'), 'utf8');
+  const reporter = await readFile(join(here, 'e2e/support/privacy-safe-reporter.mjs'), 'utf8');
+  const runner = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
+  const playwright = await readFile(join(frontendRoot, 'playwright.config.mjs'), 'utf8');
+  const parseStages = (name) => {
+    const match = security.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`, 'u'));
+    assert.ok(match, `${name} must be a fixed set`);
+    return [...match[1].matchAll(/'([^']+)'/gu)].map((item) => item[1]);
+  };
+  const crossStages = [
+    'context-creation', 'page-creation', 'fixture-account', 'owner-session',
+    'second-customer-session', 'actor-isolation', 'draft-create', 'owner-proof',
+    'owner-list', 'foreign-detail', 'missing-detail', 'foreign-edit',
+    'missing-edit', 'postcondition', 'sign-out', 'cleanup',
+  ];
+  const staleStages = [
+    'network-policy', 'fixture-account', 'browser-session', 'draft-create', 'edit-readiness',
+    'shared-session', 'cancel-confirmed', 'stale-update-result', 'generic-ui',
+    'postcondition', 'sign-out', 'cleanup',
+  ];
+  assert.deepEqual(parseStages('CROSS_CUSTOMER_PHASES'), crossStages);
+  assert.deepEqual(parseStages('STALE_EDIT_PHASES'), staleStages);
+  for (const stage of crossStages) assert.equal(SAFE_SECURITY_BOUNDARY_PHASE.test(`cross-customer:${stage}`), true);
+  for (const stage of staleStages) assert.equal(SAFE_SECURITY_BOUNDARY_PHASE.test(`stale-edit:${stage}`), true);
+  for (const unsafe of [
+    'cross-customer:foreign-detail:record', 'stale-edit:generic-ui:customer',
+    'cross-customer:cleanup-secondary', 'stale-edit:unknown', 'publication-setup:credential',
+  ]) assert.equal(SAFE_SECURITY_BOUNDARY_PHASE.test(unsafe), false);
+  for (const stage of parseStages('PUBLICATION_SETUP_PROGRESS_PHASES')) {
+    assert.equal(SAFE_SETUP_PROGRESS_PHASE.test(`publication-setup:${stage}`), true);
+  }
+  for (const stage of [
+    'anonymous-storage-precondition', 'sign-in-network', 'sign-in-http-429',
+    'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+    'sign-in-http-other-4xx', 'sign-in-http-5xx', 'sign-in-http-unexpected',
+    'auth-session-missing', 'customer-route', 'active-profile-readiness', 'unknown',
+  ]) {
+    assert.ok(parseStages('AMBIGUOUS_SETUP_FAILURE_CATEGORIES').includes(stage));
+    assert.ok(parseStages('AMBIGUOUS_PUBLICATION_FAILURE_CATEGORIES').includes(stage));
+    assert.match(reporter, new RegExp(`(?:ambiguous-setup-failure|ambiguous-publication-failure):\\([^)]*${stage}`, 'u'));
+  }
+  assert.match(security, /privacySafeSignInFailureStage\(error\)/u);
+  assert.match(reporter, /SAFE_SECURITY_BOUNDARY_PHASE\.test\(step\.title\)/u);
+  assert.match(reporter, /SAFE_SETUP_PROGRESS_PHASE\.test\(step\.title\)/u);
+  assert.doesNotMatch(reporter, /step\.error\.(?:message|stack|cause)|result\.(?:error|stdout|stderr)|request\.url\(|response\.(?:body|text|json)/iu);
+  assert.doesNotMatch(security, /console\.|process\.(?:stdout|stderr)|response\.(?:body|text|json)|context\.cookies\(|storageState|waitForTimeout|(?<!test\.)setTimeout\(/iu);
+
+  const crossStart = security.indexOf("test('cross-customer request IDs remain RLS-hidden and non-actionable'");
+  const negativeStart = security.indexOf("test('restricted suspended closed missing-profile and wrong-role actors fail closed'");
+  const staleStart = security.indexOf("test('a stale edit is rejected after another tab cancels the draft'");
+  const updateStart = security.indexOf("test('an executed update with an aborted response is not retried and requires a fresh read'");
+  const publishStart = security.indexOf("test('an executed publication with an aborted response is not retried and requires a fresh read'");
+  assert.ok(crossStart >= 0 && crossStart < negativeStart && negativeStart < staleStart
+    && staleStart < updateStart && updateStart < publishStart);
+  const cross = security.slice(crossStart, negativeStart);
+  const stale = security.slice(staleStart, updateStart);
+  const publication = security.slice(publishStart);
+  assert.equal((cross.match(/browser\.newContext\(/gu) ?? []).length, 2);
+  assert.equal((cross.match(/contextA\.newPage\(\)|contextB\.newPage\(\)/gu) ?? []).length, 2);
+  assert.match(cross, /assertDistinctSyntheticUsers[\s\S]*assertSyntheticRequestOwner[\s\S]*foreign-detail[\s\S]*missing-detail[\s\S]*foreign-edit[\s\S]*missing-edit/u);
+  assert.match(cross, /getRpcCount\('customer_update_draft_request'\)\)\.toBe\(0\)/u);
+  assert.match(cross, /getRpcCount\('customer_cancel_draft_request'\)\)\.toBe\(0\)/u);
+  assert.match(cross, /getRpcCount\('customer_publish_draft_request'\)\)\.toBe\(0\)/u);
+  assert.match(cross, /try \{ await contextA\?\.close\(\); \} catch[\s\S]*try \{ await contextB\?\.close\(\); \} catch/u);
+  assert.match(stale, /cancellationPage = await context\.newPage\(\)[\s\S]*cancellationPage\.context\(\)\)\.toBe\(context\)/u);
+  assert.match(stale, /cancel-confirmed[\s\S]*Draft cancelled\.[\s\S]*stale-update-result[\s\S]*Save draft changes[\s\S]*generic-ui[\s\S]*This draft is not available for editing\./u);
+  assert.match(stale, /getRpcCount\('customer_update_draft_request'\)\)\.toBe\(1\)/u);
+  assert.match(stale, /getRpcCount\('customer_cancel_draft_request'\)\)\.toBe\(1\)/u);
+  assert.match(stale, /finally \{[\s\S]*await cancellationPage\?\.close\(\)/u);
+  for (const scenario of [cross, stale]) {
+    assert.match(scenario, /primaryFailure = error;[\s\S]*throw error;[\s\S]*cleanupFailed && !primaryFailure/u);
+    assert.doesNotMatch(scenario, /\bretry\b|waitForTimeout|(?<!test\.)setTimeout\(/iu);
+  }
+  assert.match(publication, /context-creation[\s\S]*page-creation[\s\S]*network-policy[\s\S]*fixture-account[\s\S]*withAmbiguousPublicationSignInFailureCategory[\s\S]*draft-create[\s\S]*detail-readiness/u);
+  assert.doesNotMatch(publication, /withAmbiguousPublicationFailureCategory\('isolated-setup'/u);
+  assert.match(playwright, /workers:\s*1[\s\S]*retries:\s*0/u);
+  for (const required of [
+    'e2e-refuses-preexisting-supabase-stack', "['db', 'reset']", "['stop', '--no-backup']",
+  ]) assert.ok(runner.includes(required));
+  assert.match(runner, /finally \{\r?\n  await cleanup\(\);/u);
+  for (const scope of ['security-boundary', 'cross-customer', 'stale-edit']) {
+    assert.match(runner, new RegExp(`'${scope}': \\['--grep',`, 'u'));
+    assert.equal((workflow.match(new RegExp(`E2E_TEST_SCOPE: ${scope}\\b`, 'gu')) ?? []).length, 1);
+  }
+  assert.match(runner, /'security-boundary':[\s\S]*cross-customer request IDs remain RLS-hidden[\s\S]*restricted suspended closed missing-profile[\s\S]*a stale edit is rejected[\s\S]*an executed update with an aborted response[\s\S]*an executed publication with an aborted response/u);
+  assert.match(workflow, /E2E_TEST_SCOPE: security-boundary[\s\S]*E2E_TEST_SCOPE: cross-customer[\s\S]*E2E_TEST_SCOPE: stale-edit[\s\S]*E2E_TEST_SCOPE: full[\s\S]*if: always\(\)/u);
+  assert.doesNotMatch(workflow, /continue-on-error:\s*true|upload-artifact/u);
+});
+
+test('Ticket 9A-9R reporter emits fixed stages and suppresses raw failure details', () => {
+  const reporter = new PrivacySafeReporter();
+  const output = [];
+  const write = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    output.push(String(chunk));
+    return true;
+  };
+  try {
+    const safeTitle = { titlePath: () => ['root', 'security-boundaries.spec.mjs', 'safe scenario'] };
+    const rawError = new Error('private-marker-must-not-appear');
+    reporter.onTestEnd(safeTitle, {
+      status: 'failed',
+      error: rawError,
+      steps: [{ title: 'cross-customer:foreign-detail', error: rawError, steps: [] }],
+    });
+    reporter.onStepEnd(null, null, { title: 'stale-edit:cancel-confirmed', steps: [] });
+    reporter.onStepEnd(null, null, { title: 'stale-edit:cleanup-secondary', steps: [] });
+    reporter.onTestEnd(safeTitle, {
+      status: 'failed',
+      error: rawError,
+      steps: [{ title: 'cross-customer:foreign-detail:private-marker-must-not-appear', error: rawError, steps: [] }],
+    });
+  } finally {
+    process.stdout.write = write;
+  }
+  const text = output.join('');
+  assert.match(text, /FAIL \[assertion-or-runtime\] \[cross-customer:foreign-detail\]/u);
+  assert.match(text, /PHASE stale-edit:cancel-confirmed/u);
+  assert.match(text, /CLEANUP stale-edit:cleanup-secondary/u);
+  assert.equal((text.match(/FAIL \[assertion-or-runtime\]/gu) ?? []).length, 2);
+  assert.doesNotMatch(text, /private-marker-must-not-appear|Error:|stack|requestId|password|token|cookie/u);
+});
+
+test('sign-in 4xx reporter accepts only fixed privacy-safe status categories', () => {
+  const reporter = new PrivacySafeReporter();
+  const output = [];
+  const write = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    output.push(String(chunk));
+    return true;
+  };
+  try {
+    const safeTitle = { titlePath: () => ['root', 'security-boundaries.spec.mjs', 'safe scenario'] };
+    const rawError = new Error('private-marker-must-not-appear');
+    for (const prefix of [
+      'negative-actor-failure:restricted:',
+      'ambiguous-setup-failure:',
+      'ambiguous-publication-failure:',
+    ]) {
+      for (const stage of [
+        'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+        'sign-in-http-other-4xx',
+      ]) {
+        reporter.onTestEnd(safeTitle, {
+          status: 'failed',
+          steps: [{ title: `${prefix}${stage}`, error: rawError, steps: [] }],
+        });
+      }
+      for (const stage of ['sign-in-http-4xx', 'sign-in-http-402']) {
+        reporter.onTestEnd(safeTitle, {
+          status: 'failed',
+          steps: [{ title: `${prefix}${stage}`, error: rawError, steps: [] }],
+        });
+      }
+    }
+  } finally {
+    process.stdout.write = write;
+  }
+  const text = output.join('');
+  for (const stage of [
+    'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+    'sign-in-http-other-4xx',
+  ]) {
+    assert.equal((text.match(new RegExp(`\\[.*:${stage}\\]`, 'gu')) ?? []).length, 3);
+  }
+  assert.doesNotMatch(text, /\[.*:sign-in-http-(?:4xx|402)\]/u);
+  assert.doesNotMatch(text, /private-marker-must-not-appear|Error:|stack|requestId|password|token|cookie/u);
+});
+
 test('CI E2E job is isolated behind the complete database security job', async () => {
   const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
   assert.match(
@@ -822,6 +1007,38 @@ test('CI E2E job is isolated behind the complete database security job', async (
   assert.doesNotMatch(workflow, /version:\s*latest/u);
   assert.match(workflow, /playwright install --with-deps chromium/);
   assert.doesNotMatch(workflow, /upload-artifact/);
+});
+
+test('authenticated GHCR remains confined to disposable Supabase children', async () => {
+  const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
+  const helper = await readFile(join(repositoryRoot, '.github/scripts/prepull-supabase-local-images.sh'), 'utf8');
+  const runner = await readFile(join(frontendRoot, 'scripts/e2e/run-local.mjs'), 'utf8');
+  const permissions = workflow.match(/^permissions:\r?\n((?:  [^\r\n]+\r?\n)+)/mu)?.[1];
+  assert.deepEqual(permissions?.trim().split(/\r?\n/u).map((line) => line.trim()), [
+    'contents: read', 'packages: read',
+  ]);
+  assert.equal((workflow.match(/SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr\.io/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/- name: Authenticate Docker to GHCR/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/docker login ghcr\.io[^\n]*--password-stdin/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/GHCR_TOKEN: \$\{\{ github\.token \}\}/gu) ?? []).length, 2);
+  assert.equal((workflow.match(/- name: Log out Docker from GHCR/gu) ?? []).length, 2);
+  const logoutBlocks = [...workflow.matchAll(
+    /      - name: Log out Docker from GHCR\r?\n        if: always\(\)\r?\n        run: \|\r?\n((?:          [^\r\n]*\r?\n?)+)/gu,
+  )];
+  assert.equal(logoutBlocks.length, 2);
+  for (const [, script] of logoutBlocks) {
+    assert.match(script, /if docker logout ghcr\.io >\/dev\/null 2>&1; then/u);
+    assert.equal(script.trim().split(/\r?\n/u).at(-1).trim(), 'fi');
+  }
+  assert.doesNotMatch(workflow, /SUPABASE_INTERNAL_IMAGE_REGISTRY: public\.ecr\.aws|packages: write|id-token: write/u);
+  assert.match(helper, /SUPABASE_INTERNAL_IMAGE_REGISTRY:-\}" != 'ghcr\.io'/u);
+  assert.match(helper, /reference="ghcr\.io\/supabase\/\$image"[\s\S]*docker pull --quiet "\$reference"/u);
+  assert.match(helper, /local_id="\$\(docker image inspect[^\n]*"\$ghcr_reference"/u);
+  assert.match(helper, /Supabase ECR comparison \$name: UNRESOLVED/u);
+  assert.match(runner, /if \(registry !== 'ghcr\.io'\) throw new Error\('e2e-supabase-registry-invalid'\)/u);
+  assert.equal((runner.match(/env: safeSupabaseEnvironment\(\)/gu) ?? []).length, 5);
+  assert.doesNotMatch(runner, /safeChildEnvironment\(\{[^}]*SUPABASE_INTERNAL_IMAGE_REGISTRY[^}]*E2E_/su);
+  assert.doesNotMatch(runner, /GITHUB_TOKEN|GHCR_TOKEN|GHCR_ACTOR/u);
 });
 
 test('E2E sign-out follows the implemented fail-closed sign-in redirect', async () => {

@@ -21,7 +21,10 @@ const SIGN_IN_FAILURE_STAGES = new Set([
   'anonymous-storage-precondition',
   'sign-in-network',
   'sign-in-http-429',
-  'sign-in-http-4xx',
+  'sign-in-http-400',
+  'sign-in-http-401',
+  'sign-in-http-403',
+  'sign-in-http-other-4xx',
   'sign-in-http-5xx',
   'sign-in-http-unexpected',
   'auth-session-missing',
@@ -247,7 +250,10 @@ export async function signInCustomer(page, account, { requireAnonymousStorage = 
   }
   const status = response.status();
   if (status === 429) failSignIn('sign-in-http-429');
-  if (status >= 400 && status < 500) failSignIn('sign-in-http-4xx');
+  if (status === 400) failSignIn('sign-in-http-400');
+  if (status === 401) failSignIn('sign-in-http-401');
+  if (status === 403) failSignIn('sign-in-http-403');
+  if (status >= 400 && status < 500) failSignIn('sign-in-http-other-4xx');
   if (status >= 500 && status < 600) failSignIn('sign-in-http-5xx');
   if (!response.ok()) failSignIn('sign-in-http-unexpected');
   try {

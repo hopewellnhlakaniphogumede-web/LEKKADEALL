@@ -54,7 +54,10 @@ const NEGATIVE_ACTOR_FAILURE_CATEGORIES = new Set([
   'anonymous-storage-precondition',
   'sign-in-network',
   'sign-in-http-429',
-  'sign-in-http-4xx',
+  'sign-in-http-400',
+  'sign-in-http-401',
+  'sign-in-http-403',
+  'sign-in-http-other-4xx',
   'sign-in-http-5xx',
   'sign-in-http-unexpected',
   'auth-session-missing',
@@ -122,11 +125,42 @@ const AMBIGUOUS_SETUP_FAILURE_CATEGORIES = new Set([
   'browser-context',
   'fixture-account',
   'browser-session',
+  'anonymous-storage-precondition',
+  'sign-in-network',
+  'sign-in-http-429',
+  'sign-in-http-400',
+  'sign-in-http-401',
+  'sign-in-http-403',
+  'sign-in-http-other-4xx',
+  'sign-in-http-5xx',
+  'sign-in-http-unexpected',
+  'auth-session-missing',
+  'customer-route',
+  'active-profile-readiness',
+  'unknown',
   'draft-create',
   'edit-route',
 ]);
 const AMBIGUOUS_PUBLICATION_FAILURE_CATEGORIES = new Set([
-  'isolated-setup',
+  'context-creation',
+  'page-creation',
+  'network-policy',
+  'fixture-account',
+  'anonymous-storage-precondition',
+  'sign-in-network',
+  'sign-in-http-429',
+  'sign-in-http-400',
+  'sign-in-http-401',
+  'sign-in-http-403',
+  'sign-in-http-other-4xx',
+  'sign-in-http-5xx',
+  'sign-in-http-unexpected',
+  'auth-session-missing',
+  'customer-route',
+  'active-profile-readiness',
+  'unknown',
+  'draft-create',
+  'detail-readiness',
   'single-publication-execution',
   'ambiguous-ui',
   'interception-release',
@@ -135,6 +169,21 @@ const AMBIGUOUS_PUBLICATION_FAILURE_CATEGORIES = new Set([
   'postcondition',
   'sign-out',
   'cleanup',
+]);
+const PUBLICATION_SETUP_PROGRESS_PHASES = new Set([
+  'context-creation', 'page-creation', 'network-policy', 'fixture-account',
+  'browser-session', 'draft-create', 'detail-readiness',
+]);
+const CROSS_CUSTOMER_PHASES = new Set([
+  'context-creation', 'page-creation', 'fixture-account', 'owner-session',
+  'second-customer-session', 'actor-isolation', 'draft-create', 'owner-proof',
+  'owner-list', 'foreign-detail', 'missing-detail', 'foreign-edit',
+  'missing-edit', 'postcondition', 'sign-out', 'cleanup',
+]);
+const STALE_EDIT_PHASES = new Set([
+  'network-policy', 'fixture-account', 'browser-session', 'draft-create', 'edit-readiness',
+  'shared-session', 'cancel-confirmed', 'stale-update-result', 'generic-ui',
+  'postcondition', 'sign-out', 'cleanup',
 ]);
 const CANONICAL_VALUE_FIELDS = new Set([
   'status',
@@ -166,13 +215,33 @@ async function withAmbiguousSetupFailureCategory(category, operation) {
     throw new Error('ambiguous-setup-failure-category-invalid');
   }
   try {
-    return await operation();
+    const result = await operation();
+    await test.step(`ambiguous-setup:${category}`, async () => {});
+    return result;
   } catch {
     await test.step(`ambiguous-setup-failure:${category}`, async () => {
       throw new Error('privacy-safe-ambiguous-setup-boundary-failure');
     });
     return undefined;
   }
+}
+
+async function withAmbiguousSetupSignInFailureCategory(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    return withAmbiguousSetupFailureCategory(
+      privacySafeSignInFailureStage(error),
+      async () => { throw new Error('privacy-safe-ambiguous-setup-boundary-failure'); },
+    );
+  }
+}
+
+async function withSecurityBoundaryPhase(boundary, phase, operation) {
+  const phases = boundary === 'cross-customer' ? CROSS_CUSTOMER_PHASES
+    : boundary === 'stale-edit' ? STALE_EDIT_PHASES : null;
+  if (!phases?.has(phase)) throw new Error('security-boundary-phase-invalid');
+  return test.step(`${boundary}:${phase}`, operation);
 }
 
 async function markAmbiguousUpdateProgress(phase) {
@@ -194,12 +263,29 @@ async function withAmbiguousPublicationFailureCategory(category, operation) {
     throw new Error('ambiguous-publication-failure-category-invalid');
   }
   try {
-    return await operation();
+    const result = await operation();
+    if (PUBLICATION_SETUP_PROGRESS_PHASES.has(category)) {
+      await test.step(`publication-setup:${category}`, async () => {});
+    }
+    return result;
   } catch {
     await test.step(`ambiguous-publication-failure:${category}`, async () => {
       throw new Error('privacy-safe-ambiguous-publication-boundary-failure');
     });
     return undefined;
+  }
+}
+
+async function withAmbiguousPublicationSignInFailureCategory(operation) {
+  try {
+    const result = await operation();
+    await test.step('publication-setup:browser-session', async () => {});
+    return result;
+  } catch (error) {
+    return withAmbiguousPublicationFailureCategory(
+      privacySafeSignInFailureStage(error),
+      async () => { throw new Error('privacy-safe-ambiguous-publication-boundary-failure'); },
+    );
   }
 }
 
@@ -212,66 +298,112 @@ test('cross-customer request IDs remain RLS-hidden and non-actionable', async ({
     title: 'Prepare synthetic utility room',
     description: 'Prepare and paint the utility room using a neutral finish.',
   };
-  const contextA = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
-  const contextB = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+  let contextA;
+  let contextB;
+  let primaryFailure;
   try {
-    const pageA = await contextA.newPage();
-    const pageB = await contextB.newPage();
-    const policyA = attachNetworkPolicy(pageA, { appUrl, supabaseUrl, anonKey });
-    const policyB = attachNetworkPolicy(pageB, { appUrl, supabaseUrl, anonKey });
-    const emissionsA = attachSensitiveEmissionAudit(pageA, privacyMarkers(customerA, bDraft));
-    const emissionsB = attachSensitiveEmissionAudit(pageB, privacyMarkers(customerB, bDraft));
-
-    await prepareSyntheticCustomerAccount(customerA.email, customerA.password);
-    await signInCustomer(pageA, customerA);
-    await registerCustomer(pageB, customerB);
-    await assertDistinctSyntheticUsers(customerA.email, customerB.email);
-    const requestIdB = await createDraftThroughUi(pageB, bDraft);
-    await assertSyntheticRequestOwner(customerB.email, requestIdB);
-    expect(contextA).not.toBe(contextB);
-    expect(pageA.context()).toBe(contextA);
-    expect(pageB.context()).toBe(contextB);
-
-    await pageA.goto('/app/customer/requests');
-    await expect(pageA.getByRole('heading', { name: bDraft.title })).toHaveCount(0);
-    await pageA.goto(`/app/customer/requests/detail/?requestId=${requestIdB}`);
-    await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
-    await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
-    await expect(pageA.getByText(bDraft.title)).toHaveCount(0);
-    await expect(pageA.getByText(bDraft.description)).toHaveCount(0);
-    await expect(pageA.getByText('Synthetic home maintenance')).toHaveCount(0);
-    await expect(pageA.getByText('Draft', { exact: true })).toHaveCount(0);
-    await expect(pageA.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
-    await expect(pageA.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
-    await pageA.goto('/app/customer/requests/detail/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
-    await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
-    await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
-    await pageA.goto(`/app/customer/requests/edit/?requestId=${requestIdB}`);
-    await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
-    await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
-    await pageA.goto('/app/customer/requests/edit/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
-    await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
-    await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
-
-    expect(policyA.getRpcCount('customer_update_draft_request')).toBe(0);
-    expect(policyA.getRpcCount('customer_cancel_draft_request')).toBe(0);
-    expect(policyA.getRpcCount('customer_publish_draft_request')).toBe(0);
-    expect(policyB.getRpcCount('customer_create_draft_request')).toBe(1);
-    expect(policyB.getRpcCount('customer_publish_draft_request')).toBe(0);
-    await assertBrowserPrivacy(pageA, { markers: privacyMarkers(customerA, bDraft), expectAuthSession: true });
-    await assertBrowserPrivacy(pageB, { markers: privacyMarkers(customerB, bDraft), expectAuthSession: true });
-    policyA.assertClean();
-    policyB.assertClean();
-    emissionsA.assertClean();
-    emissionsB.assertClean();
-
-    await signOutCustomer(pageA);
-    await signOutCustomer(pageB);
-    await assertBrowserPrivacy(pageA, { markers: privacyMarkers(customerA, bDraft), expectAuthSession: false });
-    await assertBrowserPrivacy(pageB, { markers: privacyMarkers(customerB, bDraft), expectAuthSession: false });
+    await withSecurityBoundaryPhase('cross-customer', 'context-creation', async () => {
+      contextA = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+      contextB = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+    });
+    let pageA;
+    let pageB;
+    let policyA;
+    let policyB;
+    let emissionsA;
+    let emissionsB;
+    await withSecurityBoundaryPhase('cross-customer', 'page-creation', async () => {
+      pageA = await contextA.newPage();
+      pageB = await contextB.newPage();
+      policyA = attachNetworkPolicy(pageA, { appUrl, supabaseUrl, anonKey });
+      policyB = attachNetworkPolicy(pageB, { appUrl, supabaseUrl, anonKey });
+      emissionsA = attachSensitiveEmissionAudit(pageA, privacyMarkers(customerA, bDraft));
+      emissionsB = attachSensitiveEmissionAudit(pageB, privacyMarkers(customerB, bDraft));
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'fixture-account', async () => {
+      await prepareSyntheticCustomerAccount(customerA.email, customerA.password);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'owner-session', async () => {
+      await signInCustomer(pageA, customerA);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'second-customer-session', async () => {
+      await registerCustomer(pageB, customerB);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'actor-isolation', async () => {
+      await assertDistinctSyntheticUsers(customerA.email, customerB.email);
+      expect(contextA).not.toBe(contextB);
+      expect(pageA.context()).toBe(contextA);
+      expect(pageB.context()).toBe(contextB);
+    });
+    let requestIdB;
+    await withSecurityBoundaryPhase('cross-customer', 'draft-create', async () => {
+      requestIdB = await createDraftThroughUi(pageB, bDraft);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'owner-proof', async () => {
+      await assertSyntheticRequestOwner(customerB.email, requestIdB);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'owner-list', async () => {
+      await pageA.goto('/app/customer/requests');
+      await expect(pageA.getByRole('heading', { name: bDraft.title })).toHaveCount(0);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'foreign-detail', async () => {
+      await pageA.goto(`/app/customer/requests/detail/?requestId=${requestIdB}`);
+      await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
+      await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
+      await expect(pageA.getByText(bDraft.title)).toHaveCount(0);
+      await expect(pageA.getByText(bDraft.description)).toHaveCount(0);
+      await expect(pageA.getByText('Synthetic home maintenance')).toHaveCount(0);
+      await expect(pageA.getByText('Draft', { exact: true })).toHaveCount(0);
+      await expect(pageA.getByRole('button', { name: 'Cancel draft' })).toHaveCount(0);
+      await expect(pageA.getByRole('button', { name: 'Publish request' })).toHaveCount(0);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'missing-detail', async () => {
+      await pageA.goto('/app/customer/requests/detail/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+      await expect(pageA.getByText('Request not found or unavailable')).toBeVisible();
+      await expect(pageA.locator('.request-detail-card')).toHaveCount(0);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'foreign-edit', async () => {
+      await pageA.goto(`/app/customer/requests/edit/?requestId=${requestIdB}`);
+      await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
+      await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'missing-edit', async () => {
+      await pageA.goto('/app/customer/requests/edit/?requestId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+      await expect(pageA.getByText('Draft not found or unavailable')).toBeVisible();
+      await expect(pageA.locator('form[data-draft-edit-form]')).toHaveCount(0);
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'postcondition', async () => {
+      expect(policyA.getRpcCount('customer_update_draft_request')).toBe(0);
+      expect(policyA.getRpcCount('customer_cancel_draft_request')).toBe(0);
+      expect(policyA.getRpcCount('customer_publish_draft_request')).toBe(0);
+      expect(policyB.getRpcCount('customer_create_draft_request')).toBe(1);
+      expect(policyB.getRpcCount('customer_publish_draft_request')).toBe(0);
+      await assertBrowserPrivacy(pageA, { markers: privacyMarkers(customerA, bDraft), expectAuthSession: true });
+      await assertBrowserPrivacy(pageB, { markers: privacyMarkers(customerB, bDraft), expectAuthSession: true });
+      policyA.assertClean();
+      policyB.assertClean();
+      emissionsA.assertClean();
+      emissionsB.assertClean();
+    });
+    await withSecurityBoundaryPhase('cross-customer', 'sign-out', async () => {
+      await signOutCustomer(pageA);
+      await signOutCustomer(pageB);
+      await assertBrowserPrivacy(pageA, { markers: privacyMarkers(customerA, bDraft), expectAuthSession: false });
+      await assertBrowserPrivacy(pageB, { markers: privacyMarkers(customerB, bDraft), expectAuthSession: false });
+    });
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
   } finally {
-    await contextA.close();
-    await contextB.close();
+    let cleanupFailed = false;
+    try { await contextA?.close(); } catch { cleanupFailed = true; }
+    try { await contextB?.close(); } catch { cleanupFailed = true; }
+    await withSecurityBoundaryPhase('cross-customer', 'cleanup', async () => {
+      if (cleanupFailed && !primaryFailure) throw new Error('privacy-safe-security-boundary-cleanup-failure');
+    });
+    if (cleanupFailed && primaryFailure) {
+      await test.step('cross-customer:cleanup-secondary', async () => {});
+    }
   }
 });
 
@@ -436,34 +568,75 @@ test('a stale edit is rejected after another tab cancels the draft', async ({ co
   const created = mainDraftValues();
   const edited = editedDraftValues();
   const markers = privacyMarkers(account, created, edited);
-  const policyEdit = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
-  const emissionsEdit = attachSensitiveEmissionAudit(page, markers);
-  await prepareSyntheticCustomerAccount(account.email, account.password);
-  await signInCustomer(page, account);
-  const requestId = await createDraftThroughUi(page, created);
-  await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
-  await expect(page.locator('form[data-draft-edit-form]')).toBeVisible();
-
-  const cancellationPage = await context.newPage();
-  const policyCancel = attachNetworkPolicy(cancellationPage, { appUrl, supabaseUrl, anonKey });
-  const emissionsCancel = attachSensitiveEmissionAudit(cancellationPage, markers);
-  await openDraftDetail(cancellationPage, requestId);
-  await cancellationPage.getByRole('button', { name: 'Cancel draft' }).click();
-  await cancellationPage.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
-  await expect(cancellationPage.getByText('Draft cancelled.', { exact: true })).toBeVisible();
-
-  const editForm = await fillDraftForm(page, edited);
-  await editForm.getByRole('button', { name: 'Save draft changes' }).click();
-  await expect(page.getByText('This draft is not available for editing.', { exact: true })).toBeVisible();
-  expect(policyEdit.getRpcCount('customer_update_draft_request')).toBe(1);
-  expect(policyCancel.getRpcCount('customer_cancel_draft_request')).toBe(1);
-  policyEdit.assertClean();
-  policyCancel.assertClean();
-  emissionsEdit.assertClean();
-  emissionsCancel.assertClean();
-  await cancellationPage.close();
-  await signOutCustomer(page);
-  await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+  let policyEdit;
+  let emissionsEdit;
+  let cancellationPage;
+  let primaryFailure;
+  try {
+    await withSecurityBoundaryPhase('stale-edit', 'network-policy', async () => {
+      policyEdit = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
+      emissionsEdit = attachSensitiveEmissionAudit(page, markers);
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'fixture-account', async () => {
+      await prepareSyntheticCustomerAccount(account.email, account.password);
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'browser-session', async () => {
+      await signInCustomer(page, account);
+    });
+    let requestId;
+    await withSecurityBoundaryPhase('stale-edit', 'draft-create', async () => {
+      requestId = await createDraftThroughUi(page, created);
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'edit-readiness', async () => {
+      await page.goto(`/app/customer/requests/edit/?requestId=${requestId}`);
+      await expect(page.locator('form[data-draft-edit-form]')).toBeVisible();
+    });
+    let policyCancel;
+    let emissionsCancel;
+    await withSecurityBoundaryPhase('stale-edit', 'shared-session', async () => {
+      cancellationPage = await context.newPage();
+      expect(cancellationPage.context()).toBe(context);
+      policyCancel = attachNetworkPolicy(cancellationPage, { appUrl, supabaseUrl, anonKey });
+      emissionsCancel = attachSensitiveEmissionAudit(cancellationPage, markers);
+      await openDraftDetail(cancellationPage, requestId);
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'cancel-confirmed', async () => {
+      await cancellationPage.getByRole('button', { name: 'Cancel draft' }).click();
+      await cancellationPage.locator('[data-cancel-draft-form]').getByRole('button', { name: 'Cancel draft' }).click();
+      await expect(cancellationPage.getByText('Draft cancelled.', { exact: true })).toBeVisible();
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'stale-update-result', async () => {
+      const editForm = await fillDraftForm(page, edited);
+      await editForm.getByRole('button', { name: 'Save draft changes' }).click();
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'generic-ui', async () => {
+      await expect(page.getByText('This draft is not available for editing.', { exact: true })).toBeVisible();
+      expect(policyEdit.getRpcCount('customer_update_draft_request')).toBe(1);
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'postcondition', async () => {
+      expect(policyCancel.getRpcCount('customer_cancel_draft_request')).toBe(1);
+      policyEdit.assertClean();
+      policyCancel.assertClean();
+      emissionsEdit.assertClean();
+      emissionsCancel.assertClean();
+    });
+    await withSecurityBoundaryPhase('stale-edit', 'sign-out', async () => {
+      await signOutCustomer(page);
+      await assertBrowserPrivacy(page, { markers, expectAuthSession: false });
+    });
+  } catch (error) {
+    primaryFailure = error;
+    throw error;
+  } finally {
+    let cleanupFailed = false;
+    try { await cancellationPage?.close(); } catch { cleanupFailed = true; }
+    await withSecurityBoundaryPhase('stale-edit', 'cleanup', async () => {
+      if (cleanupFailed && !primaryFailure) throw new Error('privacy-safe-security-boundary-cleanup-failure');
+    });
+    if (cleanupFailed && primaryFailure) {
+      await test.step('stale-edit:cleanup-secondary', async () => {});
+    }
+  }
 });
 
 test('an executed update with an aborted response is not retried and requires a fresh read', async ({ browser }) => {
@@ -493,7 +666,9 @@ test('an executed update with an aborted response is not retried and requires a 
         await prepareSyntheticCustomerAccount(account.email, account.password);
       });
       await withAmbiguousSetupFailureCategory('browser-session', async () => {
-        await signInCustomer(page, account);
+        await withAmbiguousSetupSignInFailureCategory(async () => {
+          await signInCustomer(page, account);
+        });
       });
       await withAmbiguousSetupFailureCategory('draft-create', async () => {
         requestId = await createDraftThroughUi(page, created);
@@ -715,14 +890,26 @@ test('an executed publication with an aborted response is not retried and requir
   let pausedPublicationHandler;
   let primaryFailure;
   try {
-    await withAmbiguousPublicationFailureCategory('isolated-setup', async () => {
+    await withAmbiguousPublicationFailureCategory('context-creation', async () => {
       context = await browser.newContext({ baseURL: appUrl, serviceWorkers: 'allow' });
+    });
+    await withAmbiguousPublicationFailureCategory('page-creation', async () => {
       page = await context.newPage();
+    });
+    await withAmbiguousPublicationFailureCategory('network-policy', async () => {
       policy = attachNetworkPolicy(page, { appUrl, supabaseUrl, anonKey });
       emissions = attachSensitiveEmissionAudit(page, markers);
+    });
+    await withAmbiguousPublicationFailureCategory('fixture-account', async () => {
       await prepareSyntheticCustomerAccount(account.email, account.password);
+    });
+    await withAmbiguousPublicationSignInFailureCategory(async () => {
       await signInCustomer(page, account);
+    });
+    await withAmbiguousPublicationFailureCategory('draft-create', async () => {
       requestId = await createDraftThroughUi(page, created);
+    });
+    await withAmbiguousPublicationFailureCategory('detail-readiness', async () => {
       await openDraftDetail(page, requestId);
       await expect(page.getByRole('button', { name: 'Publish request' })).toBeVisible();
     });

@@ -31,6 +31,9 @@ const TEST_SCOPE_ARGS = Object.freeze({
   lifecycle: ['--grep', 'customer registration through cancelled draft completes against real local RLS and RPCs'],
   aborted: ['--grep', 'an executed update with an aborted response is not retried and requires a fresh read'],
   affected: ['--grep', '(?:customer registration through cancelled draft completes against real local RLS and RPCs|an executed update with an aborted response is not retried and requires a fresh read)'],
+  'security-boundary': ['--grep', '(?:cross-customer request IDs remain RLS-hidden and non-actionable|restricted suspended closed missing-profile and wrong-role actors fail closed|a stale edit is rejected after another tab cancels the draft|an executed update with an aborted response is not retried and requires a fresh read|an executed publication with an aborted response is not retried and requires a fresh read)'],
+  'cross-customer': ['--grep', 'cross-customer request IDs remain RLS-hidden and non-actionable'],
+  'stale-edit': ['--grep', 'a stale edit is rejected after another tab cancels the draft'],
 });
 const testScope = String(process.env.E2E_TEST_SCOPE ?? 'full');
 
@@ -63,6 +66,13 @@ function safeChildEnvironment(extra = {}) {
     if (process.env[name] !== undefined) safe[name] = process.env[name];
   }
   return { ...safe, ...extra };
+}
+
+function safeSupabaseEnvironment() {
+  const registry = process.env.SUPABASE_INTERNAL_IMAGE_REGISTRY;
+  if (registry === undefined && !process.env.CI) return safeChildEnvironment();
+  if (registry !== 'ghcr.io') throw new Error('e2e-supabase-registry-invalid');
+  return safeChildEnvironment({ SUPABASE_INTERNAL_IMAGE_REGISTRY: 'ghcr.io' });
 }
 
 function assertCleanupPath(target) {
@@ -132,7 +142,7 @@ async function cleanup() {
   if (supabaseStarted) {
     await runCaptured('supabase', ['stop', '--no-backup'], {
       cwd: foundationRoot,
-      env: safeChildEnvironment(),
+      env: safeSupabaseEnvironment(),
       allowFailure: true,
     });
   }
@@ -151,19 +161,19 @@ async function main() {
 
   const existing = await runCaptured('supabase', ['status'], {
     cwd: foundationRoot,
-    env: safeChildEnvironment(),
+    env: safeSupabaseEnvironment(),
     allowFailure: true,
   });
   if (existing.ok) throw new Error('e2e-refuses-preexisting-supabase-stack');
 
   process.stdout.write('Ticket 9A-9: starting disposable local Supabase\n');
-  await runCaptured('supabase', ['start'], { cwd: foundationRoot, env: safeChildEnvironment() });
+  await runCaptured('supabase', ['start'], { cwd: foundationRoot, env: safeSupabaseEnvironment() });
   supabaseStarted = true;
-  await runCaptured('supabase', ['db', 'reset'], { cwd: foundationRoot, env: safeChildEnvironment() });
+  await runCaptured('supabase', ['db', 'reset'], { cwd: foundationRoot, env: safeSupabaseEnvironment() });
 
   const statusResult = await runCaptured('supabase', ['status', '-o', 'env'], {
     cwd: foundationRoot,
-    env: safeChildEnvironment(),
+    env: safeSupabaseEnvironment(),
   });
   const local = parseSupabaseStatusEnv(statusResult.stdout);
   const localFixtureAdmin = parseLocalFixtureAdminEnv(statusResult.stdout);

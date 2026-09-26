@@ -706,18 +706,179 @@ create temporary table ticket10f_race_results (
   result_value pg_catalog.text
 ) on commit drop;
 
+-- Freeze one pre-award intent before either same-key session starts. Both
+-- sessions submit this identical SQL; neither can reread a post-award version.
+create temporary table ticket10f_same_key_invocation (
+  request_version pg_catalog.timestamptz not null,
+  bid_version pg_catalog.timestamptz not null,
+  query_text pg_catalog.text not null
+) on commit drop;
+
+insert into ticket10f_same_key_invocation (
+  request_version, bid_version, query_text
+)
+select request.updated_at, bid.created_at,
+  pg_catalog.format(
+    $q$select pg_catalog.concat_ws(':',
+      result.request_id::pg_catalog.text,
+      result.accepted_bid_id::pg_catalog.text,
+      result.request_status::pg_catalog.text,
+      result.bid_status::pg_catalog.text
+    ) from public.customer_accept_current_bid(
+      %L::pg_catalog.uuid, %L::pg_catalog.uuid,
+      %L::pg_catalog.timestamptz, %L::pg_catalog.timestamptz,
+      %L::pg_catalog.uuid
+    ) as result$q$,
+    request.id, bid.id, request.updated_at, bid.created_at,
+    '00000000-0000-4000-8000-0000000f5201'::pg_catalog.uuid
+  )
+from public.service_requests as request
+join public.bids as bid on bid.request_id = request.id
+where request.id = '00000000-0000-4000-8000-0000000f1201'
+  and bid.id = '00000000-0000-4000-8000-0000000f3201';
+
+-- Keep backend PIDs only in the test session, never in TAP diagnostics.
+create temporary table ticket10f_same_key_backends (
+  name pg_catalog.text primary key,
+  backend_pid pg_catalog.int4 not null
+) on commit drop;
+
+insert into ticket10f_same_key_backends (name, backend_pid)
+select 'winner', remote.backend_pid
+from extensions.dblink('ticket10f_a', 'select pg_catalog.pg_backend_pid()')
+  as remote(backend_pid pg_catalog.int4);
+insert into ticket10f_same_key_backends (name, backend_pid)
+select 'waiter', remote.backend_pid
+from extensions.dblink('ticket10f_b', 'select pg_catalog.pg_backend_pid()')
+  as remote(backend_pid pg_catalog.int4);
+
+-- Observe the exact lock edge within a fixed deadline; async dispatch alone
+-- does not prove that the waiter has reached the request-row lock.
+create function pg_temp.ticket10f_wait_for_same_key_lock()
+returns pg_catalog.bool language plpgsql volatile set search_path = pg_catalog as $$
+declare
+  v_winner_pid pg_catalog.int4;
+  v_waiter_pid pg_catalog.int4;
+  v_blocked pg_catalog.bool;
+  v_deadline pg_catalog.timestamptz := pg_catalog.clock_timestamp()
+    + pg_catalog.make_interval(secs => 5);
+begin
+  select backend.backend_pid into v_winner_pid
+  from pg_temp.ticket10f_same_key_backends as backend
+  where backend.name = 'winner';
+  select backend.backend_pid into v_waiter_pid
+  from pg_temp.ticket10f_same_key_backends as backend
+  where backend.name = 'waiter';
+  if v_winner_pid is null or v_waiter_pid is null then
+    return false;
+  end if;
+
+  loop
+    if pg_catalog.clock_timestamp() >= v_deadline then
+      return false;
+    end if;
+    perform pg_catalog.pg_stat_clear_snapshot();
+    select activity.wait_event_type = 'Lock'
+      and v_winner_pid = any(pg_catalog.pg_blocking_pids(v_waiter_pid))
+      into v_blocked
+    from pg_catalog.pg_stat_activity as activity
+    where activity.pid = v_waiter_pid;
+    if coalesce(v_blocked, false)
+       and pg_catalog.clock_timestamp() <= v_deadline then
+      return true;
+    end if;
+  end loop;
+end;
+$$;
+
+create temporary table ticket10f_same_key_lock_barrier (
+  observed pg_catalog.bool not null
+) on commit drop;
+
+-- Classify the already-collected remote outcome without emitting its error text.
+create function pg_temp.ticket10f_same_key_waiter_category()
+returns pg_catalog.text language plpgsql set search_path = pg_catalog as $$
+declare
+  v_winner pg_catalog.text;
+  v_waiter pg_catalog.text;
+  v_has_waiter pg_catalog.bool;
+  v_remote_error pg_catalog.text;
+  v_expected pg_catalog.text := '00000000-0000-4000-8000-0000000f1201:00000000-0000-4000-8000-0000000f3201:awarded:accepted';
+begin
+  select result.result_value into v_winner
+  from pg_temp.ticket10f_race_results as result where result.name = 'same-key-a';
+  select result.result_value into v_waiter
+  from pg_temp.ticket10f_race_results as result where result.name = 'same-key-b';
+  v_has_waiter := found;
+  if v_has_waiter and v_winner = v_expected and v_waiter = v_expected then
+    return 'canonical-result';
+  end if;
+  if not v_has_waiter then
+    v_remote_error := extensions.dblink_error_message('ticket10f_b');
+    if v_remote_error ~ '^ERROR:[[:space:]]+Customer bid acceptance is unavailable([[:space:]]|$)' then
+      return 'generic-remote-failure-no-result';
+    end if;
+  end if;
+  return 'unexpected-diagnostic-state';
+exception when others then
+  return 'unexpected-diagnostic-state';
+end;
+$$;
+
+-- This invoker-rights probe uses only the reviewed public reconciliation RPC.
+create function pg_temp.ticket10f_same_key_reconciliation_category()
+returns pg_catalog.text language plpgsql security invoker set search_path = pg_catalog as $$
+begin
+  perform result.request_id
+  from public.customer_reconcile_bid_acceptance(
+    '00000000-0000-4000-8000-0000000f1201',
+    '00000000-0000-4000-8000-0000000f5201'
+  ) as result;
+  if found then
+    return 'result-present';
+  end if;
+  return 'unexpected-diagnostic-state';
+exception
+  when sqlstate '42501' then
+    if sqlerrm = 'Customer bid acceptance reconciliation is unavailable' then
+      return 'generic-failure';
+    end if;
+    return 'unexpected-diagnostic-state';
+  when others then
+    return 'unexpected-diagnostic-state';
+end;
+$$;
+
 -- Same request, bid and key: the waiter replays the one canonical result.
 select pg_temp.set_ticket10f_remote_actor('ticket10f_a','00000000-0000-4000-8000-0000000f0002');
 select pg_temp.set_ticket10f_remote_actor('ticket10f_b','00000000-0000-4000-8000-0000000f0002');
 select is(extensions.dblink_exec('ticket10f_a','begin'), 'BEGIN', 'same-key winner begins');
-select is(extensions.dblink_send_query('ticket10f_a',$q$select public.ticket10f_test_accept('00000000-0000-4000-8000-0000000f1201','00000000-0000-4000-8000-0000000f3201','00000000-0000-4000-8000-0000000f5201')$q$), 1, 'same-key winner starts');
+select is(extensions.dblink_send_query('ticket10f_a',
+  (select query_text from ticket10f_same_key_invocation)
+), 1, 'same-key winner starts');
 insert into ticket10f_race_results select 'same-key-a', remote.result_value from extensions.dblink_get_result('ticket10f_a',false) as remote(result_value pg_catalog.text);
-select is(extensions.dblink_send_query('ticket10f_b',$q$select public.ticket10f_test_accept('00000000-0000-4000-8000-0000000f1201','00000000-0000-4000-8000-0000000f3201','00000000-0000-4000-8000-0000000f5201')$q$), 1, 'same-key replay starts behind held request lock');
-select is(extensions.dblink_is_busy('ticket10f_b'), 1, 'same-key replay is lock-blocked without a sleep');
-select is(extensions.dblink_exec('ticket10f_a','commit'), 'COMMIT', 'same-key winner commits');
+select is(extensions.dblink_send_query('ticket10f_b',
+  (select query_text from ticket10f_same_key_invocation)
+), 1, 'same-key replay starts behind held request lock');
+insert into ticket10f_same_key_lock_barrier (observed)
+select pg_temp.ticket10f_wait_for_same_key_lock();
+select is((select observed from ticket10f_same_key_lock_barrier), true,
+  'same-key replay is blocked by winner on request-row lock');
+select is(extensions.dblink_exec('ticket10f_a',
+  case when (select observed from ticket10f_same_key_lock_barrier)
+    then 'commit' else 'rollback' end
+), 'COMMIT', 'same-key winner commits only after proven lock wait');
 insert into ticket10f_race_results select 'same-key-b', remote.result_value from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text);
+select diag('same-key winner category: ' || case
+  when (select result_value from ticket10f_race_results where name='same-key-a') =
+    '00000000-0000-4000-8000-0000000f1201:00000000-0000-4000-8000-0000000f3201:awarded:accepted'
+    then 'canonical-result' else 'unexpected-diagnostic-state' end);
+select diag('same-key waiter category: ' || pg_temp.ticket10f_same_key_waiter_category());
 select is((select result_value from ticket10f_race_results where name='same-key-b'), (select result_value from ticket10f_race_results where name='same-key-a'), 'same-key waiter receives identical canonical result');
 select is((select pg_catalog.count(*) from extensions.dblink_get_result('ticket10f_b',false) as remote(result_value pg_catalog.text)), 0::pg_catalog.int8, 'same-key waiter result is fully drained');
+select pg_temp.set_ticket10f_actor('00000000-0000-4000-8000-0000000f0002'); set local role authenticated;
+select diag('same-key reconciliation category: ' || pg_temp.ticket10f_same_key_reconciliation_category());
+reset role;
 select is((select pg_catalog.count(*) from private.customer_bid_acceptance_receipts where request_id='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one receipt');
 select is((select pg_catalog.count(*) from public.audit_events where action='customer.bid_accepted' and metadata->>'request_id'='00000000-0000-4000-8000-0000000f1201'), 1::pg_catalog.int8, 'same-key race creates one audit');
 
