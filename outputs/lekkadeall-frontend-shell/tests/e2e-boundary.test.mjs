@@ -103,7 +103,7 @@ test('long E2E security journeys have bounded time without retries or verbose di
   assert.match(reporterSource, /auth-creation\|ticket-9b-profile-readiness\|context-creation\|page-creation\|sign-in\|authenticated-privacy\|fixture-state-application\|route-guard-verification\|sign-out/);
   assert.match(
     reporterSource,
-    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
+    /context-creation\|page-creation\|anonymous-storage-precondition\|sign-in-network\|sign-in-http-429\|sign-in-http-400\|sign-in-http-401\|sign-in-http-403\|sign-in-http-other-4xx\|sign-in-http-5xx\|sign-in-http-unexpected\|auth-session-missing\|customer-route\|active-profile-readiness\|authenticated-privacy\|context-cleanup\|unknown/,
   );
   assert.match(reporterSource, /lifecycle-phase:\(registration\|reauthentication\|category-dashboard\|create\|list-detail\|publish\|update\|cancel\|postcondition\|sign-out\)/);
   assert.match(reporterSource, /provider-discovery-failure:\(fixture-setup\|browser-session\|initial-discovery\|revocation\|fresh-discovery\|privacy\|sign-out\)/);
@@ -248,7 +248,10 @@ test('negative actors report fixed privacy-safe browser-session boundaries', asy
     'anonymous-storage-precondition',
     'sign-in-network',
     'sign-in-http-429',
-    'sign-in-http-4xx',
+    'sign-in-http-400',
+    'sign-in-http-401',
+    'sign-in-http-403',
+    'sign-in-http-other-4xx',
     'sign-in-http-5xx',
     'sign-in-http-unexpected',
     'auth-session-missing',
@@ -293,9 +296,13 @@ test('negative actors report fixed privacy-safe browser-session boundaries', asy
   assert.match(signInSource, /candidate\.request\(\)\.method\(\) === 'POST'/u);
   assert.doesNotMatch(signInSource, /retry|setTimeout|waitForTimeout|sleep/iu);
   assert.match(signInSource, /status === 429[\s\S]*sign-in-http-429/u);
-  assert.match(signInSource, /status >= 400 && status < 500[\s\S]*sign-in-http-4xx/u);
+  for (const status of [400, 401, 403]) {
+    assert.match(signInSource, new RegExp(`status === ${status}[^\\n]*sign-in-http-${status}`, 'u'));
+  }
+  assert.match(signInSource, /status >= 400 && status < 500[^\n]*sign-in-http-other-4xx/u);
   assert.match(signInSource, /status >= 500 && status < 600[\s\S]*sign-in-http-5xx/u);
   assert.match(signInSource, /!response\.ok\(\)[\s\S]*sign-in-http-unexpected/u);
+  assert.equal((signInSource.match(/response\.status\(\)/gu) ?? []).length, 1);
   assert.doesNotMatch(signInSource, /response\.(?:body|json|text|headers|headerValue)\b/u);
   assert.doesNotMatch(
     signInSource,
@@ -820,7 +827,8 @@ test('Ticket 9A-9R stages isolate security failures without weakening browser bo
   }
   for (const stage of [
     'anonymous-storage-precondition', 'sign-in-network', 'sign-in-http-429',
-    'sign-in-http-4xx', 'sign-in-http-5xx', 'sign-in-http-unexpected',
+    'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+    'sign-in-http-other-4xx', 'sign-in-http-5xx', 'sign-in-http-unexpected',
     'auth-session-missing', 'customer-route', 'active-profile-readiness', 'unknown',
   ]) {
     assert.ok(parseStages('AMBIGUOUS_SETUP_FAILURE_CATEGORIES').includes(stage));
@@ -909,6 +917,52 @@ test('Ticket 9A-9R reporter emits fixed stages and suppresses raw failure detail
   assert.doesNotMatch(text, /private-marker-must-not-appear|Error:|stack|requestId|password|token|cookie/u);
 });
 
+test('sign-in 4xx reporter accepts only fixed privacy-safe status categories', () => {
+  const reporter = new PrivacySafeReporter();
+  const output = [];
+  const write = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    output.push(String(chunk));
+    return true;
+  };
+  try {
+    const safeTitle = { titlePath: () => ['root', 'security-boundaries.spec.mjs', 'safe scenario'] };
+    const rawError = new Error('private-marker-must-not-appear');
+    for (const prefix of [
+      'negative-actor-failure:restricted:',
+      'ambiguous-setup-failure:',
+      'ambiguous-publication-failure:',
+    ]) {
+      for (const stage of [
+        'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+        'sign-in-http-other-4xx',
+      ]) {
+        reporter.onTestEnd(safeTitle, {
+          status: 'failed',
+          steps: [{ title: `${prefix}${stage}`, error: rawError, steps: [] }],
+        });
+      }
+      for (const stage of ['sign-in-http-4xx', 'sign-in-http-402']) {
+        reporter.onTestEnd(safeTitle, {
+          status: 'failed',
+          steps: [{ title: `${prefix}${stage}`, error: rawError, steps: [] }],
+        });
+      }
+    }
+  } finally {
+    process.stdout.write = write;
+  }
+  const text = output.join('');
+  for (const stage of [
+    'sign-in-http-400', 'sign-in-http-401', 'sign-in-http-403',
+    'sign-in-http-other-4xx',
+  ]) {
+    assert.equal((text.match(new RegExp(`\\[.*:${stage}\\]`, 'gu')) ?? []).length, 3);
+  }
+  assert.doesNotMatch(text, /\[.*:sign-in-http-(?:4xx|402)\]/u);
+  assert.doesNotMatch(text, /private-marker-must-not-appear|Error:|stack|requestId|password|token|cookie/u);
+});
+
 test('CI E2E job is isolated behind the complete database security job', async () => {
   const workflow = await readFile(join(repositoryRoot, '.github/workflows/database-tests.yml'), 'utf8');
   assert.match(
@@ -968,6 +1022,14 @@ test('authenticated GHCR remains confined to disposable Supabase children', asyn
   assert.equal((workflow.match(/docker login ghcr\.io[^\n]*--password-stdin/gu) ?? []).length, 2);
   assert.equal((workflow.match(/GHCR_TOKEN: \$\{\{ github\.token \}\}/gu) ?? []).length, 2);
   assert.equal((workflow.match(/- name: Log out Docker from GHCR/gu) ?? []).length, 2);
+  const logoutBlocks = [...workflow.matchAll(
+    /      - name: Log out Docker from GHCR\r?\n        if: always\(\)\r?\n        run: \|\r?\n((?:          [^\r\n]*\r?\n?)+)/gu,
+  )];
+  assert.equal(logoutBlocks.length, 2);
+  for (const [, script] of logoutBlocks) {
+    assert.match(script, /if docker logout ghcr\.io >\/dev\/null 2>&1; then/u);
+    assert.equal(script.trim().split(/\r?\n/u).at(-1).trim(), 'fi');
+  }
   assert.doesNotMatch(workflow, /SUPABASE_INTERNAL_IMAGE_REGISTRY: public\.ecr\.aws|packages: write|id-token: write/u);
   assert.match(helper, /SUPABASE_INTERNAL_IMAGE_REGISTRY:-\}" != 'ghcr\.io'/u);
   assert.match(helper, /reference="ghcr\.io\/supabase\/\$image"[\s\S]*docker pull --quiet "\$reference"/u);

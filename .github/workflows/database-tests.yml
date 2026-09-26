@@ -303,3 +303,4 @@ jobs:
             echo 'GHCR Docker logout: PASS'
           else
             echo 'GHCR Docker logout: FAIL'
+          fi
